@@ -40,17 +40,17 @@ The **Avanthi Cricket Carnival (ACC) Auction Operating System** is an end-to-end
 
 | 🏟️ Public Live Dashboard | ⚡ Stage Auctioneer View |
 | :---: | :---: |
-| ![Public View](master_desktop_public.png) | ![Live Stage View](master_desktop_live.png) |
+| ![Public View](docs/screenshots/master_desktop_public.png) | ![Live Stage View](docs/screenshots/master_desktop_live.png) |
 | *Real-time spectator catalog, lot spotlight, and 11-squad matrix* | *Circular countdown ring, active bidding podium, and bid stream* |
 
 | 🛠️ Operator / Admin Cockpit | 📽️ Auditorium Projector Display |
 | :---: | :---: |
-| ![Admin Console](master_desktop_admin.png) | ![Projector View](master_desktop_projector.png) |
+| ![Admin Console](docs/screenshots/master_desktop_admin.png) | ![Projector View](docs/screenshots/master_desktop_projector.png) |
 | *Hammer controls, skip/pause triggers, forensic undo, audit log* | *1440px+ dark-mode display with 380px photo and giant typography* |
 
 | 📱 Franchise Captain Terminal | 🔐 Secure Role-Based Authentication |
 | :---: | :---: |
-| ![Franchise Terminal](master_mobile_franchise.png) | ![Authentication Portal](master_mobile_login.png) |
+| ![Franchise Terminal](docs/screenshots/master_mobile_franchise.png) | ![Authentication Portal](docs/screenshots/master_mobile_login.png) |
 | *Mobile-first responsive bidding console with legal max-bid cap* | *Role-based security gate for Admins, Captains, and Players* |
 
 ---

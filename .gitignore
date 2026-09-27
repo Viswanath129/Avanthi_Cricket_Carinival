@@ -57,3 +57,11 @@ logs/
 npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
+
+# Backups & Test Artifacts
+*.bak
+test_*.png
+verify_*.png
+desktop_*.png
+mobile_*.png
+speeder_*.png
