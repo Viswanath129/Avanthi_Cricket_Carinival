@@ -1,0 +1,29 @@
+{
+  "rules": {
+    "presence": {
+      ".read": true,
+      "$userKey": {
+        ".read": true,
+        ".write": true,
+        "$connId": {
+          ".read": true,
+          ".write": true
+        }
+      }
+    },
+    "publicStats": {
+      "liveUsers": {
+        ".read": true,
+        ".write": true
+      }
+    },
+    "presence_test": {
+      ".read": true,
+      ".write": true
+    },
+    "auctionState": {
+      ".read": true,
+      ".write": true
+    }
+  }
+}

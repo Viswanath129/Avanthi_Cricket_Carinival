@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Player Registration — ACC</title>
+<link rel="stylesheet" href="../css/tokens.css" />
+<link rel="stylesheet" href="../css/reset.css" />
+<link rel="stylesheet" href="../css/base.css" />
+<link rel="stylesheet" href="../css/typography.css" />
+<link rel="stylesheet" href="../css/layout.css" />
+<link rel="stylesheet" href="../css/components.css" />
+<link rel="stylesheet" href="../css/forms.css" />
+<link rel="stylesheet" href="../css/animations.css" />
+<link rel="stylesheet" href="../css/responsive.css" />
+</head>
+<body>
+<header class="nav">
+  <div class="nav-inner">
+    <a href="../index.html" class="nav-brand"><div class="nav-logo">ACC</div><div><div class="nav-title">PLAYER REGISTRATION</div><div class="nav-subtitle">MOBILE-FIRST • PROGRESSIVE</div></div></a>
+    <div class="nav-actions"><span class="badge badge-success">REGISTRATION OPEN • 1-10 OCT</span></div>
+  </div>
+</header>
+
+<main class="section">
+  <div class="container container-narrow">
+    <div class="progress-steps" id="progress"></div>
+    <form class="form" id="reg-form" style="margin-top:20px">
+      <!-- 01 Identity -->
+      <div class="form-section" data-step="1">
+        <div class="form-section-header"><div class="form-section-title"><span class="form-section-index current">01</span>IDENTITY</div><span class="label">Roll number is your unique ID</span></div>
+        <div class="form-section-body">
+          <div class="field"><label class="field-label">Roll Number *</label><input class="field-input" id="roll" placeholder="25811A0403" required /><div class="field-hint">Year is derived, not selected. Lateral entry handled automatically.</div><div id="roll-result" style="margin-top:8px"></div></div>
+          <div class="form-grid"><div class="field"><label class="field-label">Full Name *</label><input class="field-input" id="name" required /></div><div class="field"><label class="field-label">Mobile Number *</label><input class="field-input" id="mobile" placeholder="Private, never public" required /></div></div>
+        </div>
+      </div>
+
+      <!-- 02 Academic -->
+      <div class="form-section" data-step="2">
+        <div class="form-section-header"><div class="form-section-title"><span class="form-section-index">02</span>ACADEMIC PROFILE</div><span class="badge badge-neutral" id="academic-badge">Auto-derived</span></div>
+        <div class="form-section-body">
+          <div class="form-grid-3"><div class="field"><label class="field-label">Program</label><input class="field-input" id="program" readonly /></div><div class="field"><label class="field-label">Branch</label><input class="field-input" id="branch" readonly /></div><div class="field"><label class="field-label">Year</label><input class="field-input" id="year" readonly /></div></div>
+          <div class="form-grid"><div class="field"><label class="field-label">Bucket</label><input class="field-input" id="bucket" readonly /></div><div class="field"><label class="field-label">Base Price *</label><select class="field-select" id="base-price"><option>20</option><option>30</option><option>40</option><option>50</option><option>60</option><option>70</option><option>80</option><option>90</option><option>100</option><option>120</option><option>140</option><option>160</option><option>180</option><option>200</option><option>230</option><option>250</option></select></div></div>
+          <div id="reference-block" style="display:none" class="card"><div class="card-body"><div class="label">ACC REFERENCE PROGRAM</div><div style="margin-top:8px"><label class="field-label">Did you join through ACC reference program?</label><div class="radio-group"><label class="radio-pill"><input type="radio" name="ref" value="yes" /> Yes</label><label class="radio-pill"><input type="radio" name="ref" value="no" /> No</label></div></div><div id="ref-team" style="display:none;margin-top:10px"><label class="field-label">Referring Team</label><select class="field-select"><option>Select franchise</option><option>Titans</option><option>Warriors</option></select></div></div></div>
+        </div>
+      </div>
+
+      <!-- 03 Cricket Skills -->
+      <div class="form-section" data-step="3">
+        <div class="form-section-header"><div class="form-section-title"><span class="form-section-index">03</span>CRICKET SKILLS • BRANCHING</div><span class="derived-type" id="derived-type">Fielder</span></div>
+        <div class="form-section-body">
+          <div class="field"><label class="field-label">Skilled batter?</label><div class="radio-group"><label class="radio-pill"><input type="radio" name="batter" value="yes" /> Yes</label><label class="radio-pill"><input type="radio" name="batter" value="no" /> No</label></div></div>
+          <div id="batter-extra" style="display:none" class="form-grid"><div class="field"><label class="field-label">Batting style</label><select class="field-select"><option>Strike rotator</option><option>Aggressive batter</option><option>Big hitter</option></select></div><div class="field"><label class="field-label">Preferred position</label><select class="field-select"><option>Opener</option><option>Top order</option><option>Middle order</option><option>Finisher</option></select></div></div>
+          <div class="field"><label class="field-label">Batting arm *</label><div class="radio-group"><label class="radio-pill"><input type="radio" name="bat-arm" value="right" checked /> Right</label><label class="radio-pill"><input type="radio" name="bat-arm" value="left" /> Left</label></div></div>
+          <div class="field"><label class="field-label">Skilled bowler?</label><div class="radio-group"><label class="radio-pill"><input type="radio" name="bowler" value="yes" /> Yes</label><label class="radio-pill"><input type="radio" name="bowler" value="no" /> No</label></div></div>
+          <div id="bowler-extra" style="display:none">
+            <div class="form-grid"><div class="field"><label class="field-label">Bowling arm</label><div class="radio-group"><label class="radio-pill"><input type="radio" name="bowl-arm" value="right" /> Right</label><label class="radio-pill"><input type="radio" name="bowl-arm" value="left" /> Left</label></div></div><div class="field"><label class="field-label">Bowling type</label><div class="radio-group"><label class="radio-pill"><input type="radio" name="bowl-type" value="fast" /> Fast</label><label class="radio-pill"><input type="radio" name="bowl-type" value="spin" /> Spin</label></div></div></div>
+            <div id="pace-extra" style="display:none" class="field"><label class="field-label">Pace variety</label><div class="radio-group"><label class="radio-pill"><input type="checkbox" /> Swing</label><label class="radio-pill"><input type="checkbox" /> Seam</label><label class="radio-pill"><input type="checkbox" /> Express pace</label></div></div>
+            <div id="spin-extra" style="display:none" class="field"><label class="field-label">Spin variety</label><div class="radio-group"><label class="radio-pill"><input type="radio" name="spin" /> Off-spin</label><label class="radio-pill"><input type="radio" name="spin" /> Leg-spin</label><label class="radio-pill"><input type="radio" name="spin" /> Left-arm orthodox</label><label class="radio-pill"><input type="radio" name="spin" /> Left-arm wrist spin</label></div></div>
+          </div>
+          <div class="field"><label class="field-label">Wicket-keeper?</label><div class="radio-group"><label class="radio-pill"><input type="radio" name="keeper" value="yes" /> Yes</label><label class="radio-pill"><input type="radio" name="keeper" value="no" /> No</label></div></div>
+          <div id="fielding-extra"><div class="field"><label class="field-label">Fielding zone</label><div class="radio-group"><label class="radio-pill"><input type="radio" name="zone" /> Infield</label><label class="radio-pill"><input type="radio" name="zone" /> Outfield</label></div></div><div class="field"><label class="field-label">Preferred fielding position</label><select class="field-select"><option>Slip</option><option>Point</option><option>Cover</option><option>Mid-off</option><option>Mid-on</option><option>Mid-wicket</option><option>Square leg</option><option>Third man</option><option>Fine leg</option><option>Long-on</option><option>Long-off</option><option>Deep mid-wicket</option></select></div></div>
+          <div class="field"><label class="field-label">Highest level played</label><select class="field-select"><option>District or above</option><option>Inter-college</option><option>School or intra-college</option><option>Recreational only</option></select></div>
+        </div>
+      </div>
+
+      <!-- 04 CricHeroes -->
+      <div class="form-section" data-step="4">
+        <div class="form-section-header"><div class="form-section-title"><span class="form-section-index">04</span>CRICHEROES • MANDATORY BEFORE AUCTION</div></div>
+        <div class="form-section-body">
+          <div class="field"><label class="field-label">CricHeroes Profile URL</label><input class="field-input" placeholder="https://cricheroes.com/player/..." /><div class="field-hint">Do not block submission if pending. Allow 'profile creation pending' and show guide.</div></div>
+          <div class="field"><label class="field-label">CricHeroes Mobile Number</label><input class="field-input" placeholder="Required to add player to team on CricHeroes" /></div>
+          <div class="field"><label class="field-label">Status</label><div class="radio-group"><label class="radio-pill"><input type="radio" name="ch" checked /> Profile available</label><label class="radio-pill"><input type="radio" name="ch" /> Creation pending — show guide</label></div></div>
+          <div class="card" style="background:var(--color-info-bg);border-color:rgba(107,140,255,0.2)"><div class="card-body"><div class="label">Guide: How to create CricHeroes profile</div><div style="font-size:12px;line-height:1.5;margin-top:6px" class="muted">1. Install CricHeroes app • 2. Register with mobile • 3. Create player profile • 4. Paste link here. Stats are self-declared and labelled as such. No scraping.</div></div></div>
+        </div>
+      </div>
+
+      <!-- 05 Photo -->
+      <div class="form-section" data-step="5">
+        <div class="form-section-header"><div class="form-section-title"><span class="form-section-index">05</span>PHOTO • PROJECTOR QUALITY</div></div>
+        <div class="form-section-body">
+          <div class="file-drop" id="drop"><div class="file-preview" id="preview"></div><div><div style="font-weight:700">Drop photo or click to upload</div><div class="field-hint">Face clearly visible. Used on projector. Will be processed for list + large display.</div></div><input type="file" id="file-input" accept="image/*" hidden /></div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:12px"><button type="submit" class="btn btn-primary btn-xl btn-block">SUBMIT REGISTRATION • REVIEW</button></div>
+    </form>
+  </div>
+</main>
+
+<script type="module">
+import { parseRollNumber, formatParsedResult } from '../js/roll-parser.js';
+
+const rollInput=document.getElementById('roll');
+const rollResult=document.getElementById('roll-result');
+const program=document.getElementById('program');
+const branch=document.getElementById('branch');
+const year=document.getElementById('year');
+const bucket=document.getElementById('bucket');
+const academicBadge=document.getElementById('academic-badge');
+const refBlock=document.getElementById('reference-block');
+
+function updateRoll(){
+  const raw=rollInput.value.trim();
+  if(!raw){ rollResult.innerHTML=''; return; }
+  const parsed=parseRollNumber(raw, 2026);
+  const fmt=formatParsedResult(parsed);
+  if(!parsed.valid){
+    rollResult.innerHTML=`<div class="badge badge-danger">INVALID • ${parsed.error}</div>`;
+    return;
+  }
+  rollResult.innerHTML=`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${fmt.badges.map(b=>`<span class="badge badge-success">${b}</span>`).join('')}${parsed.referenceQuestion? '<span class="badge badge-warning">REF QUESTION SHOWN</span>':''}</div><div class="field-hint" style="margin-top:6px">${fmt.summary}</div>`;
+  program.value=parsed.program||parsed.course;
+  branch.value=parsed.branch;
+  year.value=parsed.yearOfStudy? `Year ${parsed.yearOfStudy}` : 'PG Manual';
+  bucket.value=parsed.bucket||'PG - No bucket';
+  academicBadge.textContent=`${parsed.course} • ${parsed.bucket||'No bucket'}`;
+  refBlock.style.display=parsed.referenceQuestion? 'block':'none';
+}
+rollInput.addEventListener('input', updateRoll);
+
+// branching logic
+const batterRadios=document.querySelectorAll('input[name="batter"]');
+const bowlerRadios=document.querySelectorAll('input[name="bowler"]');
+const keeperRadios=document.querySelectorAll('input[name="keeper"]');
+const bowlTypeRadios=document.querySelectorAll('input[name="bowl-type"]');
+
+function updateDerived(){
+  const isBatter=document.querySelector('input[name="batter"]:checked')?.value==='yes';
+  const isBowler=document.querySelector('input[name="bowler"]:checked')?.value==='yes';
+  const isKeeper=document.querySelector('input[name="keeper"]:checked')?.value==='yes';
+  let type='Fielder';
+  if(isKeeper && isBatter) type='Wicket-keeper batter';
+  else if(isKeeper) type='Wicket-keeper';
+  else if(isBatter && isBowler) type='All-rounder';
+  else if(isBatter) type='Batter';
+  else if(isBowler) type='Bowler';
+  document.getElementById('derived-type').textContent=type;
+
+  document.getElementById('batter-extra').style.display=isBatter? 'grid':'none';
+  document.getElementById('bowler-extra').style.display=isBowler? 'block':'none';
+  document.getElementById('fielding-extra').style.display=!isKeeper? 'block':'none';
+
+  // validation: at least one skill
+  if(!isBatter && !isBowler && !isKeeper){
+    document.getElementById('derived-type').style.background='var(--color-warning-bg)';
+    document.getElementById('derived-type').style.color='var(--color-warning)';
+    document.getElementById('derived-type').textContent='Fielder only — please confirm';
+  } else {
+    document.getElementById('derived-type').style.background='';
+    document.getElementById('derived-type').style.color='';
+  }
+}
+
+document.querySelectorAll('input[type="radio"]').forEach(r=>r.addEventListener('change', ()=>{
+  updateDerived();
+  // pace/spin
+  const bt=document.querySelector('input[name="bowl-type"]:checked')?.value;
+  document.getElementById('pace-extra').style.display=bt==='fast'? 'block':'none';
+  document.getElementById('spin-extra').style.display=bt==='spin'? 'block':'none';
+  // ref team
+  const ref=document.querySelector('input[name="ref"]:checked')?.value;
+  const rt=document.getElementById('ref-team');
+  if(rt) rt.style.display=ref==='yes'? 'block':'none';
+}));
+
+updateDerived();
+
+// file drop
+const drop=document.getElementById('drop');
+const fileInput=document.getElementById('file-input');
+const preview=document.getElementById('preview');
+drop.addEventListener('click', ()=>fileInput.click());
+drop.addEventListener('dragover', e=>{ e.preventDefault(); drop.classList.add('dragging'); });
+drop.addEventListener('dragleave', ()=>drop.classList.remove('dragging'));
+drop.addEventListener('drop', e=>{ e.preventDefault(); drop.classList.remove('dragging'); const f=e.dataTransfer.files[0]; if(f) handleFile(f); });
+fileInput.addEventListener('change', ()=>{ const f=fileInput.files[0]; if(f) handleFile(f); });
+function handleFile(f){
+  const url=URL.createObjectURL(f);
+  preview.innerHTML=`<img src="${url}" style="width:100%;height:100%;object-fit:cover" />`;
+}
+
+// progress
+const steps=document.querySelectorAll('[data-step]');
+function updateProgress(){
+  const progress=document.getElementById('progress');
+  progress.innerHTML='';
+  [1,2,3,4,5].forEach((n,i)=>{
+    const line=i>0? `<div class="progress-step-line ${n<=3?'complete':''}"></div>`:'';
+    const cls=n===3?'current': n<3?'complete':'';
+    progress.innerHTML+=`${line}<div class="progress-step"><div class="progress-step-index ${cls}">${n<3?'✓': '0'+n}</div><div class="progress-step-label ${cls}">STEP ${n}</div></div>`;
+  });
+}
+updateProgress();
+
+document.getElementById('reg-form').addEventListener('submit', e=>{
+  e.preventDefault();
+  alert('Registration submitted (demo). In production: validates roll, checks duplicate mobile, stores photo variants, flags detained year discrepancy to Super Admin queue.');
+});
+</script>
+</body>
+</html>

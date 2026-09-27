@@ -1,0 +1,25 @@
+{
+  "rules": {
+    "presence": {
+      ".read": true,
+      "$userKey": {
+        ".read": true,
+        ".write": "auth != null || $userKey.beginsWith('pub_')",
+        "$connId": {
+          ".read": true,
+          ".write": "auth != null || $userKey.beginsWith('pub_')"
+        }
+      }
+    },
+    "publicStats": {
+      "liveUsers": {
+        ".read": true,
+        ".write": true
+      }
+    },
+    "auctionState": {
+      ".read": true,
+      ".write": "auth != null"
+    }
+  }
+}

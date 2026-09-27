@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<body>
+<script>
+  localStorage.setItem("acc_current_user_2026", JSON.stringify({ role: "SPECTATOR", name: "Public Guest", title: "Public Spectator" }));
+  window.location.href = "index.html#live";
+  // Simulate time-up by setting timerDeadline to the past
+  window.addEventListener("DOMContentLoaded", () => {
+    setTimeout(() => {
+      window.timerSeconds = 0;
+      window.timerRunning = false;
+      if (window.timerInterval) clearInterval(window.timerInterval);
+      if (typeof updateTimerDisplay === "function") updateTimerDisplay();
+      if (typeof renderCurrentView === "function") renderCurrentView();
+    }, 200);
+  });
+</script>
+</body>
+</html>

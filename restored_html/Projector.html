@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Projector — ACC Auction</title>
+<link rel="stylesheet" href="../css/tokens.css" />
+<link rel="stylesheet" href="../css/reset.css" />
+<link rel="stylesheet" href="../css/base.css" />
+<link rel="stylesheet" href="../css/typography.css" />
+<link rel="stylesheet" href="../css/projector.css" />
+<link rel="stylesheet" href="../css/components.css" />
+<link rel="stylesheet" href="../css/animations.css" />
+</head>
+<body class="projector">
+<header class="projector-header">
+  <div class="projector-brand"><div class="nav-logo" style="width:40px;height:40px;border-radius:12px">ACC</div>AVANTHI CRICKET CARNIVAL</div>
+  <div style="display:flex;gap:12px;align-items:center"><span class="label">ROUND 1 • B3 → B4 → B2 → B5 → B1</span><div class="projector-live"><span class="live-dot"></span>LIVE</div></div>
+</header>
+<div class="projector-main">
+  <div class="projector-player" id="projector-player"></div>
+  <div class="projector-side">
+    <div class="projector-bid" id="projector-bid"></div>
+    <div class="projector-timer" id="projector-timer"></div>
+  </div>
+</div>
+<div class="projector-strip" id="projector-strip"></div>
+
+<script type="module">
+import { state, getPlayer, on } from '../js/state.js';
+import { tickTimer, startAuction, simulateBotBids } from '../js/auction.js';
+
+function renderPlayer(){
+  const lot=state.auction.currentLot;
+  const pane=document.getElementById('projector-player');
+  if(!lot){ pane.innerHTML='<div style="display:grid;place-items:center;height:100%;font-size:24px;font-weight:800">AUCTION NOT STARTED</div>'; return; }
+  pane.innerHTML=`
+    <div class="projector-img"><img src="${lot.photo}" alt="${lot.name}" /><div class="projector-img-gradient"></div>
+      <div class="projector-player-info">
+        <div class="projector-name">${lot.name}</div>
+        <div class="projector-type">${lot.derivedType} • ${lot.program} ${lot.branch} Y${lot.year}</div>
+        <div class="projector-meta"><span class="projector-chip">BUCKET ${lot.bucket||'PG'}</span><span class="projector-chip">BASE ${lot.basePrice}</span><span class="projector-chip">ROLL ${lot.rollNumber}</span><span class="projector-chip">${lot.stats.matches} M • ${lot.stats.runs} R • ${lot.stats.wickets} W</span></div>
+      </div>
+    </div>
+  `;
+}
+function renderBid(){
+  const lot=state.auction.currentLot;
+  const pane=document.getElementById('projector-bid');
+  if(!lot) return;
+  const bidder=state.auction.currentBidder ? state.franchises.find(f=>f.id===state.auction.currentBidder) : null;
+  pane.innerHTML=`
+    <div class="projector-bid-label">Current Bid</div>
+    <div class="projector-bid-value mono" id="p-bid">${state.auction.currentBid||lot.basePrice}</div>
+    <div class="projector-bid-credits">CREDITS</div>
+    ${bidder? `<div class="projector-bidder">${bidder.name}</div>` : '<div class="badge">NO BIDS • OPENS AT '+lot.basePrice+'</div>'}
+    <div class="label" style="margin-top:12px">NEXT BID ${state.auction.currentBid? (state.auction.currentBid<100?state.auction.currentBid+10:state.auction.currentBid<200?state.auction.currentBid+20:state.auction.currentBid+30) : lot.basePrice}</div>
+  `;
+}
+function renderTimer(){
+  const pane=document.getElementById('projector-timer');
+  const pct=(state.auction.timer/state.auction.timerMax)*100;
+  const cls=state.auction.timer<=5?'color:var(--color-danger)':state.auction.timer<=10?'color:var(--color-warning)':'';
+  pane.innerHTML=`<div class="projector-timer-value mono" style="${cls}">${state.auction.timer}</div><div class="label">SECONDS • ${state.auction.firstBid? 'FIRST BID 30S' : 'RESETS TO 20S ON BID'}</div><div class="progress-bar" style="width:200px;margin-top:8px"><div class="progress-fill" style="width:${pct}%;background:${state.auction.timer<=5?'var(--color-danger)':state.auction.timer<=10?'var(--color-warning)':'var(--color-success)'}"></div></div>`;
+}
+function renderStrip(){
+  const strip=document.getElementById('projector-strip');
+  strip.innerHTML='';
+  state.franchises.forEach(f=>{
+    const d=document.createElement('div');
+    d.className=`projector-franchise ${f.status.toLowerCase()} ${f.id===state.auction.currentBidder?'active':''}`;
+    d.innerHTML=`<div class="projector-logo">${f.short}</div><div class="projector-franchise-name">${f.short}</div><div style="font-size:9px;letter-spacing:0.08em">${f.status}</div>`;
+    strip.appendChild(d);
+  });
+}
+function full(){ renderPlayer(); renderBid(); renderTimer(); renderStrip(); }
+on('auction:lot', full); on('auction:bid', ()=>{ renderBid(); renderStrip(); const el=document.getElementById('p-bid'); el?.classList.add('bump'); setTimeout(()=>el?.classList.remove('bump'),240); }); on('auction:pass', renderStrip); on('auction:timer', renderTimer); on('auction:hammer', full); on('auction:state', full);
+full();
+if(!state.auction.currentLot) startAuction();
+setInterval(()=>{ tickTimer(); simulateBotBids(); },1000);
+</script>
+</body>
+</html>

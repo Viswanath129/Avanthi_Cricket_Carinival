@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Players — ACC</title>
+<link rel="stylesheet" href="../css/tokens.css" />
+<link rel="stylesheet" href="../css/reset.css" />
+<link rel="stylesheet" href="../css/base.css" />
+<link rel="stylesheet" href="../css/typography.css" />
+<link rel="stylesheet" href="../css/layout.css" />
+<link rel="stylesheet" href="../css/components.css" />
+<link rel="stylesheet" href="../css/forms.css" />
+<link rel="stylesheet" href="../css/animations.css" />
+<link rel="stylesheet" href="../css/responsive.css" />
+</head>
+<body>
+<header class="nav">
+  <div class="nav-inner">
+    <a href="../index.html" class="nav-brand"><div class="nav-logo">ACC</div><div><div class="nav-title">PLAYERS DIRECTORY</div><div class="nav-subtitle">SEARCH • FILTER • SCOUTING</div></div></a>
+    <div class="nav-actions"><a href="player-registration.html" class="btn btn-primary">REGISTER PLAYER</a><a href="public.html" class="btn btn-ghost">LIVE AUCTION</a></div>
+  </div>
+</header>
+
+<main class="section">
+  <div class="container container-wide">
+    <div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:end;margin-bottom:20px">
+      <div><div class="kicker">PUBLIC • NO PHONE NUMBERS</div><h1 style="font-size:32px;margin-top:8px">All registered players</h1></div>
+      <div class="filter-bar"><div class="search-box"><span style="position:absolute;left:12px;top:50%;transform:translateY(-50%)">⌕</span><input id="search" placeholder="Search name, roll, branch, type" /></div><select id="bucket-filter" class="field-select" style="height:44px"><option value="">All Buckets</option><option>B1</option><option>B2</option><option>B3</option><option>B4</option><option>B5</option><option>PG</option></select><select id="type-filter" class="field-select" style="height:44px"><option value="">All Types</option><option>Batter</option><option>Bowler</option><option>All-rounder</option><option>Wicket-keeper</option><option>Fielder</option></select></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px" id="players-grid"></div>
+    <div id="empty" class="empty-state" style="display:none;margin-top:24px"><div class="empty-title">NO PLAYERS FOUND</div><div class="empty-desc">Try changing your filters.</div></div>
+  </div>
+</main>
+
+<script type="module">
+import { state, getPlayer } from '../js/state.js';
+
+const grid=document.getElementById('players-grid');
+const search=document.getElementById('search');
+const bucketFilter=document.getElementById('bucket-filter');
+const typeFilter=document.getElementById('type-filter');
+const empty=document.getElementById('empty');
+
+function render(){
+  const q=(search.value||'').toLowerCase();
+  const b=bucketFilter.value;
+  const t=typeFilter.value;
+  const filtered=state.players.filter(p=>{
+    if(b && (p.bucket||'PG')!==b) return false;
+    if(t && !p.derivedType.toLowerCase().includes(t.toLowerCase())) return false;
+    if(q){
+      const hay=`${p.name} ${p.rollNumber} ${p.branch} ${p.bucket||'PG'} ${p.derivedType}`.toLowerCase();
+      if(!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  grid.innerHTML='';
+  if(filtered.length===0){ empty.style.display='grid'; return; }
+  empty.style.display='none';
+  filtered.forEach(p=>{
+    const card=document.createElement('div');
+    card.className='player-card';
+    card.innerHTML=`
+      <div class="player-card-img"><img src="${p.photo}" alt="${p.name}" loading="lazy" /><div style="position:absolute;left:10px;top:10px;display:flex;gap:6px"><span class="badge badge-success" style="backdrop-filter:blur(6px)">${p.bucket||'PG'}</span><span class="badge" style="backdrop-filter:blur(6px)">BASE ₹${p.basePrice}</span></div></div>
+      <div class="player-card-body">
+        <div style="display:flex;justify-content:space-between;align-items:start"><div class="player-name">${p.name}</div><span class="badge badge-neutral">${p.derivedType}</span></div>
+        <div class="muted" style="font-size:12px">${p.program} • ${p.branch} Y${p.year} • ${p.rollNumber}</div>
+        <div class="player-meta"><span class="chip">${p.stats.matches} Matches</span><span class="chip">${p.stats.runs} Runs</span><span class="chip">${p.stats.wickets} Wickets</span></div>
+        <div style="display:flex;gap:8px;margin-top:4px"><a href="${p.cricHeroes}" target="_blank" class="btn btn-ghost" style="height:36px;font-size:11px">CricHeroes ↗</a><span class="badge">Self-declared stats</span></div>
+      </div>
+    `;
+    grid.appendChild(card);
+  });
+}
+search.addEventListener('input', render);
+bucketFilter.addEventListener('change', render);
+typeFilter.addEventListener('change', render);
+render();
+</script>
+</body>
+</html>

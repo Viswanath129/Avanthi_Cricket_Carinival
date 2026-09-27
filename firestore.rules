@@ -1,0 +1,41 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Tournament Room State & Concurrency Hub (supports 500+ live spectators & terminals)
+    match /acc_auctions/{roomId} {
+      allow read: if true;
+      allow write: if true;
+      
+      match /{subcollection}/{docId} {
+        allow read: if true;
+        allow write: if true;
+      }
+    }
+
+    // Direct entity collections
+    match /players/{playerId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    match /publicPlayers/{playerId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    match /deletedPlayers/{playerId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    match /franchises/{franchiseId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    match /auctionState/{docId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    match /auditLogs/{logId} {
+      allow read: if true;
+      allow write: if true;
+    }
+  }
+}

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Franchise Dashboard — ACC</title>
+<link rel="stylesheet" href="../css/tokens.css" />
+<link rel="stylesheet" href="../css/reset.css" />
+<link rel="stylesheet" href="../css/base.css" />
+<link rel="stylesheet" href="../css/typography.css" />
+<link rel="stylesheet" href="../css/layout.css" />
+<link rel="stylesheet" href="../css/components.css" />
+<link rel="stylesheet" href="../css/dashboard.css" />
+<link rel="stylesheet" href="../css/auction.css" />
+<link rel="stylesheet" href="../css/animations.css" />
+<link rel="stylesheet" href="../css/responsive.css" />
+</head>
+<body>
+<header class="nav">
+  <div class="nav-inner">
+    <a href="../index.html" class="nav-brand"><div class="nav-logo">ACC</div><div><div class="nav-title">FRANCHISE DASHBOARD</div><div class="nav-subtitle">PURSE • SQUAD • BUCKETS</div></div></a>
+    <div class="nav-actions"><div class="connection-status connected">CONNECTED</div><a href="franchise-bidding.html" class="btn btn-auction">BIDDING TERMINAL</a></div>
+  </div>
+</header>
+
+<main class="section">
+  <div class="container container-wide">
+    <div style="display:flex;gap:12px;overflow:auto;padding-bottom:8px;margin-bottom:16px" id="franchise-switcher"></div>
+    <div id="dashboard"></div>
+  </div>
+</main>
+
+<script type="module">
+import { state, getPlayer, computeMaxBid } from '../js/state.js';
+let selected='f1';
+function renderSwitcher(){
+  const pane=document.getElementById('franchise-switcher');
+  pane.innerHTML='';
+  state.franchises.forEach(f=>{
+    const b=document.createElement('button');
+    b.className=`franchise-card ${f.id===selected?'active':''}`;
+    b.innerHTML=`<div class="franchise-logo">${f.short}</div><div><div class="franchise-name">${f.name}</div><div class="label" style="font-size:10px">₹${f.purse} • ${f.squad.length}/15</div></div>`;
+    b.onclick=()=>{ selected=f.id; renderSwitcher(); renderDashboard(); };
+    pane.appendChild(b);
+  });
+}
+function renderDashboard(){
+  const f=state.franchises.find(x=>x.id===selected);
+  if(!f) return;
+  const maxBid=computeMaxBid(f);
+  const bucketHtml=Object.entries(f.bucketCounts).map(([b,c])=>{
+    const need=2-c;
+    const status=c>=2?'complete': need>0?'required':'';
+    const label=c>=2?'✓ COMPLETE': need>0? `! ${need} REQUIRED` : 'FLEX';
+    return `<div class="bucket-card ${status}"><div class="bucket-top"><span class="bucket-name">${b}</span><span class="bucket-count">${c} / 2</span></div><div class="bucket-progress"><div class="bucket-progress-fill" style="width:${Math.min(100,(c/2)*100)}%"></div></div><div class="bucket-status">${label}</div></div>`;
+  }).join('');
+  const squadHtml=f.squad.map(pid=>{
+    const p=getPlayer(pid);
+    if(!p) return '';
+    return `<div class="player-card" style="min-width:0"><div class="player-card-img" style="aspect-ratio:1"><img src="${p.photo}" /></div><div class="player-card-body"><div class="player-name" style="font-size:14px">${p.name}</div><div class="label">${p.derivedType} • ${p.bucket} • ₹${state.auction.sold.find(s=>s.playerId===p.id)?.price||p.basePrice}</div></div></div>`;
+  }).join('') || '<div class="empty-state"><div class="empty-title">NO PLAYERS PURCHASED YET</div><div class="empty-desc">Win bids in the live auction to build your squad.</div></div>';
+
+  document.getElementById('dashboard').innerHTML=`
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px"><div class="franchise-logo" style="width:64px;height:64px;font-size:20px;border-radius:16px">${f.short}</div><div><div style="font-family:var(--font-display);font-size:28px;font-weight:800">${f.name} • ${f.short}</div><div class="label">CONNECTED • PURSE ₹${f.purse} • MAX BID ₹${maxBid}</div></div></div>
+    <div class="kpi-row" style="margin-bottom:16px">
+      <div class="kpi-card"><div class="kpi-label">Purse Remaining</div><div class="kpi-value">₹${f.purse}</div><div class="kpi-sub">Started 1000</div></div>
+      <div class="kpi-card"><div class="kpi-label">Maximum Legal Bid</div><div class="kpi-value" style="color:${maxBid<100?'var(--color-danger)':'var(--color-success)'}">₹${maxBid}</div><div class="kpi-sub">Reserves ${(Math.max(0, Math.max(15-f.squad.length, Object.values(f.bucketCounts).reduce((a,b)=>a+Math.max(0,2-b),0))-1)*20)} for remaining slots <button style="margin-left:6px;text-decoration:underline;font-size:11px" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">WHY?</button><div style="display:none;margin-top:6px;font-size:11px;line-height:1.4" class="muted">You must reserve 20 credits per remaining mandatory slot. Total needed: ${Math.max(15-f.squad.length, Object.values(f.bucketCounts).reduce((a,b)=>a+Math.max(0,2-b),0))} slots → reserve ${(Math.max(0, Math.max(15-f.squad.length, Object.values(f.bucketCounts).reduce((a,b)=>a+Math.max(0,2-b),0))-1)*20)} after this bid.</div></div></div>
+      <div class="kpi-card"><div class="kpi-label">Squad Size</div><div class="kpi-value">${f.squad.length} <span style="font-size:14px;color:var(--color-text-muted)">/ 15 min</span></div><div class="kpi-sub">22 max</div></div>
+      <div class="kpi-card"><div class="kpi-label">Auction Purchases</div><div class="kpi-value">${f.squad.length}</div><div class="kpi-sub">₹${1000-f.purse} spent</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px">${bucketHtml}</div>
+    <div class="card"><div class="card-header"><div class="card-title">Squad • ${f.squad.length} players</div><div class="label">Spend by bucket • Batting balance</div></div><div class="card-body"><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px">${squadHtml}</div></div></div>
+  `;
+}
+renderSwitcher(); renderDashboard();
+</script>
+</body>
+</html>
