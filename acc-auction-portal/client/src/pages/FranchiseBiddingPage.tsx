@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils';
 const EDITION_ID = 'acc-2026';
 
 export default function FranchiseBiddingPage() {
-  const { user } = useAuth();
+  const { user, userDoc } = useAuth();
   const [franchiseId, setFranchiseId] = useState<string | null>(null);
   const [lot, setLot] = useState<any>(null);
   const [auctionState, setAuctionState] = useState<any>(null);
@@ -29,12 +29,12 @@ export default function FranchiseBiddingPage() {
     const unsub = onSnapshot(userDocRef, (snap) => {
       if (snap.exists()) {
         setFranchiseId(snap.data().franchiseId);
-      } else if (user.franchiseId) {
-        setFranchiseId(user.franchiseId);
+      } else if (userDoc?.franchiseId) {
+        setFranchiseId(userDoc.franchiseId);
       }
     });
     return () => unsub();
-  }, [user]);
+  }, [user, userDoc]);
 
   // Listeners
   useEffect(() => {
@@ -124,9 +124,25 @@ export default function FranchiseBiddingPage() {
     return <div className="p-4 text-center text-neutral-400 bg-neutral-950 h-screen w-full flex items-center justify-center font-sans tracking-widest uppercase">Loading franchise data...</div>;
   }
 
-  const maxBid = franchise ? calculateMaxBid(franchise.purse, franchise.squadCount) : 0;
+  const maxBidResult = franchise ? calculateMaxBid({
+    purseRemaining: franchise.purse || 0,
+    auctionPurchasesSoFar: franchise.squadCount || 0,
+    bucketCounts: franchise.bucketCounts || {},
+    currentPlayerBucket: lot?.bucket || 'B1',
+    minAuctionPurchases: 15,
+    bucketMinimums: DEFAULT_SQUAD_RULES.bucketMinimums,
+  }) : { maxBid: 0, isEligible: true, reason: null };
+  const maxBid = maxBidResult.maxBid;
   const nextBid = lot ? calculateNextBid(lot.currentBid || lot.basePrice || 0) : 0;
-  const bucketEligible = (franchise && lot) ? checkBucketEligibility(franchise.bucketCounts, lot.bucket, DEFAULT_SQUAD_RULES) : true;
+  const bucketEligible = (franchise && lot) ? checkBucketEligibility({
+    purseRemaining: franchise.purse || 0,
+    auctionPurchasesSoFar: franchise.squadCount || 0,
+    bucketCounts: franchise.bucketCounts || {},
+    currentPlayerBucket: lot.bucket || 'B1',
+    currentPrice: nextBid,
+    minAuctionPurchases: 15,
+    bucketMinimums: DEFAULT_SQUAD_RULES.bucketMinimums,
+  }).eligible : true;
   
   const franchiseStatus = auctionState?.franchiseStatuses?.[franchiseId] || 'IN_PLAY';
   const isActive = lot?.status === 'ACTIVE';
@@ -242,7 +258,7 @@ export default function FranchiseBiddingPage() {
             </div>
             <div className="text-right">
               <p className="text-xs text-neutral-500 uppercase tracking-wider mb-1">Squad Size</p>
-              <p className="font-mono text-xl text-neutral-300">{franchise.squadCount || 0} / {DEFAULT_SQUAD_RULES.maxTotalSize}</p>
+              <p className="font-mono text-xl text-neutral-300">{franchise.squadCount || 0} / {DEFAULT_SQUAD_RULES.maxSquadSize}</p>
             </div>
           </div>
           <div className="grid grid-cols-6 gap-1">

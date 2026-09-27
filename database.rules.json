@@ -4,10 +4,10 @@
       ".read": true,
       "$userKey": {
         ".read": true,
-        ".write": true,
+        ".write": "auth != null || $userKey.beginsWith('pub_')",
         "$connId": {
           ".read": true,
-          ".write": true
+          ".write": "auth != null || $userKey.beginsWith('pub_')"
         }
       }
     },
@@ -17,13 +17,9 @@
         ".write": true
       }
     },
-    "presence_test": {
-      ".read": true,
-      ".write": true
-    },
     "auctionState": {
       ".read": true,
-      ".write": true
+      ".write": "auth != null"
     }
   }
 }

@@ -47,9 +47,9 @@ export default function PlayerRegistrationPage() {
 
   const classification = formData.rollNumber.length >= 6 ? classifyRollNumber(formData.rollNumber) : null;
   const playerType = derivePlayerType({
-    keepsWicket: formData.isWk,
-    bats: formData.isBatter,
-    bowls: formData.isBowler
+    isWicketKeeper: formData.isWk,
+    battingPrimary: formData.isBatter,
+    bowlingPrimary: formData.isBowler
   });
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -206,7 +206,7 @@ export default function PlayerRegistrationPage() {
                     </div>
                     <div>
                       <span className="text-white/50 block">Bucket</span>
-                      <span className="font-medium">{BUCKET_LABELS[classification.bucketId as BucketId] || classification.bucketId}</span>
+                      <span className="font-medium">{BUCKET_LABELS[classification.bucket] || classification.bucket}</span>
                     </div>
                   </div>
                 </div>
@@ -392,7 +392,7 @@ export default function PlayerRegistrationPage() {
               <div>
                 <label className={labelClasses}>Select Base Price</label>
                 <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2 mt-2">
-                  {BASE_PRICE_LADDER.map(price => (
+                  {(BASE_PRICE_LADDER as readonly number[]).map((price: number) => (
                     <button
                       key={price}
                       type="button"
@@ -451,7 +451,7 @@ export default function PlayerRegistrationPage() {
                     <p><span className="text-white/40 inline-block w-24">Roll No:</span> <span className="font-mono">{formData.rollNumber}</span></p>
                     <p><span className="text-white/40 inline-block w-24">Mobile:</span> <span className="font-mono">{formData.mobileNumber}</span></p>
                     {classification && (
-                      <p><span className="text-white/40 inline-block w-24">Bucket:</span> <span className="text-green-400">{BUCKET_LABELS[classification.bucketId as BucketId] || classification.bucketId}</span></p>
+                      <p><span className="text-white/40 inline-block w-24">Bucket:</span> <span className="text-green-400">{BUCKET_LABELS[classification.bucket] || classification.bucket}</span></p>
                     )}
                   </div>
                 </div>

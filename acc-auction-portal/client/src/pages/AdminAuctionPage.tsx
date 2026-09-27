@@ -29,14 +29,14 @@ export default function AdminAuctionPage() {
 
   useEffect(() => {
     // Listen to auction state
-    const stateUnsub = onSnapshot(doc(db, 'editions', EDITION_ID, 'auction', 'state'), (doc) => {
-      if (doc.exists()) {
-        const data = doc.data();
+    const stateUnsub = onSnapshot(doc(db, 'editions', EDITION_ID, 'auction', 'state'), (stateSnap) => {
+      if (stateSnap.exists()) {
+        const data = stateSnap.data();
         setAuctionState(data);
         
         // Listen to current lot if active
         if (data.currentLotId) {
-          const lotUnsub = onSnapshot(doc(db, 'lots', data.currentLotId), (lotDoc) => {
+          const lotUnsub = onSnapshot(doc(db, 'lots', data.currentLotId), (lotDoc: any) => {
             if (lotDoc.exists()) {
               setCurrentLot({ id: lotDoc.id, ...lotDoc.data() });
             }
