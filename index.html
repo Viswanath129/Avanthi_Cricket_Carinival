@@ -2198,6 +2198,10 @@
     let loginRoleSelection = 'PLAYER';
     let loginFranchiseIdentity = 'COORDINATOR';
     let franchiseLoginSelection = 1;
+    let loginAdminSubRole = 'SUPER_ADMIN'; // 'SUPER_ADMIN' or 'OPERATOR'
+    window.uploadedFranchiseLogoData = "";
+    window.uploadedFranchiseCoordPhoto = "";
+    window.uploadedReplacePhotoData = {};
     // Ensure ACC website tournament logo is never used as player avatar placeholder
     players.forEach(p => { if (p.photo === 'acc-logo.png' || p.photo === 'acc-logo.png') p.photo = ''; });
     let auditLog = JSON.parse(localStorage.getItem("acc_audit_2026")) || [
@@ -6503,12 +6507,18 @@
           )
         );
 
-        if (!user && (val === 'admin' || val === 'superadmin' || val === 'admin@acc.edu' || val === 'superadmin@acc.edu' || val === 'administrator')) {
+        if (!user && (val === 'admin' || val === 'superadmin' || val === 'admin@acc.edu' || val === 'superadmin@acc.edu' || val === 'administrator' || (loginAdminSubRole === 'SUPER_ADMIN' && (!val || val === 'admin')))) {
           user = users.find(u => u.role === 'SUPER_ADMIN') || INITIAL_USERS[0];
         }
 
-        if (!user && (val === 'handler' || val === 'operator' || val === 'handler@acc.edu')) {
+        if (!user && (val === 'handler' || val === 'operator' || val === 'handler@acc.edu' || (loginAdminSubRole === 'OPERATOR' && (!val || val === 'operator' || val === 'handler')))) {
           user = users.find(u => u.role === 'ADMIN') || INITIAL_USERS[1];
+        }
+
+        if (!user && loginAdminSubRole === 'OPERATOR') {
+          user = users.find(u => u.role === 'ADMIN') || INITIAL_USERS[1];
+        } else if (!user && loginAdminSubRole === 'SUPER_ADMIN') {
+          user = users.find(u => u.role === 'SUPER_ADMIN') || INITIAL_USERS[0];
         }
 
         if (!user) {
@@ -7604,7 +7614,16 @@
       const nextBid = currentBid + getBidIncrement(currentBid);
       const maxLegal = calculateMaxBid(myFranchise.id, cur.bucket);
       const isLeader = myFranchise.id === leadingBidderId;
-      const isBlocked = maxLegal < nextBid;
+      const slotCheck = checkSlotProtection(myFranchise.id, cur.bucket);
+      const isSlotBlocked = !slotCheck.eligible;
+      const isPurseBlocked = maxLegal < nextBid;
+      const isBlocked = isSlotBlocked || isPurseBlocked;
+      let blockedReason = 'BID BLOCKED';
+      if (isSlotBlocked) {
+        blockedReason = '🔴 BLOCKED: Mandatory Slot Protection';
+      } else if (isPurseBlocked) {
+        blockedReason = '🔴 BLOCKED: Max Bid Exceeded';
+      }
       const scarcity = getTournamentScarcity();
       const identityLabel = currentUser.identityType === 'COORDINATOR' ? 'Faculty Coordinator / Owner' : 'Team Leader / Captain';
 
@@ -7693,16 +7712,33 @@
               </div>
             </div>
 
-            <!-- Single Tap Bidding Execution -->
+            <!-- Bidding & Action Controls -->
             <div style="display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-2);">
-              <button class="btn btn-auction" style="min-height: 52px; font-size: 1.05rem;" onclick="placeBid(${myFranchise.id})" ${isBlocked ? 'disabled' : ''}>
-                ${isBlocked ? 'BID BLOCKED (BUDGET EXCEEDED)' : `SUBMIT BID: ${nextBid} CREDITS`}
-              </button>
+              ${isBlocked ? `
+                <button class="btn btn-secondary" style="min-height: 52px; font-size: 0.95rem; font-weight: 800; border-color: rgba(225,29,72,0.5); color: var(--color-red); background: rgba(225,29,72,0.1); cursor: not-allowed; width: 100%;" disabled>
+                  ${blockedReason}
+                </button>
+              ` : `
+                <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 8px;">
+                  <button class="btn btn-auction" style="min-height: 52px; font-size: 1.05rem;" onclick="placeBid(${myFranchise.id})">
+                    BID ${nextBid}C (+${getBidIncrement(currentBid)})
+                  </button>
+                  <button class="btn btn-secondary" style="min-height: 52px; font-size: 0.9375rem; font-weight: 700; border-color: var(--border-medium);" onclick="showToast('Passed on lot #' + ${cur.id}, 'info')">
+                    PASS
+                  </button>
+                </div>
+              `}
               
               <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-faint); padding: 0 4px;">
                 <span>Max Legal Bid: <strong class="font-mono" style="color: var(--text-bright);">${maxLegal}C</strong></span>
                 <span>Next Minimum: <strong class="font-mono" style="color: var(--color-green);">${nextBid}C</strong></span>
               </div>
+            </div>
+
+            <!-- Reconnect Banner & Realtime Telemetry -->
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: rgba(5,150,105,0.06); border-radius: var(--radius-sm); border: 1px solid rgba(5,150,105,0.15); font-size: 0.75rem; margin-top: 2px;">
+              <span style="color: var(--color-green); font-weight: 600;">🟢 Live Synchronized</span>
+              <span class="label-mono font-mono" style="color: var(--text-bright);">Bucket ${cur.bucket} Count: ${(myFranchise.squad||[]).filter(p=>p.bucket===cur.bucket).length}/2</span>
             </div>
           </div>
 
@@ -7787,6 +7823,237 @@
                 </div>
               </div>
             `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    // ========================================================
+    // VIEW 4B: OFFICIAL FRANCHISE REGISTRATION WORKFLOW
+    // ========================================================
+    function handleFranchiseRegLogoUpload(e) {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        window.uploadedFranchiseLogoData = evt.target.result;
+        const prev = document.getElementById("regFranchiseLogoPreview");
+        if (prev) {
+          prev.style.display = "block";
+          prev.innerHTML = `<img src="${window.uploadedFranchiseLogoData}" style="width:100%;height:100%;object-fit:cover;">`;
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function handleFranchiseCoordPhotoUpload(e) {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        window.uploadedFranchiseCoordPhoto = evt.target.result;
+        showToast("Coordinator photo loaded successfully", "info");
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function submitFranchiseRegistration(e) {
+      if (e) e.preventDefault();
+      const name = (document.getElementById("regFranchiseName")?.value || "").trim();
+      const shortCode = (document.getElementById("regFranchiseShort")?.value || "").trim().toUpperCase();
+      const dept = (document.getElementById("regFranchiseDept")?.value || "").trim();
+      const slogan = (document.getElementById("regFranchiseSlogan")?.value || "").trim();
+      const coordName = (document.getElementById("regFranchiseCoordName")?.value || "").trim();
+      const coordDept = (document.getElementById("regFranchiseCoordDept")?.value || "").trim();
+      const coordMobile = (document.getElementById("regFranchiseCoordMobile")?.value || "").trim();
+      const coordEmail = (document.getElementById("regFranchiseCoordEmail")?.value || "").trim();
+      const capName = (document.getElementById("regFranchiseCapName")?.value || "").trim();
+      const capMobile = (document.getElementById("regFranchiseCapMobile")?.value || "").trim();
+      const vcName = (document.getElementById("regFranchiseVcName")?.value || "").trim();
+
+      if (!name || !shortCode || !coordName || !coordMobile || !capName || !capMobile) {
+        showToast("Please fill all required franchise fields.", "error");
+        return;
+      }
+
+      if (franchises.some(f => f.name.toLowerCase() === name.toLowerCase())) {
+        showToast(`Franchise name "${name}" is already registered.`, "error");
+        return;
+      }
+
+      const nextId = franchises.length + 1;
+      const newFranchise = {
+        id: nextId,
+        franchiseId: 'FR' + String(nextId).padStart(3, '0'),
+        name: name,
+        short: shortCode,
+        department: dept,
+        slogan: slogan,
+        logo: window.uploadedFranchiseLogoData || "",
+        purse: 1000,
+        squad: [],
+        status: 'PENDING_APPROVAL',
+        approvalStatus: 'PENDING_APPROVAL',
+        accountStatus: 'NOT_CREATED',
+        coordinator: {
+          name: coordName,
+          dept: coordDept,
+          phone: coordMobile,
+          email: coordEmail,
+          photo: window.uploadedFranchiseCoordPhoto || ""
+        },
+        captain: {
+          name: capName,
+          phone: capMobile,
+          viceCaptain: vcName
+        }
+      };
+
+      franchises.push(newFranchise);
+      saveDatabase();
+      if (window.RealtimeManager) window.RealtimeManager.publishAuctionState();
+      recordAuditEvent("FRANCHISE REGISTRATION SUBMITTED", `Franchise ${name} (${shortCode}) registered as pending approval`);
+
+      showToast("Franchise application submitted successfully! Queued for Super Admin approval.", "success");
+
+      const m = document.getElementById("modalContainer");
+      if (m) {
+        m.innerHTML = `
+          <div class="modal-overlay" onclick="closeModal()">
+            <div class="modal-dialog surface-card" onclick="event.stopPropagation();" style="max-width: 500px; padding: var(--space-6); text-align: center;">
+              <span class="status-badge status-connected" style="margin-bottom: 12px;">APPLICATION SUBMITTED</span>
+              <h3 style="font-family: var(--font-display); font-size: 1.5rem; color: var(--text-bright); margin-top: 8px;">
+                ${name} Registered
+              </h3>
+              <p style="color: var(--text-muted); font-size: 0.875rem; line-height: 1.6; margin: 16px 0;">
+                Your franchise team application has been recorded in the Tournament Directorate registry.
+                A Super Admin will review your Faculty Coordinator credentials and approve your squad allocation.
+              </p>
+              <div style="background: var(--surface-2); padding: 12px; border-radius: var(--radius-sm); margin-bottom: 20px; font-family: var(--font-mono); font-size: 0.8125rem;">
+                Franchise Code: <strong style="color: var(--color-green);">${shortCode}</strong> • Coordinator: ${coordName}
+              </div>
+              <button class="btn btn-primary" onclick="closeModal(); switchView('login');" style="width: 100%; min-height: 44px;">
+                PROCEED TO LOGIN
+              </button>
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    function renderFranchiseRegistrationView() {
+      return `
+        <div style="max-width: 820px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--space-6); padding: var(--space-2) 0;">
+          <div class="surface-card" style="padding: var(--space-6);">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: var(--space-4);">
+              <div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span class="status-badge status-live">ACC 2026 OFFICIAL</span>
+                  <span class="label-micro" style="color: var(--color-green);">FRANCHISE ONBOARDING</span>
+                </div>
+                <h2 style="font-family: var(--font-display); font-size: 1.75rem; font-weight: 800; color: var(--text-bright); margin-top: 4px;">
+                  REGISTER YOUR FRANCHISE TEAM
+                </h2>
+                <div style="font-size: 0.8125rem; color: var(--text-muted); margin-top: 4px;">
+                  Submit your team for official tournament entry. Up to 11 franchises will be approved by the Tournament Directorate.
+                </div>
+              </div>
+              <button type="button" class="btn btn-secondary" onclick="switchView('login')">
+                ← BACK TO LOGIN
+              </button>
+            </div>
+
+            <form onsubmit="event.preventDefault(); submitFranchiseRegistration(event); return false;" style="display: flex; flex-direction: column; gap: var(--space-5);">
+              
+              <!-- 01 Team Identity -->
+              <div style="background: var(--surface-2); padding: var(--space-4); border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: var(--space-3);">
+                <span class="label-micro" style="color: var(--color-green); font-weight: 800;">01 TEAM IDENTITY & SPONSORSHIP</span>
+                <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 12px;">
+                  <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label">FRANCHISE / TEAM NAME *</label>
+                    <input type="text" class="form-input" id="regFranchiseName" placeholder="e.g. Titans, Warriors, Strikers" required>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label">SHORT CODE (3-4 CHARS) *</label>
+                    <input type="text" class="form-input font-mono" id="regFranchiseShort" placeholder="e.g. TIT" maxlength="4" style="text-transform: uppercase;" required>
+                  </div>
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">ACADEMIC DEPARTMENT / FACULTY SPONSOR *</label>
+                  <input type="text" class="form-input" id="regFranchiseDept" placeholder="e.g. Department of Computer Science & Engineering" required>
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">TEAM MOTTO / SLOGAN</label>
+                  <input type="text" class="form-input" id="regFranchiseSlogan" placeholder="e.g. Strength, Honor, Victory">
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">TEAM LOGO (4:3 RATIO RECOMMENDED)</label>
+                  <input type="file" class="form-input" id="regFranchiseLogoFile" accept="image/*" onchange="handleFranchiseRegLogoUpload(event)">
+                  <div id="regFranchiseLogoPreview" style="margin-top: 8px; display: none; width: 96px; height: 72px; border-radius: 4px; overflow: hidden; border: 1px solid var(--border-subtle);"></div>
+                </div>
+              </div>
+
+              <!-- 02 Coordinator -->
+              <div style="background: var(--surface-2); padding: var(--space-4); border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: var(--space-3);">
+                <span class="label-micro" style="color: var(--color-blue); font-weight: 800;">02 FACULTY COORDINATOR (OWNER / LEAD DELEGATE)</span>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                  <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label">COORDINATOR FULL NAME *</label>
+                    <input type="text" class="form-input" id="regFranchiseCoordName" placeholder="e.g. Prof. K. Ramesh" required>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label">DESIGNATION & DEPARTMENT *</label>
+                    <input type="text" class="form-input" id="regFranchiseCoordDept" placeholder="e.g. Associate Professor, CSE" required>
+                  </div>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                  <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label">COORDINATOR PRIVATE MOBILE (10 DIGITS) *</label>
+                    <input type="tel" class="form-input font-mono" id="regFranchiseCoordMobile" placeholder="e.g. 9876543210" pattern="[0-9]{10}" maxlength="10" required>
+                    <div style="font-size: 0.7rem; color: var(--text-faint); margin-top: 2px;">Private: Never visible on public displays or spectator view</div>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label">COORDINATOR EMAIL *</label>
+                    <input type="email" class="form-input" id="regFranchiseCoordEmail" placeholder="e.g. coordinator@acc.edu" required>
+                  </div>
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">COORDINATOR PASSPORT PHOTO</label>
+                  <input type="file" class="form-input" id="regFranchiseCoordPhoto" accept="image/*" onchange="handleFranchiseCoordPhotoUpload(event)">
+                </div>
+              </div>
+
+              <!-- 03 Captain -->
+              <div style="background: var(--surface-2); padding: var(--space-4); border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: var(--space-3);">
+                <span class="label-micro" style="color: var(--color-orange); font-weight: 800;">03 TEAM CAPTAIN & ON-FIELD LEADERSHIP</span>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                  <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label">CAPTAIN NAME & ROLL NUMBER *</label>
+                    <input type="text" class="form-input" id="regFranchiseCapName" placeholder="e.g. Sai Teja (26811A0501)" required>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label">CAPTAIN PRIVATE MOBILE (10 DIGITS) *</label>
+                    <input type="tel" class="form-input font-mono" id="regFranchiseCapMobile" placeholder="e.g. 9876543211" pattern="[0-9]{10}" maxlength="10" required>
+                  </div>
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">VICE-CAPTAIN NAME & ROLL NUMBER (OPTIONAL)</label>
+                  <input type="text" class="form-input" id="regFranchiseVcName" placeholder="e.g. M. Rahul (26811A0502)">
+                </div>
+              </div>
+
+              <!-- Agreement -->
+              <div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px; background: rgba(5,150,105,0.06); border-radius: var(--radius-sm); border: 1px solid rgba(5,150,105,0.2);">
+                <input type="checkbox" id="regFranchiseAgree" required style="margin-top: 3px;">
+                <label for="regFranchiseAgree" style="font-size: 0.8125rem; color: var(--text-muted); cursor: pointer;">
+                  I certify this franchise application is authorized by the sponsoring department and agree to abide by the official ACC 2026 Auction Rules (1000 credits purse, mandatory bucket quotas, and discrete increment ladder).
+                </label>
+              </div>
+
+              <button type="submit" class="btn btn-primary" style="min-height: 48px; font-size: 1rem; font-weight: 800; letter-spacing: 0.04em;">
+                SUBMIT FRANCHISE APPLICATION
+              </button>
+            </form>
           </div>
         </div>
       `;
@@ -7913,13 +8180,35 @@
                   <button type="button" onclick="handleLoginSubmit(event)" class="btn btn-primary" style="width: 100%; min-height: 48px; font-size: 0.9375rem; margin-top: var(--space-1);">
                     ENTER FRANCHISE TERMINAL
                   </button>
+
+                  <div style="margin-top: 12px; text-align: center; border-top: 1px dashed var(--border-subtle); padding-top: 10px;">
+                    <span style="font-size: 0.8125rem; color: var(--text-muted);">New Franchise?</span>
+                    <button type="button" class="btn btn-secondary" style="margin-left: 8px; font-size: 0.75rem; padding: 4px 12px; min-height: 30px; border-color: var(--color-green); color: var(--color-green); font-weight: 700;" onclick="switchView('franchise-register')">
+                      REGISTER YOUR TEAM
+                    </button>
+                  </div>
                 </form>
               ` : `
                 <!-- ADMIN LOGIN: RESOLVES TO SUPER ADMIN OR ADMIN / HANDLER -->
                 <form onsubmit="event.preventDefault(); handleLoginSubmit(event); return false;" style="display: flex; flex-direction: column; gap: var(--space-4); margin-top: var(--space-2);">
+                  <div class="form-group" style="margin-bottom: var(--space-2);">
+                    <label class="form-label">ADMINISTRATIVE ACCESS LEVEL</label>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                      <button type="button" class="btn btn-secondary" style="${loginAdminSubRole === 'SUPER_ADMIN' ? 'background: rgba(16, 185, 129, 0.15); border-color: var(--color-green); color: var(--color-green); font-weight: 800;' : ''}" onclick="loginAdminSubRole = 'SUPER_ADMIN'; renderCurrentView();">
+                        SUPER ADMIN (Full Control)
+                      </button>
+                      <button type="button" class="btn btn-secondary" style="${loginAdminSubRole === 'OPERATOR' ? 'background: rgba(59, 130, 246, 0.15); border-color: #3b82f6; color: #60a5fa; font-weight: 800;' : ''}" onclick="loginAdminSubRole = 'OPERATOR'; renderCurrentView();">
+                        FLOOR OPERATOR (Auction Only)
+                      </button>
+                    </div>
+                    <div style="font-size: 0.72rem; color: var(--text-faint); margin-top: 4px;">
+                      ${loginAdminSubRole === 'SUPER_ADMIN' ? 'Full governance, data management, quota relaxation & tournament controls' : 'Floor auction execution: live bidding, hammer, skip, and pause/resume only'}
+                    </div>
+                  </div>
+
                   <div class="form-group" style="margin-bottom: 0;">
                     <label class="form-label">ADMIN USERNAME OR EMAIL</label>
-                    <input type="text" class="form-input" id="loginAdminIdentifier" placeholder="e.g. admin, superadmin, or email" required>
+                    <input type="text" class="form-input" id="loginAdminIdentifier" placeholder="${loginAdminSubRole === 'OPERATOR' ? 'e.g. handler, operator, or email' : 'e.g. admin, superadmin, or email'}" required>
                   </div>
 
                   <div class="form-group" style="margin-bottom: 0;">
@@ -7933,17 +8222,31 @@
                   </div>
 
                   <button type="button" onclick="handleLoginSubmit(event)" class="btn btn-primary" style="width: 100%; min-height: 48px; font-size: 0.9375rem; margin-top: var(--space-1);">
-                    AUTHENTICATE ADMIN
+                    AUTHENTICATE ADMIN ${loginAdminSubRole === 'OPERATOR' ? '(FLOOR OPERATOR)' : '(SUPER ADMIN)'}
                   </button>
                 </form>
               `}
 
-              <!-- Registration Footnote -->
-              <div style="margin-top: var(--space-6); text-align: center; border-top: 1px solid var(--border-subtle); padding-top: var(--space-4);">
-                <span style="font-size: 0.8125rem; color: var(--text-muted);">New tournament player?</span>
-                <button type="button" class="btn btn-secondary" style="margin-left: 8px; font-size: 0.75rem; padding: 4px 12px; min-height: 32px;" onclick="switchView('register')">
-                  PLAYER REGISTRATION
-                </button>
+              <!-- Registration Footnote & Public Entry Points -->
+              <div style="margin-top: var(--space-6); text-align: center; border-top: 1px solid var(--border-subtle); padding-top: var(--space-4); display: flex; flex-direction: column; gap: 10px; align-items: center;">
+                <div style="display: flex; gap: 8px; align-items: center; justify-content: center; flex-wrap: wrap;">
+                  <span style="font-size: 0.8125rem; color: var(--text-muted);">Tournament registrations:</span>
+                  <button type="button" class="btn btn-secondary" style="font-size: 0.75rem; padding: 4px 12px; min-height: 32px;" onclick="switchView('register')">
+                    PLAYER REGISTRATION
+                  </button>
+                  <button type="button" class="btn btn-secondary" style="font-size: 0.75rem; padding: 4px 12px; min-height: 32px; border-color: rgba(5,150,105,0.4); color: var(--color-green); font-weight: 700;" onclick="switchView('franchise-register')">
+                    REGISTER NEW FRANCHISE
+                  </button>
+                </div>
+                <div style="display: flex; gap: 14px; align-items: center; justify-content: center; flex-wrap: wrap;">
+                  <a href="javascript:void(0)" onclick="switchView('live')" style="font-size: 0.78125rem; color: var(--color-blue); text-decoration: underline; font-weight: 700;">
+                    👁️ Enter as Spectator (Public View — No Login Required)
+                  </a>
+                  <span style="color: var(--text-faint);">•</span>
+                  <a href="javascript:void(0)" onclick="loginRoleSelection = 'ADMIN'; loginAdminSubRole = 'OPERATOR'; renderCurrentView();" style="font-size: 0.78125rem; color: var(--text-muted); text-decoration: none; font-weight: 600;">
+                    ⚡ Floor Operator Login
+                  </a>
+                </div>
               </div>
 
             </div>
@@ -8866,6 +9169,178 @@
     }
 
     
+    function openReplacePhotoModal(playerId) {
+      const p = players.find(item => item.id == playerId || String(item.id) === String(playerId)) || players[0];
+      if (!p) return;
+      window.pendingPhotoReplacement = null;
+      const modal = document.getElementById("modalContainer");
+      modal.innerHTML = `
+        <div class="modal-overlay" onclick="closeModal()">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 460px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-subtle); padding-bottom: var(--space-3);">
+              <div>
+                <span class="label-micro" style="color: var(--color-green);">PROFILE CREDENTIAL</span>
+                <div style="font-family: var(--font-display); font-size: 1.25rem; font-weight: 800; color: var(--text-bright);">REPLACE PLAYER PHOTO</div>
+              </div>
+              <button class="btn btn-secondary" style="min-height: 32px; padding: 2px 8px;" onclick="closeModal()">✕</button>
+            </div>
+            <div style="margin: 16px 0; font-size: 0.8125rem; color: var(--text-muted);">
+              Upload a 4:3 portrait photo (formal or casual acceptable). Face must be clearly visible. It will be resized for fast list loading and large-screen display.
+            </div>
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 16px;">
+              <div id="replacePhotoPreviewContainer" style="width: 140px; height: 175px; border-radius: var(--radius-md); border: 2px dashed var(--border-medium); display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--surface-2);">
+                ${p.photo ? `<img src="${p.photo}" style="width:100%;height:100%;object-fit:cover;">` : `<span style="font-size: 0.75rem; color: var(--text-faint);">No Photo</span>`}
+              </div>
+              <input type="file" id="replacePhotoFileInput" accept="image/*" style="display: none;" onchange="handleReplacePhotoUpload(event, '${p.id}')">
+              <button type="button" class="btn btn-secondary" onclick="document.getElementById('replacePhotoFileInput').click()">SELECT NEW PHOTO</button>
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+              <button type="button" class="btn btn-secondary" onclick="closeModal()">CANCEL</button>
+              <button type="button" class="btn btn-primary" onclick="confirmReplacePhoto('${p.id}')">CONFIRM REPLACEMENT</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function handleReplacePhotoUpload(e, playerId) {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        const img = new Image();
+        img.onload = function() {
+          const canvas = document.createElement("canvas");
+          canvas.width = 480;
+          canvas.height = 640;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, 480, 640);
+          window.pendingPhotoReplacement = canvas.toDataURL("image/jpeg", 0.85);
+          const container = document.getElementById("replacePhotoPreviewContainer");
+          if (container) {
+            container.innerHTML = `<img src="${window.pendingPhotoReplacement}" style="width:100%;height:100%;object-fit:cover;">`;
+          }
+        };
+        img.src = evt.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function confirmReplacePhoto(playerId) {
+      if (!window.pendingPhotoReplacement) {
+        showToast("Please select a valid photograph first.", "warning");
+        return;
+      }
+      const p = players.find(item => item.id == playerId || String(item.id) === String(playerId));
+      if (!p) return;
+      p.photo = window.pendingPhotoReplacement;
+      p.photoUrl = window.pendingPhotoReplacement;
+      saveDatabase();
+      appendAuditTrail({
+        type: 'PLAYER_PHOTO_UPDATED',
+        playerId: p.id,
+        roll: p.roll,
+        name: p.name,
+        timestamp: Date.now()
+      });
+      closeModal();
+      showToast("Player photograph updated and resized.", "success");
+      renderCurrentView();
+    }
+
+    function openFlagYearDiscrepancyModal(playerId) {
+      const p = players.find(item => item.id == playerId || String(item.id) === String(playerId)) || players[0];
+      if (!p) return;
+      const modal = document.getElementById("modalContainer");
+      modal.innerHTML = `
+        <div class="modal-overlay" onclick="closeModal()">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 480px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-subtle); padding-bottom: var(--space-3);">
+              <div>
+                <span class="status-badge status-warning">ACADEMIC AUDIT</span>
+                <div style="font-family: var(--font-display); font-size: 1.25rem; font-weight: 800; color: var(--text-bright); margin-top: 4px;">FLAG YEAR DISCREPANCY</div>
+              </div>
+              <button class="btn btn-secondary" style="min-height: 32px; padding: 2px 8px;" onclick="closeModal()">✕</button>
+            </div>
+            <div style="margin: 16px 0; font-size: 0.8125rem; color: var(--text-muted);">
+              Report an academic year discrepancy (e.g. detained, lateral admission, or academic break). This sends an alert to the Super Admin review queue.
+            </div>
+            <div class="form-group" style="margin-bottom: 12px;">
+              <label class="form-label">CURRENT SYSTEM YEAR</label>
+              <input type="text" class="form-input font-mono" value="Year ${p.year || 1} (${p.program || 'B.Tech'} - Bucket ${p.bucket || 'B1'})" disabled style="opacity: 0.75;">
+            </div>
+            <div class="form-group" style="margin-bottom: 12px;">
+              <label class="form-label">ACTUAL ACADEMIC YEAR *</label>
+              <select id="flagCorrectYearSelect" class="form-select">
+                <option value="1">Year 1</option>
+                <option value="2">Year 2</option>
+                <option value="3">Year 3</option>
+                <option value="4">Year 4</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin-bottom: 16px;">
+              <label class="form-label">REASON / EXPLANATION *</label>
+              <textarea id="flagReasonInput" class="form-input" rows="3" placeholder="e.g. Admitted via lateral entry in 2024, or detained in 2nd year." required></textarea>
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+              <button type="button" class="btn btn-secondary" onclick="closeModal()">CANCEL</button>
+              <button type="button" class="btn btn-primary" onclick="submitFlagYearDiscrepancy('${p.id}')">SUBMIT REPORT</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function submitFlagYearDiscrepancy(playerId) {
+      const p = players.find(item => item.id == playerId || String(item.id) === String(playerId));
+      if (!p) return;
+      const reason = (document.getElementById("flagReasonInput").value || "").trim();
+      const correctYear = parseInt(document.getElementById("flagCorrectYearSelect").value, 10);
+      if (!reason) {
+        showToast("Please provide an explanation for the discrepancy.", "warning");
+        return;
+      }
+      p.flaggedDiscrepancy = true;
+      p.discrepancyReportedYear = correctYear;
+      p.discrepancyReason = reason;
+      p.discrepancyStatus = 'PENDING_REVIEW';
+      p.discrepancyTimestamp = Date.now();
+      saveDatabase();
+      appendAuditTrail({
+        type: 'YEAR_DISCREPANCY_FLAGGED',
+        playerId: p.id,
+        roll: p.roll,
+        name: p.name,
+        reportedYear: correctYear,
+        reason: reason,
+        timestamp: Date.now()
+      });
+      closeModal();
+      showToast("Academic discrepancy flagged for Super Admin queue.", "success");
+      renderCurrentView();
+    }
+
+    function savePlayerCricHeroes(playerId) {
+      const p = players.find(item => item.id == playerId || String(item.id) === String(playerId));
+      if (!p) return;
+      const urlEl = document.getElementById("playerPortalCricHeroesUrl");
+      const phoneEl = document.getElementById("playerPortalCricHeroesMobile");
+      if (urlEl) p.cricHeroesProfileUrl = urlEl.value.trim();
+      if (phoneEl) p.cricHeroesPhone = phoneEl.value.trim();
+      if (p.cricHeroesProfileUrl) {
+        p.cricHeroesStatus = 'PENDING_ADMIN_RESOLUTION';
+      }
+      saveDatabase();
+      appendAuditTrail({
+        type: 'PLAYER_CRICHEROES_UPDATED',
+        playerId: p.id,
+        cricHeroesUrl: p.cricHeroesProfileUrl,
+        timestamp: Date.now()
+      });
+      showToast("CricHeroes details updated.", "success");
+      renderCurrentView();
+    }
+
     function renderPlayerPortalView() {
       // Find the player object corresponding to currentUser
       const p = players.find(item => 
@@ -8907,19 +9382,26 @@
         vBadge = `<span class="status-badge status-warning">PENDING VERIFICATION</span>`;
       }
 
+      const isPaid = p.isPaid || p.paymentStatus === 'PAID';
+
       return `
         <div style="max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--space-6); padding: var(--space-2) 0;">
           
           <!-- Top Header Banner -->
           <div class="surface-card" style="padding: var(--space-6); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-4); border-left: 4px solid var(--color-green);">
             <div style="display: flex; align-items: center; gap: var(--space-5);">
-              <div>
+              <div style="display: flex; flex-direction: column; align-items: center; gap: 6px;">
                 ${getPlayerAvatar(p, 90, 110)}
+                <button type="button" class="btn btn-secondary" style="font-size: 0.6875rem; padding: 2px 8px; min-height: 24px;" onclick="openReplacePhotoModal('${p.id}')">
+                  📷 REPLACE PHOTO
+                </button>
               </div>
               <div>
                 <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                   <span class="label-micro" style="color: var(--color-green); margin: 0;">PLAYER WORKSPACE</span>
                   ${vBadge}
+                  ${isPaid ? '<span class="status-badge status-live">PAID (VERIFIED)</span>' : '<span class="status-badge status-warning">PAYMENT PENDING</span>'}
+                  ${p.flaggedDiscrepancy ? '<span class="status-badge status-warning">YEAR FLAGGED FOR REVIEW</span>' : ''}
                   <span class="status-badge" style="background: rgba(15,23,42,0.06); color: var(--text-bright); font-family: var(--font-mono); font-weight: 700;">BUCKET ${p.bucket || 'B1'}</span>
                 </div>
                 <h1 style="font-family: var(--font-display); font-size: clamp(1.5rem, 2.5vw, 2.25rem); font-weight: 800; color: var(--text-bright); margin-top: 4px; line-height: 1.1;">
@@ -8939,6 +9421,9 @@
             <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
               <button class="btn btn-secondary" style="min-height: 42px;" onclick="openPlayerPassModal('${p.id}')">
                 DOWNLOAD PASS
+              </button>
+              <button class="btn btn-secondary" style="min-height: 42px; border-color: rgba(245,158,11,0.4); color: var(--color-orange);" onclick="openFlagYearDiscrepancyModal('${p.id}')">
+                FLAG YEAR DISCREPANCY
               </button>
               <button class="btn btn-primary" style="min-height: 42px;" onclick="switchView('live')">
                 LIVE AUCTION FLOOR
@@ -9002,12 +9487,33 @@
                     <strong style="color: var(--text-bright);">${p.auctionEligible !== false ? 'ELIGIBLE FOR SELECTION' : 'PENDING APPROVAL'}</strong>
                   </div>
                   <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed var(--border-subtle);">
+                    <span style="color: var(--text-muted);">Payment Status:</span>
+                    <strong style="color: ${isPaid ? 'var(--color-green)' : 'var(--color-orange)'};">${isPaid ? 'PAID & VERIFIED' : 'PAYMENT PENDING'}</strong>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed var(--border-subtle);">
                     <span style="color: var(--text-muted);">Registered Mobile:</span>
                     <strong style="color: var(--text-bright); font-family: var(--font-mono);">${p.phone || p.mobile || 'Registered'}</strong>
                   </div>
                   <div style="display: flex; justify-content: space-between; padding: 6px 0;">
                     <span style="color: var(--text-muted);">Official Email:</span>
                     <strong style="color: var(--text-bright); font-family: var(--font-mono);">${p.email || 'N/A'}</strong>
+                  </div>
+                </div>
+
+                <!-- CricHeroes Linking Section -->
+                <div style="margin-top: var(--space-4); background: var(--surface-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: var(--space-3);">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <span class="label-micro" style="color: var(--color-blue); margin: 0;">CRICHEROES INTEGRATION</span>
+                    <span class="status-badge ${p.cricHeroesProfileUrl ? 'status-live' : 'status-warning'}" style="font-size: 0.65rem;">
+                      ${p.cricHeroesProfileUrl ? 'LINKED' : 'PENDING'}
+                    </span>
+                  </div>
+                  <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <input type="url" id="playerPortalCricHeroesUrl" class="form-input" style="font-size: 0.75rem; padding: 4px 8px;" placeholder="CricHeroes Profile URL" value="${p.cricHeroesProfileUrl || ''}">
+                    <input type="tel" id="playerPortalCricHeroesMobile" class="form-input font-mono" style="font-size: 0.75rem; padding: 4px 8px;" placeholder="Registered Mobile (10 digits)" maxlength="10" value="${p.cricHeroesPhone || p.phone || p.mobile || ''}">
+                    <button type="button" class="btn btn-secondary" style="font-size: 0.7rem; padding: 3px 8px; border-color: var(--color-blue); color: #60a5fa;" onclick="savePlayerCricHeroes('${p.id}')">
+                      SAVE CRICHEROES DETAILS
+                    </button>
                   </div>
                 </div>
               </div>
@@ -9043,9 +9549,72 @@
                   </div>
                 </div>
 
-                <div style="background: var(--surface-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: var(--space-4); margin-bottom: var(--space-4);">
+                <!-- 11 Self-Declared Career Statistics -->
+                <div style="background: var(--surface-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: var(--space-3); margin-bottom: var(--space-4);">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <span class="label-micro" style="margin: 0;">CAREER STATS (SELF-DECLARED)</span>
+                    <span style="font-size: 0.65rem; color: var(--text-faint);">Self-declared</span>
+                  </div>
+                  <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; font-size: 0.72rem; text-align: center;">
+                    <div style="background: var(--surface-2); padding: 4px; border-radius: 4px;">
+                      <div style="color: var(--text-muted); font-size: 0.6rem;">MATCHES</div>
+                      <div class="font-mono" style="font-weight: 800; color: var(--text-bright);">${p.statsMatches ?? p.matches ?? 0}</div>
+                    </div>
+                    <div style="background: var(--surface-2); padding: 4px; border-radius: 4px;">
+                      <div style="color: var(--text-muted); font-size: 0.6rem;">RUNS</div>
+                      <div class="font-mono" style="font-weight: 800; color: var(--color-orange);">${p.statsRuns ?? p.runs ?? 0}</div>
+                    </div>
+                    <div style="background: var(--surface-2); padding: 4px; border-radius: 4px;">
+                      <div style="color: var(--text-muted); font-size: 0.6rem;">BAT AVG</div>
+                      <div class="font-mono" style="font-weight: 800; color: var(--text-bright);">${p.statsBatAvg ?? p.battingAverage ?? 0}</div>
+                    </div>
+                    <div style="background: var(--surface-2); padding: 4px; border-radius: 4px;">
+                      <div style="color: var(--text-muted); font-size: 0.6rem;">SR</div>
+                      <div class="font-mono" style="font-weight: 800; color: var(--text-bright);">${p.statsSR ?? p.strikeRate ?? 0}</div>
+                    </div>
+                    <div style="background: var(--surface-2); padding: 4px; border-radius: 4px;">
+                      <div style="color: var(--text-muted); font-size: 0.6rem;">HS</div>
+                      <div class="font-mono" style="font-weight: 800; color: var(--text-bright);">${p.statsHS ?? p.highScore ?? 0}</div>
+                    </div>
+                    <div style="background: var(--surface-2); padding: 4px; border-radius: 4px;">
+                      <div style="color: var(--text-muted); font-size: 0.6rem;">WKTS</div>
+                      <div class="font-mono" style="font-weight: 800; color: var(--color-green);">${p.statsWickets ?? p.wickets ?? 0}</div>
+                    </div>
+                    <div style="background: var(--surface-2); padding: 4px; border-radius: 4px;">
+                      <div style="color: var(--text-muted); font-size: 0.6rem;">BOWL AVG</div>
+                      <div class="font-mono" style="font-weight: 800; color: var(--text-bright);">${p.statsBowlAvg ?? p.bowlingAverage ?? 0}</div>
+                    </div>
+                    <div style="background: var(--surface-2); padding: 4px; border-radius: 4px;">
+                      <div style="color: var(--text-muted); font-size: 0.6rem;">ECON</div>
+                      <div class="font-mono" style="font-weight: 800; color: var(--text-bright);">${p.statsEcon ?? p.economy ?? 0}</div>
+                    </div>
+                    <div style="background: var(--surface-2); padding: 4px; border-radius: 4px;">
+                      <div style="color: var(--text-muted); font-size: 0.6rem;">BEST BOWL</div>
+                      <div class="font-mono" style="font-weight: 800; color: var(--text-bright);">${p.statsBestBowling ?? p.bestBowling ?? 'N/A'}</div>
+                    </div>
+                    <div style="background: var(--surface-2); padding: 4px; border-radius: 4px;">
+                      <div style="color: var(--text-muted); font-size: 0.6rem;">CATCHES</div>
+                      <div class="font-mono" style="font-weight: 800; color: var(--text-bright);">${p.statsCatches ?? p.catches ?? 0}</div>
+                    </div>
+                    <div style="background: var(--surface-2); padding: 4px; border-radius: 4px;">
+                      <div style="color: var(--text-muted); font-size: 0.6rem;">STUMPINGS</div>
+                      <div class="font-mono" style="font-weight: 800; color: var(--text-bright);">${p.statsStumpings ?? p.stumpings ?? 0}</div>
+                    </div>
+                    <div style="background: var(--surface-2); padding: 4px; border-radius: 4px;">
+                      <div style="color: var(--text-muted); font-size: 0.6rem;">WK KEEPER</div>
+                      <div class="font-mono" style="font-weight: 800; color: var(--text-bright);">${p.wicketKeeper ? 'YES' : 'NO'}</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; background: var(--surface-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); margin-bottom: var(--space-3); font-size: 0.75rem;">
+                  <span style="color: var(--text-muted);">ACC FRANCHISE REFERENCE:</span>
+                  <strong style="color: var(--text-bright);">${p.referenceTeam || p.referredBy || p.referenceName || 'Open Tournament Pool'}</strong>
+                </div>
+
+                <div style="background: var(--surface-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: var(--space-3); margin-bottom: var(--space-4);">
                   <span class="label-micro">CRICKET SPECIALISM</span>
-                  <div style="font-size: 0.875rem; color: var(--text-bright); margin-top: 4px; line-height: 1.5;">
+                  <div style="font-size: 0.8125rem; color: var(--text-bright); margin-top: 2px; line-height: 1.4;">
                     ${p.bio || p.specialism || 'Verified cricket candidate for Avanthi Cricket Carnival 2026 player auction.'}
                   </div>
                 </div>
@@ -9056,9 +9625,12 @@
                 </div>
               </div>
 
-              <div style="margin-top: var(--space-4); display: flex; gap: 8px;">
-                <button class="btn btn-secondary" style="flex: 1;" onclick="openPlayerPassModal('${p.id}')">VIEW PASS</button>
-                <button class="btn btn-secondary" style="flex: 1;" onclick="logoutUser()">LOGOUT</button>
+              <div style="margin-top: var(--space-4); display: flex; gap: 8px; flex-wrap: wrap;">
+                <button class="btn btn-secondary" style="flex: 1; min-width: 100px;" onclick="openPlayerPassModal('${p.id}')">VIEW PASS</button>
+                <button class="btn btn-secondary" style="flex: 1; min-width: 100px; ${p.isBlocked || p.status === 'BLOCKED' ? 'opacity: 0.5; cursor: not-allowed;' : ''}" onclick="${p.isBlocked || p.status === 'BLOCKED' ? 'showToast(\'Editing locked by administration\', \'warning\')' : 'switchView(\'register\'); window.isEditingRegistration = true;'}" ${p.isBlocked || p.status === 'BLOCKED' ? 'disabled' : ''}>
+                  EDIT PROFILE
+                </button>
+                <button class="btn btn-secondary" style="flex: 1; min-width: 100px;" onclick="logoutUser()">LOGOUT</button>
               </div>
             </div>
 
@@ -9389,7 +9961,14 @@
         else if (key === 'B') { e.preventDefault(); openBehalfBidModal(); }
         else if (key === 'A') { e.preventDefault(); openDirectAssignModal(); }
         else if (key === 'D') { e.preventDefault(); toggleDrawMode(); }
-        else if (key === 'R') { e.preventDefault(); openRelaxationModal(); }
+        else if (key === 'R') {
+          e.preventDefault();
+          if (currentUser.role === 'SUPER_ADMIN') {
+            openRelaxationModal();
+          } else {
+            showToast("Access Denied: Quota relaxation requires Super Admin privilege.", "warning");
+          }
+        }
         else if (key === ' ') { e.preventDefault(); drawNextPlayer(); }
       });
     }
@@ -10187,7 +10766,7 @@
                       </button>
                     </div>
 
-                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;">
+                    <div style="display: grid; grid-template-columns: ${isSuperAdmin ? 'repeat(4, 1fr)' : 'repeat(3, 1fr)'}; gap: 4px;">
                       <button class="btn btn-secondary" style="font-size: 0.7rem; padding: 6px 2px;" onclick="openUndoModal()" title="Revert Any Sold Lot">
                         [U] UNDO
                       </button>
@@ -10197,9 +10776,11 @@
                       <button class="btn btn-secondary" style="font-size: 0.7rem; padding: 6px 2px;" onclick="openDirectAssignModal()" title="Direct Assign Player">
                         [A] ASSIGN
                       </button>
+                      ${isSuperAdmin ? `
                       <button class="btn btn-secondary" style="font-size: 0.7rem; padding: 6px 2px;" onclick="openRelaxationModal()" title="Relax Minimum Quota">
                         [R] RELAX
                       </button>
+                      ` : ''}
                     </div>
 
                     <div style="display: flex; justify-content: space-between; font-size: 0.6875rem; color: #64748b; padding-top: 2px;">
@@ -11429,12 +12010,17 @@
           return { title: "LOADING PLAYER PORTAL...", sub: "Fetching personal profile and allocation status" };
         case "projector":
           return { title: "INITIALIZING 4K BROADCAST PROJECTOR...", sub: "Calibrating high-contrast live lot presentation" };
+        case "franchise-register":
+          return { title: "FRANCHISE REGISTRATION...", sub: "ACC 2026 Official Team Application Gateway" };
         default:
           return { title: "LOADING ACC 2026 OS...", sub: "Synchronizing Authoritative Cloud State" };
       }
     }
 
     function switchView(viewName) {
+      if (viewName === "franchise/register" || viewName === "franchise-register") {
+        viewName = "franchise-register";
+      }
       if (viewName === "register" && !window.isEditingRegistration) {
         initFreshRegistrationState();
       }
@@ -12487,6 +13073,7 @@
       else if (currentView === "franchise") main.innerHTML = renderFranchiseTerminalView();
       else if (currentView === "teams") main.innerHTML = render11FranchisesView();
       else if (currentView === "register") main.innerHTML = renderPlayerRegistrationView();
+      else if (currentView === "franchise-register" || currentView === "franchise/register") main.innerHTML = renderFranchiseRegistrationView();
       else if (currentView === "player") main.innerHTML = renderPlayerPortalView();
       else if (currentView === "admin") main.innerHTML = renderAdminConsoleView();
       else if (currentView === "projector") main.innerHTML = renderProjectorView();
@@ -12544,9 +13131,10 @@
       const authCtx = getCurrentUserContext();
       let rawHash = window.location.hash.replace(/^#\/?/, "");
       let hash = rawHash.split('/')[0] || "public";
+      if (rawHash === "franchise/register" || rawHash === "franchise-register") hash = "franchise-register";
       if (hash === "home" || !hash) hash = "public";
 
-      if (hash && ["public", "live", "franchise", "teams", "register", "player", "admin", "projector", "login", "debug/realtime", "debug-realtime"].includes(hash)) {
+      if (hash && ["public", "live", "franchise", "teams", "register", "franchise-register", "player", "admin", "projector", "login", "debug/realtime", "debug-realtime"].includes(hash)) {
         if (hash === "player" && !authCtx.isPlayer) {
           hash = authCtx.isAdmin ? "admin" : "public";
           window.location.hash = authCtx.isAdmin ? "admin" : "home";
@@ -12811,6 +13399,14 @@
 
     window.addEventListener("hashchange", () => {
       let rawHash = window.location.hash.replace(/^#\/?/, "");
+      if (rawHash === "franchise/register" || rawHash === "franchise-register") {
+        switchView("franchise-register");
+        return;
+      }
+      if (rawHash === "debug/realtime" || rawHash === "debug-realtime") {
+        switchView("debug/realtime");
+        return;
+      }
       let hash = rawHash.split('/')[0] || "public";
       if (hash === "home" || !hash) hash = "public";
       if (hash && currentView !== hash) {
