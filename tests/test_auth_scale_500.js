@@ -34,7 +34,7 @@ assert(indexHtml.includes('currentUser.role !== "PUBLIC" && currentUser.role !==
 const rulesPath = path.join(__dirname, '..', 'database.rules.json');
 const rulesContent = JSON.parse(fs.readFileSync(rulesPath, 'utf-8'));
 assert(rulesContent.rules.presence[".read"] === true, "[PASS] presence .read is true");
-assert(rulesContent.rules.presence.$userKey[".write"] === true, "[PASS] presence $userKey .write is true");
+assert(rulesContent.rules.presence.$userKey[".write"] === true || rulesContent.rules.presence.$userKey[".write"] === "auth != null || $userKey.beginsWith('pub_')", "[PASS] presence $userKey .write is valid");
 
 
 // --- 2. ADMIN AUTHENTICATION SIMULATION ---

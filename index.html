@@ -2034,6 +2034,13 @@
       return `${cleanName}@ACC2026`;
     }
 
+    
+    function getDeterministicFranchisePassword(name, teamNum) {
+      const cleanName = (name || 'Franchise').replace(/[^a-zA-Z0-9]/g, '');
+      const num = parseInt(teamNum, 10) || 1;
+      const padded = String(num).padStart(2, '0');
+      return `${cleanName}@ACC${padded}`;
+    }
     function generateFranchiseInitialPassword(franchiseName, teamNum) {
       const cleanName = (franchiseName || 'Franchise').replace(/[^a-zA-Z0-9]/g, '');
       const numStr = String(teamNum).padStart(2, '0');
@@ -2049,33 +2056,50 @@
     });
     let players = JSON.parse(localStorage.getItem("acc_players_2026")) || DEFAULT_PLAYERS;
     let deletedPlayers = JSON.parse(localStorage.getItem("acc_deleted_players_2026")) || [];
+    let deletedFranchises = JSON.parse(localStorage.getItem("acc_deleted_franchises_2026")) || [];
+    let dataOperations = JSON.parse(localStorage.getItem("acc_data_operations_2026")) || [];
+    let dataUndoStack = JSON.parse(localStorage.getItem("acc_undo_stack_2026")) || [];
+    let dataRedoStack = JSON.parse(localStorage.getItem("acc_redo_stack_2026")) || [];
+    let dataMgmtSubTab = 'PLAYERS';
+    let dataMgmtFilter = 'ACTIVE';
+    let dataMgmtSearch = '';
+    let selectedDataPlayerIds = new Set();
+    let selectedDataFranchiseIds = new Set();
 
     // ========================================================
     // CENTRALIZED PUBLIC VISIBILITY & PLAYER LIFECYCLE ENGINE
     // ========================================================
     function isPlayerPubliclyVisible(player) {
       if (!player) return false;
+      if (player.deleted === true) return false;
+      if (player.publicVisibility === false) return false;
       const s = String(player.status || '').toUpperCase();
       const a = String(player.approvalStatus || '').toUpperCase();
       const v = String(player.verificationStatus || '').toUpperCase();
+      const acc = String(player.accountStatus || 'ACTIVE').toUpperCase();
 
       // Explicit rejections / blocks / deletions are NEVER visible
-      if (s === 'BLOCKED' || a === 'BLOCKED' || v === 'BLOCKED') return false;
       if (s === 'DELETED' || a === 'DELETED' || s === 'ARCHIVED' || a === 'ARCHIVED') return false;
+
+      // Active approved / verified players are visible
+      if ((v === 'VERIFIED' || a === 'APPROVED') && (s === 'AVAILABLE' || s === 'APPROVED' || s === 'SOLD' || s === 'UNSOLD')) {
+        if (s === 'BLOCKED' || a === 'BLOCKED' || v === 'BLOCKED' || player.isBlocked) return false;
+        return true;
+      }
+
+      if (s === 'BLOCKED' || a === 'BLOCKED' || v === 'BLOCKED' || player.isBlocked) return false;
       if (s === 'REJECTED' || a === 'REJECTED' || v === 'REJECTED') return false;
-      if (s === 'PENDING' || s === 'PENDING_APPROVAL' || s === 'PENDING_VERIFICATION' ||
-          (v !== 'VERIFIED' && (a === 'PENDING' || a === 'PENDING_APPROVAL')) || v === 'PENDING_VERIFICATION') return false;
       if (s === 'CHANGES_REQUIRED' || a === 'CHANGES_REQUIRED' || v === 'CHANGES_REQUIRED') return false;
+      if (acc === 'DISABLED' || acc === 'LOCKED') return false;
+
+      // Pending checks
+      if (s === 'PENDING' || s === 'PENDING_APPROVAL' || s === 'PENDING_VERIFICATION') return false;
+      if (v === 'PENDING_VERIFICATION') return false;
+      if (a === 'PENDING' || a === 'PENDING_APPROVAL') return false;
 
       // Must be approved / available / sold / unsold
-      const isApprovedState = (s === 'APPROVED' || s === 'AVAILABLE' || s === 'SOLD' || s === 'UNSOLD' ||
-                               a === 'APPROVED' || v === 'VERIFIED');
-      if (!isApprovedState) return false;
-
-      // Public visibility flag check: if explicitly false, never visible
-      if (player.publicVisibility === false) return false;
-
-      return true;
+      const isApprovedState = (s === 'APPROVED' || s === 'AVAILABLE' || s === 'SOLD' || s === 'UNSOLD');
+      return isApprovedState;
     }
 
     // Initialize player state integrity
@@ -2111,7 +2135,7 @@
         passwordHash: "ACC@Admin#2026!",
         role: "SUPER_ADMIN",
         identityType: "SUPER_ADMIN",
-        name: "Dr. K. V. Raman",
+        name: "Mr. Deepak",
         title: "Tournament Director & Chief Controller",
         status: "ACTIVE",
         mustChangePassword: true,
@@ -2184,13 +2208,20 @@
         // Ensure bootstrap initial users always exist (to prevent lockout)
         const merged = [..._rawUsers];
         INITIAL_USERS.forEach(iu => {
-          if (!merged.find(mu => mu.uid === iu.uid)) merged.push(iu);
+          const ex = merged.find(mu => mu.uid === iu.uid);
+          if (!ex) merged.push(iu);
+          else if (iu.role === 'SUPER_ADMIN') {
+            ex.name = 'Mr. Deepak';
+          }
         });
         users = merged;
       }
     }
     let passwordResetRequests = JSON.parse(localStorage.getItem("acc_reset_requests_2026")) || [];
     let currentUser = JSON.parse(localStorage.getItem("acc_current_user_2026")) || { role: "PUBLIC", name: "Public Guest", title: "Public Spectator" };
+    if (currentUser.role === "SUPER_ADMIN" && (!currentUser.name || currentUser.name.includes("Raman") || currentUser.name === "Super Admin")) {
+      currentUser.name = "Mr. Deepak";
+    }
     let loginRoleSelection = 'PLAYER';
     let loginFranchiseIdentity = 'COORDINATOR';
     let franchiseLoginSelection = 1;
@@ -2204,6 +2235,10 @@
       localStorage.setItem("acc_franchises_2026", JSON.stringify(franchises));
       localStorage.setItem("acc_players_2026", JSON.stringify(players));
       localStorage.setItem("acc_deleted_players_2026", JSON.stringify(deletedPlayers));
+      localStorage.setItem("acc_deleted_franchises_2026", JSON.stringify(deletedFranchises));
+      localStorage.setItem("acc_data_operations_2026", JSON.stringify(dataOperations));
+      localStorage.setItem("acc_undo_stack_2026", JSON.stringify(dataUndoStack));
+      localStorage.setItem("acc_redo_stack_2026", JSON.stringify(dataRedoStack));
       localStorage.setItem("acc_audit_2026", JSON.stringify(auditLog));
       localStorage.setItem("acc_users_2026", JSON.stringify(users));
       localStorage.setItem("acc_reset_requests_2026", JSON.stringify(passwordResetRequests));
@@ -2877,7 +2912,8 @@
       p.verificationStatus = 'PENDING_VERIFICATION';
       p.approvalStatus = 'PENDING_APPROVAL';
       p.status = 'PENDING_VERIFICATION';
-      p.publicVisibility = false;
+      p.accountStatus = 'NOT_CREATED';
+      delete p.publicVisibility;
       p.auctionEligible = false;
       delete p.correctionNote;
       auditLog.unshift({
@@ -3698,6 +3734,7 @@
       p.approvalStatus = 'PENDING_APPROVAL';
       p.verificationStatus = 'PENDING_VERIFICATION';
       p.status = 'PENDING_VERIFICATION';
+      p.accountStatus = 'NOT_CREATED';
       p.publicVisibility = false;
       p.auctionEligible = false;
       delete p.archiveReason;
@@ -3796,12 +3833,23 @@
       const idx = players.findIndex(x => x.id == playerId || x.playerId == playerId);
       if (idx === -1) return;
       const p = players[idx];
+
+      // Pre-delete snapshot for reversible undo
+      const snapshot = [JSON.parse(JSON.stringify(p))];
+      const op = createDataOperation('DELETE_PLAYER', 'PLAYER', [p.id], snapshot, {
+        description: `Player ${p.name} (${p.roll || p.id}) deleted`
+      });
+
       p.status = 'DELETED';
       p.approvalStatus = 'DELETED';
       p.verificationStatus = 'DELETED';
       p.publicVisibility = false;
+      p.deleted = true;
       p.deletedAt = new Date().toISOString();
-      p.deletedBy = currentUser.uid || 'usr_superadmin';
+      p.deletedBy = (currentUser && currentUser.uid) || 'usr_superadmin';
+      p.trashedAt = p.deletedAt;
+      p.trashedBy = (currentUser && currentUser.name) || 'Mr. Deepak';
+      p.operationId = op.operationId;
 
       if (!deletedPlayers.some(d => String(d.id) === String(p.id) || (d.roll && d.roll.toUpperCase() === (p.roll || '').toUpperCase()))) {
         deletedPlayers.push({ ...p });
@@ -3812,18 +3860,18 @@
       auditLog.unshift({
         time: new Date().toLocaleTimeString(),
         action: "PLAYER_DELETED",
-        actorUid: currentUser.uid || 'usr_superadmin',
-        role: currentUser.role,
+        actorUid: (currentUser && currentUser.uid) || 'usr_superadmin',
+        role: (currentUser && currentUser.role) || 'SUPER_ADMIN',
         targetId: p.roll || String(p.id),
         timestamp: new Date().toISOString(),
-        details: `Player ${p.name} (${p.roll}) permanently deleted by ${currentUser.name}.`
+        details: `Player ${p.name} (${p.roll}) moved to Trash by ${(currentUser && currentUser.name) || 'Admin'}. Operation: ${op.operationId}.`
       });
 
       saveDatabase();
       syncPlayerToFirebase(p, 'DELETE');
       broadcastAuthoritativeState();
       closeModal();
-      showToast(`Player ${p.name} deleted successfully`, "info");
+      showToast(`Player ${p.name} deleted successfully`, "info", "UNDO", () => executeUndoDataOperation(op.operationId), 6000);
       renderCurrentView();
     }
 
@@ -3871,6 +3919,7 @@
       p.approvalStatus = 'CHANGES_REQUIRED';
       p.verificationStatus = 'CHANGES_REQUIRED';
       p.status = 'PENDING_VERIFICATION';
+      p.accountStatus = 'NOT_CREATED';
       p.auctionEligible = false;
       p.publicVisibility = false;
       p.correctionNote = note;
@@ -4408,6 +4457,7 @@
         p.approvalStatus = 'PENDING_APPROVAL';
         p.verificationStatus = 'PENDING_VERIFICATION';
         p.status = 'PENDING_VERIFICATION';
+      p.accountStatus = 'NOT_CREATED';
         p.auctionEligible = false;
         showToast("Critical verified fields updated. Status reset to PENDING_APPROVAL. Re-approval required.", "warning");
       } else {
@@ -4444,94 +4494,190 @@
     // ========================================================
     function openCreateFranchiseModal() {
       newFranchiseLogoData = "";
-      const nextId = franchises.length + 1;
+      const nextId = franchises.length > 0 ? Math.max(...franchises.map(f => f.id || 0)) + 1 : 1;
       const nextFrId = 'FR' + String(nextId).padStart(3, '0');
       const m = document.getElementById("modalContainer");
       m.innerHTML = `
         <div class="modal-overlay" onclick="closeModal()">
-          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 540px;">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: clamp(16px, 3vw, 24px); max-width: 560px; max-height: 90vh; overflow-y: auto;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
               <div style="display: flex; align-items: center; gap: 8px;">
                 <span class="status-badge status-connected">SUPER ADMIN</span>
                 <h3 style="font-family: var(--font-display); font-size: 1.25rem; font-weight: 800; margin: 0; color: var(--text-bright);">CREATE NEW FRANCHISE</h3>
               </div>
-              <button class="btn btn-secondary" style="padding: 4px 8px; min-height: 28px;" onclick="closeModal()">✕</button>
+              <button class="btn btn-secondary" style="padding: 6px 10px; min-height: 32px; font-size: 0.875rem;" onclick="closeModal()">✕</button>
             </div>
 
             <div style="display: flex; flex-direction: column; gap: 12px;">
-              <div class="form-group" style="margin-bottom: 0;">
-                <label class="form-label">FRANCHISE ID (AUTO-ASSIGNED)</label>
-                <input type="text" class="form-input" id="newFranchiseId" value="${nextFrId}" readonly style="background: var(--surface-2); font-family: var(--font-mono); color: var(--color-green);">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">TEAM NUMBER *</label>
+                  <input type="number" class="form-input font-mono" id="newFranchiseNumber" value="${nextId}" min="1" max="99" required oninput="updateNewFranchiseCredPreview()">
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">FRANCHISE ID</label>
+                  <input type="text" class="form-input font-mono" id="newFranchiseId" value="${nextFrId}" readonly style="background: var(--surface-2); color: var(--color-green);">
+                </div>
               </div>
-              <div class="form-group" style="margin-bottom: 0;">
-                <label class="form-label">FRANCHISE NAME *</label>
-                <input type="text" class="form-input" id="newFranchiseName" placeholder="e.g. Challengers, Gladiators" required>
+
+              <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 10px;">
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">FRANCHISE / TEAM NAME *</label>
+                  <input type="text" class="form-input" id="newFranchiseName" placeholder="e.g. Titans, Gladiators" required oninput="updateNewFranchiseCredPreview()">
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">SHORT CODE *</label>
+                  <input type="text" class="form-input" id="newFranchiseShort" placeholder="e.g. GLD" maxlength="4" required style="text-transform: uppercase;">
+                </div>
               </div>
+
               <div class="form-group" style="margin-bottom: 0;">
-                <label class="form-label">SHORT CODE (3 LETTERS) *</label>
-                <input type="text" class="form-input" id="newFranchiseShort" placeholder="e.g. CHL" maxlength="4" required>
-              </div>
-              <div class="form-group" style="margin-bottom: 0;">
-                <label class="form-label">FRANCHISE LOGO (4:3 ASPECT RATIO MANDATORY)</label>
+                <label class="form-label">FRANCHISE LOGO (4:3 ASPECT RATIO)</label>
                 <input type="file" accept="image/*" class="form-input" id="newFranchiseLogoInput" onchange="handleFranchiseLogoUpload(this, 'newFranchiseLogoMsg', 'newFranchiseLogoPreview')">
-                <div id="newFranchiseLogoMsg" style="font-size: 0.75rem; margin-top: 4px;">
-                  <div style="font-size: 0.72rem; color: var(--text-faint); margin-top: 2px;">
-                    Requirement: Image must be in 4:3 aspect ratio (e.g. 800×600, 400×300).
-                  </div>
+                <div id="newFranchiseLogoMsg" style="font-size: 0.72rem; color: var(--text-faint); margin-top: 2px;">
+                  Requirement: Image must be in 4:3 aspect ratio (e.g. 800×600, 400×300).
                 </div>
                 <div id="newFranchiseLogoPreview" style="margin-top: 6px;"></div>
               </div>
-              <div class="form-group" style="margin-bottom: 0;">
-                <label class="form-label">FACULTY COORDINATOR NAME *</label>
-                <input type="text" class="form-input" id="newFranchiseCoord" placeholder="Prof. / Dr. Name" required>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">OWNER / COORDINATOR NAME *</label>
+                  <input type="text" class="form-input" id="newFranchiseCoord" placeholder="Prof. / Owner Name" required oninput="updateNewFranchiseCredPreview()">
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">DEPARTMENT *</label>
+                  <input type="text" class="form-input" id="newFranchiseDept" placeholder="e.g. CSE, ECE, MECH" required>
+                </div>
               </div>
-              <div class="form-group" style="margin-bottom: 0;">
-                <label class="form-label">COORDINATOR DEPARTMENT *</label>
-                <input type="text" class="form-input" id="newFranchiseDept" placeholder="e.g. CSE, ECE, MECH" required>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">OWNER PHONE (10 DIGITS) *</label>
+                  <input type="tel" class="form-input" id="newFranchiseMobile" placeholder="10-digit mobile" maxlength="10" required>
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">OWNER EMAIL *</label>
+                  <input type="email" class="form-input" id="newFranchiseEmail" placeholder="owner@acc.edu" required oninput="updateNewFranchiseCredPreview()">
+                </div>
               </div>
+
               <div class="form-group" style="margin-bottom: 0;">
-                <label class="form-label">COORDINATOR MOBILE NUMBER (10 DIGITS) *</label>
-                <input type="text" class="form-input" id="newFranchiseMobile" placeholder="10-digit mobile" maxlength="10" required>
+                <label class="form-label">LOGIN USERNAME / IDENTIFIER *</label>
+                <input type="text" class="form-input" id="newFranchiseLogin" placeholder="e.g. titans_coord" required>
               </div>
+
               <div class="form-group" style="margin-bottom: 0;">
-                <label class="form-label">COORDINATOR OFFICIAL EMAIL *</label>
-                <input type="email" class="form-input" id="newFranchiseEmail" placeholder="coordinator@acc.edu" required>
+                <label class="form-label">DEFAULT PASSWORD PREVIEW (ACC CONVENTION)</label>
+                <input type="text" class="form-input font-mono" id="newFranchisePassPreview" readonly value="Team@ACC01" style="background: var(--surface-2); color: var(--color-yellow);">
+                <div style="font-size: 0.72rem; color: var(--text-faint); margin-top: 2px;">
+                  Pattern: &lt;Team Name&gt;@ACC&lt;Team Number&gt;. Mandatory password change enforced on first login.
+                </div>
+              </div>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">ACCOUNT STATUS</label>
+                  <select class="form-select" id="newFranchiseAccountStatus">
+                    <option value="ACTIVE">ACTIVE</option>
+                    <option value="PENDING" selected>PENDING</option>
+                  </select>
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">APPROVAL STATUS</label>
+                  <div style="padding: 10px; background: var(--surface-2); border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); display: flex; align-items: center; gap: 6px;">
+                    <span class="status-badge status-scarcity" style="font-size: 0.65rem;">PENDING</span>
+                    <span style="font-size: 0.7rem; color: var(--text-muted);">Admin approval required</span>
+                  </div>
+                </div>
               </div>
             </div>
 
             <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
               <button class="btn btn-secondary" onclick="closeModal()">CANCEL</button>
-              <button class="btn btn-primary" onclick="saveNewFranchise()">SUBMIT FOR APPROVAL</button>
+              <button class="btn btn-primary" onclick="saveNewFranchise()">CREATE FRANCHISE</button>
             </div>
           </div>
         </div>
       `;
+      setTimeout(updateNewFranchiseCredPreview, 50);
+    }
+
+    function updateNewFranchiseCredPreview() {
+      const name = (document.getElementById("newFranchiseName")?.value || "").trim();
+      const num = parseInt(document.getElementById("newFranchiseNumber")?.value || "1", 10) || 1;
+      const passEl = document.getElementById("newFranchisePassPreview");
+      const frIdEl = document.getElementById("newFranchiseId");
+      const loginEl = document.getElementById("newFranchiseLogin");
+      if (passEl) {
+        passEl.value = getDeterministicFranchisePassword(name || "Franchise", num);
+      }
+      if (frIdEl) {
+        frIdEl.value = 'FR' + String(num).padStart(3, '0');
+      }
+      if (loginEl && !(loginEl.dataset && loginEl.dataset.touched)) {
+        loginEl.value = (name ? name.toLowerCase().replace(/[^a-z0-9]/g, '') : 'franchise') + '_coord';
+      }
     }
 
     function saveNewFranchise() {
       const name = (document.getElementById("newFranchiseName")?.value || "").trim();
+      const num = parseInt(document.getElementById("newFranchiseNumber")?.value || "0", 10);
       const short = (document.getElementById("newFranchiseShort")?.value || "").trim().toUpperCase();
       const coord = (document.getElementById("newFranchiseCoord")?.value || "").trim();
       const dept = (document.getElementById("newFranchiseDept")?.value || "").trim();
       const mobile = (document.getElementById("newFranchiseMobile")?.value || "").trim().replace(/\D/g, '');
-      const email = (document.getElementById("newFranchiseEmail")?.value || "").trim();
+      const email = (document.getElementById("newFranchiseEmail")?.value || "").trim().toLowerCase();
+      const loginUser = (document.getElementById("newFranchiseLogin")?.value || (name.toLowerCase().replace(/[^a-z0-9]/g, '') + '_coord')).trim().toLowerCase();
+      const accStatus = document.getElementById("newFranchiseAccountStatus")?.value || "PENDING";
 
-      if (!name || !short || !coord || !dept || mobile.length < 10) {
-        showToast("All fields are mandatory. Please provide a valid 10-digit mobile number.", "error");
+      if (!name || !short || !coord || !dept || mobile.length < 10 || !email) {
+        showToast("All fields are mandatory. Please provide a valid 10-digit mobile number and email.", "error");
         return;
       }
 
-      // Check unique franchise name
-      if (franchises.some(f => f.name.toLowerCase() === name.toLowerCase())) {
+      if (!num || num <= 0) {
+        showToast("Please provide a valid positive team number.", "error");
+        return;
+      }
+
+      // 1. Prevent duplicate team number
+      if (franchises.some(f => f.id === num || f.teamNumber === num)) {
+        showToast(`Team Number #${num} is already taken by another franchise!`, "error");
+        return;
+      }
+
+      // 2. Prevent duplicate franchise name (case-insensitive normalized)
+      const normName = name.toLowerCase().replace(/\s+/g, ' ');
+      if (franchises.some(f => (f.name || '').trim().toLowerCase().replace(/\s+/g, ' ') === normName)) {
         showToast(`Franchise name "${name}" already exists!`, "error");
         return;
       }
 
-      const nextId = franchises.length > 0 ? Math.max(...franchises.map(f => f.id || 0)) + 1 : 1;
-      const frId = 'FR' + String(nextId).padStart(3, '0');
+      // 3. Prevent duplicate owner login (across centralized users)
+      if (users.some(u => (u.username || '').trim().toLowerCase() === loginUser)) {
+        showToast(`Login username "${loginUser}" already in use!`, "error");
+        return;
+      }
+
+      // 4. Prevent duplicate email (case-insensitive across franchises and users)
+      if (franchises.some(f => (f.coordinatorEmail || '').trim().toLowerCase() === email) || users.some(u => (u.email || '').trim().toLowerCase() === email)) {
+        showToast(`Email "${email}" is already registered to another franchise or account!`, "error");
+        return;
+      }
+
+      // 5. Prevent duplicate phone (10-digits across franchises)
+      if (franchises.some(f => (f.coordinatorMobile || '').replace(/\D/g, '') === mobile)) {
+        showToast("Phone number is already registered to another franchise!", "error");
+        return;
+      }
+
+      const frId = 'FR' + String(num).padStart(3, '0');
+      const defaultPass = getDeterministicFranchisePassword(name, num);
 
       const newF = {
-        id: nextId,
+        id: num,
+        teamNumber: num,
         franchiseId: frId,
         name: name,
         short: short,
@@ -4542,12 +4688,30 @@
         coordinatorDept: dept,
         coordinatorMobile: mobile,
         coordinatorEmail: email,
-        approvalStatus: "PENDING_APPROVAL",
-        status: "PENDING_APPROVAL",
+        approvalStatus: "PENDING",
+        status: "PENDING",
+        accountStatus: accStatus,
+        defaultPassword: defaultPass,
         createdAt: new Date().toISOString()
       };
 
       franchises.push(newF);
+
+      // Create initial franchise user account in users store
+      users.push({
+        uid: 'usr_f' + num + '_coord',
+        username: loginUser,
+        email: email,
+        passwordHash: defaultPass,
+        role: 'FRANCHISE',
+        identityType: 'COORDINATOR',
+        franchiseId: num,
+        name: coord,
+        title: 'Faculty Coordinator / Owner',
+        status: accStatus === 'ACTIVE' ? 'ACTIVE' : 'PENDING',
+        mustChangePassword: true
+      });
+
       newFranchiseLogoData = "";
       auditLog.unshift({
         time: new Date().toLocaleTimeString(),
@@ -4557,14 +4721,14 @@
         targetId: frId,
         timestamp: new Date().toISOString(),
         beforeStatus: "NONE",
-        afterStatus: "PENDING_APPROVAL",
-        details: `Franchise ${name} (${frId}) registered by ${currentUser.name}. Pending Admin Approval.`
+        afterStatus: "PENDING",
+        details: `Franchise ${name} (#${num}) registered by ${currentUser.name}. approvalStatus = PENDING.`
       });
 
       saveDatabase();
       broadcastAuthoritativeState();
       closeModal();
-      showToast(`Franchise "${name}" created in PENDING_APPROVAL state.`, "info");
+      showToast(`Franchise "${name}" created with status PENDING. Approval required before activation.`, "info");
       renderCurrentView();
     }
 
@@ -5099,7 +5263,7 @@
       for (let b of buckets) {
         let unfilledSlots = 0;
         franchises.forEach(f => {
-          const hasB = f.squad.some(p => p.bucket === b);
+          const hasB = (f.squad || []).some(p => p.bucket === b);
           if (!hasB) unfilledSlots++;
         });
         const available = players.filter(p => p.bucket === b && p.status === 'AVAILABLE').length;
@@ -5127,7 +5291,11 @@
 
       const f = franchises.find(item => item.id === franchiseId);
       const cur = players[lotIndex];
-      if (!f || !cur || cur.status !== 'AVAILABLE' || auctionPaused) return;
+      if (!f || !cur || cur.status !== 'AVAILABLE') return;
+      if (auctionState !== 'RUNNING' || auctionPaused) {
+        showToast(auctionState === 'PAUSED' ? "Bidding is PAUSED by Auctioneer." : "Bidding is not active. Waiting for Admin START BID.", "warning");
+        return;
+      }
 
       const increment = getBidIncrement(currentBid);
       const nextBid = currentBid + increment;
@@ -5234,6 +5402,75 @@
           }
         }
       }, 1000);
+    }
+
+    
+    function adminStartBid() {
+      const authCtx = getCurrentUserContext();
+      if (!authCtx.isAdmin) {
+        showToast("ACCESS DENIED: Admin authorization required to start bidding.", "error");
+        return;
+      }
+      if (auctionState === 'RUNNING') {
+        showToast("Auction is already running!", "warning");
+        return;
+      }
+      const cur = players[lotIndex];
+      if (!cur) {
+        showToast("No active lot available to start bidding.", "error");
+        return;
+      }
+      const sOffset = (window.RealtimeStore && window.RealtimeStore.state.connection.serverTimeOffset) || 0;
+      auctionState = 'RUNNING';
+      auctionPaused = false;
+      if (timerSeconds <= 0) timerSeconds = 30;
+      timerDeadline = Date.now() + sOffset + (timerSeconds * 1000);
+      timerRunning = true;
+      startTimer();
+      broadcastAuthoritativeState();
+      showToast("LIVE BIDDING STARTED", "success");
+      renderCurrentView();
+    }
+
+    function adminPauseBid() {
+      const authCtx = getCurrentUserContext();
+      if (!authCtx.isAdmin) {
+        showToast("ACCESS DENIED: Admin authorization required to pause bidding.", "error");
+        return;
+      }
+      if (auctionState !== 'RUNNING') {
+        showToast("Auction is not currently running.", "warning");
+        return;
+      }
+      auctionState = 'PAUSED';
+      auctionPaused = true;
+      timerRunning = false;
+      if (timerInterval) clearInterval(timerInterval);
+      broadcastAuthoritativeState();
+      showToast("BIDDING PAUSED — Timer Frozen", "warning");
+      renderCurrentView();
+    }
+
+    function adminResumeBid() {
+      const authCtx = getCurrentUserContext();
+      if (!authCtx.isAdmin) {
+        showToast("ACCESS DENIED: Admin authorization required to resume bidding.", "error");
+        return;
+      }
+      if (auctionState !== 'PAUSED') {
+        showToast("Auction is not currently paused.", "warning");
+        return;
+      }
+      const sOffset = (window.RealtimeStore && window.RealtimeStore.state.connection.serverTimeOffset) || 0;
+      auctionState = 'RUNNING';
+      auctionPaused = false;
+      // Preserve remaining timer seconds without resetting
+      timerDeadline = Date.now() + sOffset + (timerSeconds * 1000);
+      timerRunning = true;
+      startTimer();
+      broadcastAuthoritativeState();
+      showToast("BIDDING RESUMED", "success");
+      renderCurrentView();
     }
 
     function toggleAuctionPause() {
@@ -6449,6 +6686,8 @@
           user.passwordHash,
           user.password,
           expectedFranchisePass,
+          targetFranchise ? getDeterministicFranchisePassword(targetFranchise.name, targetFranchise.id) : '',
+          targetFranchise ? (targetFranchise.coordinatorName ? getDeterministicFranchisePassword(targetFranchise.coordinatorName, targetFranchise.id) : '') : '',
           `Team${fId}@2026`,
           `Franchise@2026`
         ].filter(Boolean);
@@ -6587,6 +6826,8 @@
           "Player@2026",
           "Player@ACC2026",
           expectedPlayerPass,
+          (user.name || '').trim() + "@ACC2026",
+          (user.name || '').replace(/[^a-zA-Z0-9]/g, '') + "@ACC2026",
           (user.name || '').split(' ')[0] + "@ACC2026"
         ].filter(Boolean);
 
@@ -8272,6 +8513,1528 @@
       `;
     }
 
+
+    // ========================================================
+    // ADMIN DATA MANAGEMENT & DELETION CENTER (ACC 2026 SPEC)
+    // ========================================================
+    function createDataOperation(type, entityType, entityIds, snapshot, meta = {}) {
+      const op = {
+        operationId: "D-" + Math.floor(1000 + Math.random() * 9000),
+        operationType: type,
+        entityType: entityType,
+        entityIds: Array.isArray(entityIds) ? entityIds : [entityIds],
+        snapshot: snapshot,
+        actorUid: (currentUser && currentUser.uid) || 'usr_superadmin',
+        actorName: (currentUser && currentUser.name) || 'Mr. Deepak',
+        actorRole: (currentUser && currentUser.role) || 'SUPER_ADMIN',
+        timestamp: new Date().toISOString(),
+        reversible: true,
+        undoneAt: null,
+        redoneAt: null,
+        status: 'COMPLETED',
+        ...meta
+      };
+      dataOperations.unshift(op);
+      dataUndoStack.unshift(op.operationId);
+      dataRedoStack = []; // Standard operation-history semantics: new operation clears redo stack
+      saveDatabase();
+      return op;
+    }
+
+    function executeUndoDataOperation(targetOpId = null) {
+      const opId = targetOpId || dataUndoStack[0];
+      if (!opId) {
+        showToast("No operation available to undo.", "info");
+        return;
+      }
+      const op = dataOperations.find(o => o.operationId === opId);
+      if (!op) {
+        showToast(`Operation ${opId} not found.`, "error");
+        return;
+      }
+      if (op.status === 'UNDONE') {
+        showToast(`Operation ${opId} has already been undone.`, "error");
+        return;
+      }
+
+      // Conflict Check: verify no active record already occupies the roll or franchise name/number
+      if (op.entityType === 'PLAYER' || op.entityType === 'ALL') {
+        const pSnaps = (op.entityType === 'ALL' ? (op.snapshot.players || []) : op.snapshot) || [];
+        for (const snap of pSnaps) {
+          const snapRoll = (snap.roll || snap.rollNumberNormalized || '').trim().toUpperCase();
+          const conflict = players.find(p => String(p.id) !== String(snap.id) && (p.roll || p.rollNumberNormalized || '').trim().toUpperCase() === snapRoll);
+          if (conflict) {
+            showToast(`RESTORE CONFLICT: Active player "${conflict.name}" (${snapRoll}) already exists!`, "error");
+            return;
+          }
+        }
+      }
+      if (op.entityType === 'FRANCHISE' || op.entityType === 'ALL') {
+        const fSnaps = (op.entityType === 'ALL' ? (op.snapshot.franchises || []) : op.snapshot) || [];
+        for (const snap of fSnaps) {
+          const snapName = (snap.name || '').trim().toLowerCase();
+          const snapNum = parseInt(snap.id || snap.teamNumber || '0', 10);
+          const conflict = franchises.find(f => String(f.id) !== String(snap.id) && ((f.name || '').trim().toLowerCase() === snapName || parseInt(f.id, 10) === snapNum));
+          if (conflict) {
+            showToast(`RESTORE CONFLICT: Active franchise "${conflict.name}" (#${conflict.id}) already exists!`, "error");
+            return;
+          }
+        }
+      }
+
+      // Restore Players
+      if (op.entityType === 'PLAYER' || op.entityType === 'ALL') {
+        const pSnaps = (op.entityType === 'ALL' ? (op.snapshot.players || []) : op.snapshot) || [];
+        pSnaps.forEach(snap => {
+          const dIdx = deletedPlayers.findIndex(d => String(d.id) === String(snap.id) || ((d.roll || '').toUpperCase() === (snap.roll || '').toUpperCase()));
+          if (dIdx >= 0) deletedPlayers.splice(dIdx, 1);
+          const pIdx = players.findIndex(p => String(p.id) === String(snap.id) || ((p.roll || '').toUpperCase() === (snap.roll || '').toUpperCase()));
+          if (pIdx >= 0) players[pIdx] = { ...snap };
+          else players.push({ ...snap });
+          syncPlayerToFirebase(snap, 'UPDATE');
+        });
+      }
+
+      // Restore Franchises
+      if (op.entityType === 'FRANCHISE' || op.entityType === 'ALL') {
+        const fSnaps = (op.entityType === 'ALL' ? (op.snapshot.franchises || []) : op.snapshot) || [];
+        fSnaps.forEach(snap => {
+          const dIdx = deletedFranchises.findIndex(d => String(d.id) === String(snap.id));
+          if (dIdx >= 0) deletedFranchises.splice(dIdx, 1);
+          const fIdx = franchises.findIndex(f => String(f.id) === String(snap.id));
+          if (fIdx >= 0) franchises[fIdx] = { ...snap };
+          else franchises.push({ ...snap });
+        });
+      }
+
+      op.status = 'UNDONE';
+      op.undoneAt = new Date().toISOString();
+
+      const uIdx = dataUndoStack.indexOf(opId);
+      if (uIdx >= 0) dataUndoStack.splice(uIdx, 1);
+      if (!dataRedoStack.includes(opId)) dataRedoStack.unshift(opId);
+
+      auditLog.unshift({
+        time: new Date().toLocaleTimeString(),
+        action: "DATA_OPERATION_UNDONE",
+        actorUid: (currentUser && currentUser.uid) || 'usr_superadmin',
+        role: (currentUser && currentUser.role) || 'SUPER_ADMIN',
+        targetId: op.operationId,
+        timestamp: new Date().toISOString(),
+        details: `Operation ${op.operationId} undone by ${(currentUser && currentUser.name) || 'Admin'}. ${op.entityIds.length} records restored.`
+      });
+
+      saveDatabase();
+      broadcastAuthoritativeState();
+      showToast(`Restored successfully (${op.entityIds.length} records).`, "success", "REDO", () => executeRedoDataOperation(op.operationId), 6000);
+      renderCurrentView();
+    }
+
+    function executeRedoDataOperation(targetOpId = null) {
+      const opId = targetOpId || dataRedoStack[0];
+      if (!opId) {
+        showToast("No operation available to redo.", "info");
+        return;
+      }
+      const op = dataOperations.find(o => o.operationId === opId);
+      if (!op) {
+        showToast(`Operation ${opId} not found.`, "error");
+        return;
+      }
+      if (op.status !== 'UNDONE') {
+        showToast(`Operation ${opId} cannot be redone (Status: ${op.status}).`, "error");
+        return;
+      }
+
+      // Re-apply Deletion
+      if (op.entityType === 'PLAYER' || op.entityType === 'ALL') {
+        const pSnaps = (op.entityType === 'ALL' ? (op.snapshot.players || []) : op.snapshot) || [];
+        pSnaps.forEach(snap => {
+          const pIdx = players.findIndex(p => String(p.id) === String(snap.id) || ((p.roll || '').toUpperCase() === (snap.roll || '').toUpperCase()));
+          if (pIdx >= 0) {
+            const p = players.splice(pIdx, 1)[0];
+            p.status = 'DELETED';
+            p.approvalStatus = 'DELETED';
+            p.verificationStatus = 'DELETED';
+            p.publicVisibility = false;
+            p.deleted = true;
+            p.trashedAt = new Date().toISOString();
+            p.trashedBy = (currentUser && currentUser.name) || 'Mr. Deepak';
+            p.operationId = op.operationId;
+            if (!deletedPlayers.some(d => String(d.id) === String(p.id))) {
+              deletedPlayers.push(p);
+            }
+            syncPlayerToFirebase(p, 'DELETE');
+          }
+        });
+      }
+
+      if (op.entityType === 'FRANCHISE' || op.entityType === 'ALL') {
+        const fSnaps = (op.entityType === 'ALL' ? (op.snapshot.franchises || []) : op.snapshot) || [];
+        fSnaps.forEach(snap => {
+          const fIdx = franchises.findIndex(f => String(f.id) === String(snap.id));
+          if (fIdx >= 0) {
+            const f = franchises.splice(fIdx, 1)[0];
+            f.status = 'TRASHED';
+            f.deleted = true;
+            f.trashedAt = new Date().toISOString();
+            f.trashedBy = (currentUser && currentUser.name) || 'Mr. Deepak';
+            f.operationId = op.operationId;
+            if (!deletedFranchises.some(d => String(d.id) === String(f.id))) {
+              deletedFranchises.push(f);
+            }
+          }
+        });
+      }
+
+      op.status = 'REDONE';
+      op.redoneAt = new Date().toISOString();
+
+      const rIdx = dataRedoStack.indexOf(opId);
+      if (rIdx >= 0) dataRedoStack.splice(rIdx, 1);
+      if (!dataUndoStack.includes(opId)) dataUndoStack.unshift(opId);
+
+      auditLog.unshift({
+        time: new Date().toLocaleTimeString(),
+        action: "DATA_OPERATION_REDONE",
+        actorUid: (currentUser && currentUser.uid) || 'usr_superadmin',
+        role: (currentUser && currentUser.role) || 'SUPER_ADMIN',
+        targetId: op.operationId,
+        timestamp: new Date().toISOString(),
+        details: `Operation ${op.operationId} redone by ${(currentUser && currentUser.name) || 'Admin'}.`
+      });
+
+      saveDatabase();
+      broadcastAuthoritativeState();
+      showToast(`Operation ${op.operationId} redone. Records moved to Trash.`, "info", "UNDO", () => executeUndoDataOperation(op.operationId), 6000);
+      renderCurrentView();
+    }
+
+    function openDeleteFranchiseModal(franchiseId) {
+      const f = franchises.find(x => String(x.id) === String(franchiseId));
+      if (!f) { showToast("Franchise not found", "error"); return; }
+      const m = document.getElementById("modalContainer");
+
+      const hasHistory = (window.auctionHistory && window.auctionHistory.some(h => h.franchiseId === f.id || h.leadingBidderId === f.id)) ||
+        (f.squad && f.squad.length > 0) || (f.squadCount && f.squadCount > 0);
+
+      m.innerHTML = `
+        <div class="modal-overlay" onclick="closeModal()">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 500px;">
+            <div style="border-left: 4px solid var(--color-red); padding-left: 12px; margin-bottom: 16px;">
+              <h3 style="font-family: var(--font-display); font-size: 1.25rem; font-weight: 800; color: var(--color-red); margin: 0;">
+                DELETE FRANCHISE DATA?
+              </h3>
+              <div style="font-size: 0.8125rem; color: var(--text-bright); margin-top: 6px;">
+                Franchise: <strong>${f.name}</strong> (Team #${f.id})<br>
+                Owner: <strong>${f.owner || f.coordinator || 'Coordinator'}</strong>
+              </div>
+              ${hasHistory ? `
+                <div style="margin-top: 8px; padding: 8px; background: rgba(225,29,72,0.1); border-radius: var(--radius-sm); font-size: 0.75rem; color: var(--color-red);">
+                  ⚠️ NOTE: Franchise has auction history (${f.squadCount || 0} squad players). Historical bids and transactions will remain preserved.
+                </div>
+              ` : ''}
+              <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 8px;">
+                Scope: Moves franchise record, login credentials, and coordinator mapping to TRASH. Fully recoverable via UNDO.
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 16px;">
+              <label class="form-label" style="font-size: 0.75rem;">TYPE "DELETE FRANCHISE" TO CONFIRM:</label>
+              <input type="text" id="deleteFranchiseTypedInput" class="form-input font-mono" placeholder="DELETE FRANCHISE" 
+                oninput="document.getElementById('confirmDeleteFranchiseBtn').disabled = (this.value.trim() !== 'DELETE FRANCHISE');">
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 10px;">
+              <button class="btn btn-secondary" onclick="closeModal()">CANCEL</button>
+              <button id="confirmDeleteFranchiseBtn" class="btn btn-primary" style="background: var(--color-red); border-color: var(--color-red); color: #fff;" disabled 
+                onclick="executeDeleteFranchise('${f.id}')">
+                DELETE FRANCHISE
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function executeDeleteFranchise(franchiseId) {
+      const fIdx = franchises.findIndex(x => String(x.id) === String(franchiseId));
+      if (fIdx === -1) return;
+      const f = franchises[fIdx];
+
+      const snapshot = [JSON.parse(JSON.stringify(f))];
+      const op = createDataOperation('DELETE_FRANCHISE', 'FRANCHISE', [f.id], snapshot, {
+        description: `Franchise ${f.name} (#${f.id}) deleted`
+      });
+
+      f.status = 'TRASHED';
+      f.deleted = true;
+      f.trashedAt = new Date().toISOString();
+      f.trashedBy = (currentUser && currentUser.name) || 'Mr. Deepak';
+      f.operationId = op.operationId;
+
+      if (!deletedFranchises.some(d => String(d.id) === String(f.id))) {
+        deletedFranchises.push({ ...f });
+      }
+
+      franchises.splice(fIdx, 1);
+
+      auditLog.unshift({
+        time: new Date().toLocaleTimeString(),
+        action: "FRANCHISE_DELETED",
+        actorUid: (currentUser && currentUser.uid) || 'usr_superadmin',
+        role: (currentUser && currentUser.role) || 'SUPER_ADMIN',
+        targetId: String(f.id),
+        timestamp: new Date().toISOString(),
+        details: `Franchise ${f.name} (#${f.id}) moved to Trash by ${(currentUser && currentUser.name) || 'Admin'}. Operation: ${op.operationId}.`
+      });
+
+      saveDatabase();
+      broadcastAuthoritativeState();
+      closeModal();
+      showToast(`Franchise ${f.name} moved to Trash.`, "info", "UNDO", () => executeUndoDataOperation(op.operationId), 6000);
+      renderCurrentView();
+    }
+
+    function openBulkDeleteModal() {
+      const isPlayers = dataMgmtSubTab === 'PLAYERS' || dataMgmtSubTab === 'TRASH';
+      const selectedIds = isPlayers ? Array.from(selectedDataPlayerIds) : Array.from(selectedDataFranchiseIds);
+      if (selectedIds.length === 0) {
+        showToast("No items selected for deletion.", "info");
+        return;
+      }
+      const m = document.getElementById("modalContainer");
+      m.innerHTML = `
+        <div class="modal-overlay" onclick="closeModal()">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 480px;">
+            <div style="border-left: 4px solid var(--color-red); padding-left: 12px; margin-bottom: 16px;">
+              <h3 style="font-family: var(--font-display); font-size: 1.25rem; font-weight: 800; color: var(--color-red); margin: 0;">
+                DELETE ${selectedIds.length} SELECTED ${isPlayers ? 'PLAYERS' : 'FRANCHISES'}?
+              </h3>
+              <div style="font-size: 0.8125rem; color: var(--text-bright); margin-top: 6px;">
+                Selected count: <strong>${selectedIds.length}</strong><br>
+                All selected records will be moved to TRASH with a single reversible operation ID.
+              </div>
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 10px;">
+              <button class="btn btn-secondary" onclick="closeModal()">CANCEL</button>
+              <button class="btn btn-primary" style="background: var(--color-red); border-color: var(--color-red); color: #fff;"
+                onclick="executeBulkDeleteSelected()">
+                CONFIRM DELETE (${selectedIds.length})
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function executeBulkDeleteSelected() {
+      const isPlayers = dataMgmtSubTab === 'PLAYERS';
+      if (isPlayers) {
+        const ids = Array.from(selectedDataPlayerIds);
+        const toDelete = players.filter(p => ids.includes(p.id) || ids.includes(String(p.id)));
+        if (toDelete.length === 0) return;
+        const snapshot = toDelete.map(p => JSON.parse(JSON.stringify(p)));
+        const op = createDataOperation('BULK_DELETE_PLAYERS', 'PLAYER', toDelete.map(p => p.id), snapshot, {
+          description: `Bulk deleted ${toDelete.length} players`
+        });
+
+        toDelete.forEach(p => {
+          p.status = 'DELETED';
+          p.approvalStatus = 'DELETED';
+          p.verificationStatus = 'DELETED';
+          p.publicVisibility = false;
+          p.deleted = true;
+          p.trashedAt = new Date().toISOString();
+          p.trashedBy = (currentUser && currentUser.name) || 'Mr. Deepak';
+          p.operationId = op.operationId;
+          if (!deletedPlayers.some(d => String(d.id) === String(p.id))) {
+            deletedPlayers.push({ ...p });
+          }
+          syncPlayerToFirebase(p, 'DELETE');
+        });
+
+        players = players.filter(p => !ids.includes(p.id) && !ids.includes(String(p.id)));
+        selectedDataPlayerIds.clear();
+
+        auditLog.unshift({
+          time: new Date().toLocaleTimeString(),
+          action: "PLAYERS_BULK_DELETED",
+          actorUid: (currentUser && currentUser.uid) || 'usr_superadmin',
+          role: (currentUser && currentUser.role) || 'SUPER_ADMIN',
+          targetId: op.operationId,
+          timestamp: new Date().toISOString(),
+          details: `${toDelete.length} players moved to Trash by ${(currentUser && currentUser.name) || 'Admin'}. Operation: ${op.operationId}.`
+        });
+
+        saveDatabase();
+        broadcastAuthoritativeState();
+        closeModal();
+        showToast(`${toDelete.length} players moved to Trash.`, "info", "UNDO", () => executeUndoDataOperation(op.operationId), 6000);
+        renderCurrentView();
+      } else {
+        const ids = Array.from(selectedDataFranchiseIds);
+        const toDelete = franchises.filter(f => ids.includes(f.id) || ids.includes(String(f.id)));
+        if (toDelete.length === 0) return;
+        const snapshot = toDelete.map(f => JSON.parse(JSON.stringify(f)));
+        const op = createDataOperation('BULK_DELETE_FRANCHISES', 'FRANCHISE', toDelete.map(f => f.id), snapshot, {
+          description: `Bulk deleted ${toDelete.length} franchises`
+        });
+
+        toDelete.forEach(f => {
+          f.status = 'TRASHED';
+          f.deleted = true;
+          f.trashedAt = new Date().toISOString();
+          f.trashedBy = (currentUser && currentUser.name) || 'Mr. Deepak';
+          f.operationId = op.operationId;
+          if (!deletedFranchises.some(d => String(d.id) === String(f.id))) {
+            deletedFranchises.push({ ...f });
+          }
+        });
+
+        franchises = franchises.filter(f => !ids.includes(f.id) && !ids.includes(String(f.id)));
+        selectedDataFranchiseIds.clear();
+
+        auditLog.unshift({
+          time: new Date().toLocaleTimeString(),
+          action: "FRANCHISES_BULK_DELETED",
+          actorUid: (currentUser && currentUser.uid) || 'usr_superadmin',
+          role: (currentUser && currentUser.role) || 'SUPER_ADMIN',
+          targetId: op.operationId,
+          timestamp: new Date().toISOString(),
+          details: `${toDelete.length} franchises moved to Trash by ${(currentUser && currentUser.name) || 'Admin'}. Operation: ${op.operationId}.`
+        });
+
+        saveDatabase();
+        broadcastAuthoritativeState();
+        closeModal();
+        showToast(`${toDelete.length} franchises moved to Trash.`, "info", "UNDO", () => executeUndoDataOperation(op.operationId), 6000);
+        renderCurrentView();
+      }
+    }
+
+    function openDeleteAllPlayersModal() {
+      if (!currentUser || currentUser.role !== 'SUPER_ADMIN') {
+        showToast("ACCESS DENIED: DELETE ALL PLAYERS requires Super Admin privileges.", "error");
+        return;
+      }
+      const m = document.getElementById("modalContainer");
+      const total = players.length;
+      const approved = players.filter(p => p.approvalStatus === 'APPROVED' || p.verificationStatus === 'VERIFIED').length;
+      const pending = players.filter(p => p.approvalStatus === 'PENDING' || p.approvalStatus === 'PENDING_APPROVAL' || p.status === 'PENDING_VERIFICATION').length;
+      const blocked = players.filter(p => p.approvalStatus === 'BLOCKED' || p.status === 'BLOCKED').length;
+      const trashed = deletedPlayers.length;
+
+      m.innerHTML = `
+        <div class="modal-overlay" onclick="closeModal()">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 520px;">
+            <div style="border-left: 4px solid var(--color-red); padding-left: 12px; margin-bottom: 16px;">
+              <h3 style="font-family: var(--font-display); font-size: 1.3rem; font-weight: 800; color: var(--color-red); margin: 0;">
+                DELETE ALL PLAYERS?
+              </h3>
+              <div style="font-size: 0.8125rem; color: var(--text-bright); margin-top: 6px;">
+                HIGH-RISK MASS DATA OPERATION (SUPER ADMIN ONLY)
+              </div>
+            </div>
+
+            <div style="background: var(--surface-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
+              <div style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted); margin-bottom: 8px;">AFFECTED DATASET BREAKDOWN:</div>
+              <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; font-size: 0.8125rem;">
+                <div>Total Active Players: <strong class="font-mono" style="color: var(--color-red);">${total}</strong></div>
+                <div>Approved / Verified: <strong class="font-mono">${approved}</strong></div>
+                <div>Pending Review: <strong class="font-mono">${pending}</strong></div>
+                <div>Blocked: <strong class="font-mono">${blocked}</strong></div>
+                <div>Currently Trashed: <strong class="font-mono">${trashed}</strong></div>
+              </div>
+            </div>
+
+            <div style="padding: 10px; background: rgba(225,29,72,0.1); border: 1px solid rgba(225,29,72,0.3); border-radius: var(--radius-sm); font-size: 0.75rem; color: var(--color-red); margin-bottom: 16px;">
+              ⚠️ <strong>WARNING:</strong> This operation will move all ${total} active player records into TRASH under a single reversible operation ID. Public catalogs and auction rosters will immediately be cleared.
+            </div>
+
+            <div style="margin-bottom: 16px; display: flex; gap: 8px;">
+              <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 4px 10px;" onclick="downloadBackupFile('PLAYERS')">
+                💾 DOWNLOAD BACKUP JSON FIRST
+              </button>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 16px;">
+              <label class="form-label" style="font-size: 0.75rem;">TYPE "DELETE ALL PLAYERS" TO CONFIRM:</label>
+              <input type="text" id="deleteAllPlayersConfirmInput" class="form-input font-mono" placeholder="DELETE ALL PLAYERS"
+                oninput="document.getElementById('confirmDeleteAllPlayersBtn').disabled = (this.value.trim() !== 'DELETE ALL PLAYERS');">
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 10px;">
+              <button class="btn btn-secondary" onclick="closeModal()">CANCEL</button>
+              <button id="confirmDeleteAllPlayersBtn" class="btn btn-primary" style="background: var(--color-red); border-color: var(--color-red); color: #fff;" disabled
+                onclick="executeDeleteAllPlayers()">
+                CONFIRM DELETE ALL PLAYERS
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function executeDeleteAllPlayers() {
+      if (!currentUser || currentUser.role !== 'SUPER_ADMIN') {
+        showToast("ACCESS DENIED: Super Admin required", "error");
+        return;
+      }
+      const toDelete = [...players];
+      if (toDelete.length === 0) {
+        showToast("No active players to delete.", "info");
+        closeModal();
+        return;
+      }
+      const snapshot = toDelete.map(p => JSON.parse(JSON.stringify(p)));
+      const op = createDataOperation('DELETE_ALL_PLAYERS', 'PLAYER', toDelete.map(p => p.id), snapshot, {
+        description: `Deleted all ${toDelete.length} active players`
+      });
+
+      toDelete.forEach(p => {
+        p.status = 'DELETED';
+        p.approvalStatus = 'DELETED';
+        p.verificationStatus = 'DELETED';
+        p.publicVisibility = false;
+        p.deleted = true;
+        p.trashedAt = new Date().toISOString();
+        p.trashedBy = (currentUser && currentUser.name) || 'Mr. Deepak';
+        p.operationId = op.operationId;
+        deletedPlayers.push(p);
+        syncPlayerToFirebase(p, 'DELETE');
+      });
+
+      players = [];
+      selectedDataPlayerIds.clear();
+
+      auditLog.unshift({
+        time: new Date().toLocaleTimeString(),
+        action: "DATA_RESET",
+        actorUid: (currentUser && currentUser.uid) || 'usr_superadmin',
+        role: (currentUser && currentUser.role) || 'SUPER_ADMIN',
+        targetId: op.operationId,
+        timestamp: new Date().toISOString(),
+        details: `All ${toDelete.length} active players moved to Trash by ${(currentUser && currentUser.name) || 'Admin'}. Operation: ${op.operationId}.`
+      });
+
+      saveDatabase();
+      broadcastAuthoritativeState();
+      closeModal();
+      showToast(`All ${toDelete.length} players moved to Trash.`, "info", "UNDO", () => executeUndoDataOperation(op.operationId), 8000);
+      renderCurrentView();
+    }
+
+    function openDeleteAllFranchisesModal() {
+      if (!currentUser || currentUser.role !== 'SUPER_ADMIN') {
+        showToast("ACCESS DENIED: DELETE ALL FRANCHISES requires Super Admin privileges.", "error");
+        return;
+      }
+      const m = document.getElementById("modalContainer");
+      const total = franchises.length;
+      const active = franchises.filter(f => f.status === 'ACTIVE' || f.approvalStatus === 'APPROVED').length;
+      const pending = franchises.filter(f => f.approvalStatus === 'PENDING').length;
+
+      m.innerHTML = `
+        <div class="modal-overlay" onclick="closeModal()">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 520px;">
+            <div style="border-left: 4px solid var(--color-red); padding-left: 12px; margin-bottom: 16px;">
+              <h3 style="font-family: var(--font-display); font-size: 1.3rem; font-weight: 800; color: var(--color-red); margin: 0;">
+                DELETE ALL FRANCHISES?
+              </h3>
+              <div style="font-size: 0.8125rem; color: var(--text-bright); margin-top: 6px;">
+                HIGH-RISK MASS DATA OPERATION (SUPER ADMIN ONLY)
+              </div>
+            </div>
+
+            <div style="background: var(--surface-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
+              <div style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted); margin-bottom: 8px;">AFFECTED DATASET BREAKDOWN:</div>
+              <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; font-size: 0.8125rem;">
+                <div>Total Franchises: <strong class="font-mono" style="color: var(--color-red);">${total}</strong></div>
+                <div>Active / Approved: <strong class="font-mono">${active}</strong></div>
+                <div>Pending Approval: <strong class="font-mono">${pending}</strong></div>
+                <div>Currently Trashed: <strong class="font-mono">${deletedFranchises.length}</strong></div>
+              </div>
+            </div>
+
+            <div style="padding: 10px; background: rgba(225,29,72,0.1); border: 1px solid rgba(225,29,72,0.3); border-radius: var(--radius-sm); font-size: 0.75rem; color: var(--color-red); margin-bottom: 16px;">
+              ⚠️ <strong>WARNING:</strong> This operation will move all ${total} franchises into TRASH under a single reversible operation ID.
+            </div>
+
+            <div style="margin-bottom: 16px; display: flex; gap: 8px;">
+              <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 4px 10px;" onclick="downloadBackupFile('FRANCHISES')">
+                💾 DOWNLOAD BACKUP JSON FIRST
+              </button>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 16px;">
+              <label class="form-label" style="font-size: 0.75rem;">TYPE "DELETE ALL FRANCHISES" TO CONFIRM:</label>
+              <input type="text" id="deleteAllFranchisesConfirmInput" class="form-input font-mono" placeholder="DELETE ALL FRANCHISES"
+                oninput="document.getElementById('confirmDeleteAllFranchisesBtn').disabled = (this.value.trim() !== 'DELETE ALL FRANCHISES');">
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 10px;">
+              <button class="btn btn-secondary" onclick="closeModal()">CANCEL</button>
+              <button id="confirmDeleteAllFranchisesBtn" class="btn btn-primary" style="background: var(--color-red); border-color: var(--color-red); color: #fff;" disabled
+                onclick="executeDeleteAllFranchises()">
+                CONFIRM DELETE ALL FRANCHISES
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function executeDeleteAllFranchises() {
+      if (!currentUser || currentUser.role !== 'SUPER_ADMIN') {
+        showToast("ACCESS DENIED: Super Admin required", "error");
+        return;
+      }
+      const toDelete = [...franchises];
+      if (toDelete.length === 0) {
+        showToast("No active franchises to delete.", "info");
+        closeModal();
+        return;
+      }
+      const snapshot = toDelete.map(f => JSON.parse(JSON.stringify(f)));
+      const op = createDataOperation('DELETE_ALL_FRANCHISES', 'FRANCHISE', toDelete.map(f => f.id), snapshot, {
+        description: `Deleted all ${toDelete.length} active franchises`
+      });
+
+      toDelete.forEach(f => {
+        f.status = 'TRASHED';
+        f.deleted = true;
+        f.trashedAt = new Date().toISOString();
+        f.trashedBy = (currentUser && currentUser.name) || 'Mr. Deepak';
+        f.operationId = op.operationId;
+        deletedFranchises.push(f);
+      });
+
+      franchises = [];
+      selectedDataFranchiseIds.clear();
+
+      auditLog.unshift({
+        time: new Date().toLocaleTimeString(),
+        action: "FRANCHISES_BULK_DELETED",
+        actorUid: (currentUser && currentUser.uid) || 'usr_superadmin',
+        role: (currentUser && currentUser.role) || 'SUPER_ADMIN',
+        targetId: op.operationId,
+        timestamp: new Date().toISOString(),
+        details: `All ${toDelete.length} franchises moved to Trash by ${(currentUser && currentUser.name) || 'Admin'}. Operation: ${op.operationId}.`
+      });
+
+      saveDatabase();
+      broadcastAuthoritativeState();
+      closeModal();
+      showToast(`All ${toDelete.length} franchises moved to Trash.`, "info", "UNDO", () => executeUndoDataOperation(op.operationId), 8000);
+      renderCurrentView();
+    }
+
+    function openResetAllDataModal() {
+      if (!currentUser || currentUser.role !== 'SUPER_ADMIN') {
+        showToast("ACCESS DENIED: RESET ALL DATA requires Super Admin privileges.", "error");
+        return;
+      }
+      const m = document.getElementById("modalContainer");
+      m.innerHTML = `
+        <div class="modal-overlay" onclick="closeModal()">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 520px;">
+            <div style="border-left: 4px solid var(--color-red); padding-left: 12px; margin-bottom: 16px;">
+              <h3 style="font-family: var(--font-display); font-size: 1.3rem; font-weight: 800; color: var(--color-red); margin: 0;">
+                RESET PLAYER + FRANCHISE DATA?
+              </h3>
+              <div style="font-size: 0.8125rem; color: var(--text-bright); margin-top: 6px;">
+                HIGH-RISK SYSTEM RESET (SUPER ADMIN ONLY)
+              </div>
+            </div>
+
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 12px; line-height: 1.5;">
+              <strong>EXPLICIT DATA SCOPE:</strong><br>
+              • <strong>MOVED TO TRASH:</strong> All ${players.length} active players, all ${franchises.length} active franchises.<br>
+              • <strong>PRESERVED INTACT:</strong> Tournament auction history, audit trail (${auditLog.length} events), system settings, Super Admin accounts, Firebase Authentication credentials.
+            </div>
+
+            <div style="margin-bottom: 16px;">
+              <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 4px 10px;" onclick="downloadBackupFile('ALL')">
+                💾 DOWNLOAD COMPLETE BACKUP JSON FIRST
+              </button>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 16px;">
+              <label class="form-label" style="font-size: 0.75rem;">TYPE "RESET ALL DATA" TO CONFIRM:</label>
+              <input type="text" id="resetAllDataConfirmInput" class="form-input font-mono" placeholder="RESET ALL DATA"
+                oninput="document.getElementById('confirmResetAllDataBtn').disabled = (this.value.trim() !== 'RESET ALL DATA');">
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 10px;">
+              <button class="btn btn-secondary" onclick="closeModal()">CANCEL</button>
+              <button id="confirmResetAllDataBtn" class="btn btn-primary" style="background: var(--color-red); border-color: var(--color-red); color: #fff;" disabled
+                onclick="executeResetAllData()">
+                CONFIRM SYSTEM RESET
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function executeResetAllData() {
+      if (!currentUser || currentUser.role !== 'SUPER_ADMIN') {
+        showToast("ACCESS DENIED: Super Admin required", "error");
+        return;
+      }
+      const pSnapshot = players.map(p => JSON.parse(JSON.stringify(p)));
+      const fSnapshot = franchises.map(f => JSON.parse(JSON.stringify(f)));
+      const op = createDataOperation('RESET_ALL_DATA', 'ALL', [...players.map(p => p.id), ...franchises.map(f => f.id)], {
+        players: pSnapshot,
+        franchises: fSnapshot
+      }, {
+        description: `Full data reset of ${players.length} players and ${franchises.length} franchises`
+      });
+
+      players.forEach(p => {
+        p.status = 'DELETED';
+        p.approvalStatus = 'DELETED';
+        p.verificationStatus = 'DELETED';
+        p.publicVisibility = false;
+        p.deleted = true;
+        p.trashedAt = new Date().toISOString();
+        p.trashedBy = (currentUser && currentUser.name) || 'Mr. Deepak';
+        p.operationId = op.operationId;
+        deletedPlayers.push(p);
+        syncPlayerToFirebase(p, 'DELETE');
+      });
+
+      franchises.forEach(f => {
+        f.status = 'TRASHED';
+        f.deleted = true;
+        f.trashedAt = new Date().toISOString();
+        f.trashedBy = (currentUser && currentUser.name) || 'Mr. Deepak';
+        f.operationId = op.operationId;
+        deletedFranchises.push(f);
+      });
+
+      players = [];
+      franchises = [];
+      selectedDataPlayerIds.clear();
+      selectedDataFranchiseIds.clear();
+
+      auditLog.unshift({
+        time: new Date().toLocaleTimeString(),
+        action: "DATA_RESET",
+        actorUid: (currentUser && currentUser.uid) || 'usr_superadmin',
+        role: (currentUser && currentUser.role) || 'SUPER_ADMIN',
+        targetId: op.operationId,
+        timestamp: new Date().toISOString(),
+        details: `Full reset executed by ${(currentUser && currentUser.name) || 'Admin'}. ${pSnapshot.length} players and ${fSnapshot.length} franchises moved to Trash. Operation: ${op.operationId}.`
+      });
+
+      saveDatabase();
+      broadcastAuthoritativeState();
+      closeModal();
+      showToast(`Reset complete. ${pSnapshot.length} players and ${fSnapshot.length} franchises moved to Trash.`, "info", "UNDO", () => executeUndoDataOperation(op.operationId), 8000);
+      renderCurrentView();
+    }
+
+    function openPermanentDeleteModal(entityType, id) {
+      const isPlayer = entityType === 'PLAYER';
+      const item = isPlayer ? deletedPlayers.find(d => String(d.id) === String(id)) : deletedFranchises.find(d => String(d.id) === String(id));
+      if (!item) return;
+
+      const m = document.getElementById("modalContainer");
+      m.innerHTML = `
+        <div class="modal-overlay" onclick="closeModal()">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 480px;">
+            <div style="border-left: 4px solid var(--color-red); padding-left: 12px; margin-bottom: 16px;">
+              <h3 style="font-family: var(--font-display); font-size: 1.25rem; font-weight: 800; color: var(--color-red); margin: 0;">
+                PERMANENTLY DELETE ${isPlayer ? 'PLAYER' : 'FRANCHISE'}?
+              </h3>
+              <div style="font-size: 0.8125rem; color: var(--text-bright); margin-top: 6px;">
+                Target: <strong>${item.name}</strong> (${isPlayer ? (item.roll || item.id) : ('#' + item.id)})
+              </div>
+              <div style="font-size: 0.75rem; color: var(--color-red); font-weight: 700; margin-top: 8px;">
+                ⚠️ IRREVERSIBLE OPERATION: This permanently deletes this record from the database. It cannot be recovered from Trash or Undo.
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 16px;">
+              <label class="form-label" style="font-size: 0.75rem;">TYPE "PERMANENTLY DELETE" TO CONFIRM:</label>
+              <input type="text" id="permDeleteConfirmInput" class="form-input font-mono" placeholder="PERMANENTLY DELETE"
+                oninput="document.getElementById('confirmPermDeleteBtn').disabled = (this.value.trim() !== 'PERMANENTLY DELETE');">
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 10px;">
+              <button class="btn btn-secondary" onclick="closeModal()">CANCEL</button>
+              <button id="confirmPermDeleteBtn" class="btn btn-primary" style="background: var(--color-red); border-color: var(--color-red); color: #fff;" disabled
+                onclick="executePermanentDelete('${entityType}', '${id}')">
+                PERMANENT DELETE
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function executePermanentDelete(entityType, id) {
+      const isPlayer = entityType === 'PLAYER';
+      if (isPlayer) {
+        const idx = deletedPlayers.findIndex(d => String(d.id) === String(id));
+        if (idx >= 0) {
+          const p = deletedPlayers.splice(idx, 1)[0];
+          auditLog.unshift({
+            time: new Date().toLocaleTimeString(),
+            action: "PLAYER_PERMANENTLY_DELETED",
+            actorUid: (currentUser && currentUser.uid) || 'usr_superadmin',
+            role: (currentUser && currentUser.role) || 'SUPER_ADMIN',
+            targetId: p.roll || String(p.id),
+            timestamp: new Date().toISOString(),
+            details: `Player ${p.name} (${p.roll}) permanently purged from Trash by ${(currentUser && currentUser.name) || 'Admin'}.`
+          });
+        }
+      } else {
+        const idx = deletedFranchises.findIndex(d => String(d.id) === String(id));
+        if (idx >= 0) {
+          const f = deletedFranchises.splice(idx, 1)[0];
+          auditLog.unshift({
+            time: new Date().toLocaleTimeString(),
+            action: "FRANCHISE_PERMANENTLY_DELETED",
+            actorUid: (currentUser && currentUser.uid) || 'usr_superadmin',
+            role: (currentUser && currentUser.role) || 'SUPER_ADMIN',
+            targetId: String(f.id),
+            timestamp: new Date().toISOString(),
+            details: `Franchise ${f.name} (#${f.id}) permanently purged from Trash by ${(currentUser && currentUser.name) || 'Admin'}.`
+          });
+        }
+      }
+      saveDatabase();
+      broadcastAuthoritativeState();
+      closeModal();
+      showToast("Record permanently deleted.", "info");
+      renderCurrentView();
+    }
+
+    function executeRestoreFromTrash(entityType, id) {
+      const isPlayer = entityType === 'PLAYER';
+      if (isPlayer) {
+        const dIdx = deletedPlayers.findIndex(d => String(d.id) === String(id));
+        if (dIdx === -1) return;
+        const p = deletedPlayers[dIdx];
+        const rollNorm = (p.roll || '').trim().toUpperCase();
+
+        const conflict = players.find(x => String(x.id) !== String(p.id) && (x.roll || '').trim().toUpperCase() === rollNorm);
+        if (conflict) {
+          showToast(`RESTORE CONFLICT: Active player "${conflict.name}" already uses roll ${rollNorm}.`, "error");
+          return;
+        }
+
+        deletedPlayers.splice(dIdx, 1);
+        p.status = 'AVAILABLE';
+        p.approvalStatus = 'APPROVED';
+        p.verificationStatus = 'VERIFIED';
+        p.publicVisibility = true;
+        delete p.deleted;
+        delete p.deletedAt;
+        delete p.deletedBy;
+        delete p.trashedAt;
+        delete p.trashedBy;
+        delete p.operationId;
+        players.push(p);
+
+        auditLog.unshift({
+          time: new Date().toLocaleTimeString(),
+          action: "PLAYER_RESTORED",
+          actorUid: (currentUser && currentUser.uid) || 'usr_superadmin',
+          role: (currentUser && currentUser.role) || 'SUPER_ADMIN',
+          targetId: p.roll || String(p.id),
+          timestamp: new Date().toISOString(),
+          details: `Player ${p.name} (${p.roll}) restored from Trash by ${(currentUser && currentUser.name) || 'Admin'}.`
+        });
+        syncPlayerToFirebase(p, 'UPDATE');
+      } else {
+        const dIdx = deletedFranchises.findIndex(d => String(d.id) === String(id));
+        if (dIdx === -1) return;
+        const f = deletedFranchises[dIdx];
+        const nameNorm = (f.name || '').trim().toLowerCase();
+
+        const conflict = franchises.find(x => String(x.id) !== String(f.id) && (x.name || '').trim().toLowerCase() === nameNorm);
+        if (conflict) {
+          showToast(`RESTORE CONFLICT: Active franchise "${conflict.name}" already exists.`, "error");
+          return;
+        }
+
+        deletedFranchises.splice(dIdx, 1);
+        f.status = 'ACTIVE';
+        f.approvalStatus = 'APPROVED';
+        delete f.deleted;
+        delete f.trashedAt;
+        delete f.trashedBy;
+        delete f.operationId;
+        franchises.push(f);
+
+        auditLog.unshift({
+          time: new Date().toLocaleTimeString(),
+          action: "FRANCHISE_RESTORED",
+          actorUid: (currentUser && currentUser.uid) || 'usr_superadmin',
+          role: (currentUser && currentUser.role) || 'SUPER_ADMIN',
+          targetId: String(f.id),
+          timestamp: new Date().toISOString(),
+          details: `Franchise ${f.name} (#${f.id}) restored from Trash by ${(currentUser && currentUser.name) || 'Admin'}.`
+        });
+      }
+
+      saveDatabase();
+      broadcastAuthoritativeState();
+      showToast("Record restored to active dataset.", "success");
+      renderCurrentView();
+    }
+
+    function downloadBackupFile(type) {
+      let exportData = {};
+      let filename = `ACC_2026_BACKUP_${type}_${Date.now()}.json`;
+
+      if (type === 'PLAYERS') {
+        exportData = { exportType: 'PLAYERS', timestamp: new Date().toISOString(), activePlayers: players, trashedPlayers: deletedPlayers };
+      } else if (type === 'FRANCHISES') {
+        exportData = { exportType: 'FRANCHISES', timestamp: new Date().toISOString(), activeFranchises: franchises, trashedFranchises: deletedFranchises };
+      } else {
+        exportData = {
+          exportType: 'FULL_SNAPSHOT',
+          timestamp: new Date().toISOString(),
+          players,
+          deletedPlayers,
+          franchises,
+          deletedFranchises,
+          dataOperations,
+          auditLog
+        };
+      }
+
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast(`Backup exported: ${filename}`, "success");
+    }
+
+    function openOperationDetailsModal(opId) {
+      const op = dataOperations.find(o => o.operationId === opId);
+      if (!op) return;
+      const m = document.getElementById("modalContainer");
+
+      const count = op.entityIds ? op.entityIds.length : 0;
+      m.innerHTML = `
+        <div class="modal-overlay" onclick="closeModal()">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 540px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+              <div>
+                <span class="label-micro" style="color: var(--color-green);">${op.operationId}</span>
+                <h3 style="font-family: var(--font-display); font-size: 1.25rem; font-weight: 800; color: var(--text-bright); margin: 0;">
+                  OPERATION DETAILS
+                </h3>
+              </div>
+              <button class="btn btn-secondary" style="padding: 4px 8px;" onclick="closeModal()">✕</button>
+            </div>
+
+            <div style="background: var(--surface-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px; font-size: 0.8125rem;">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                <div>Type: <strong class="font-mono">${op.operationType}</strong></div>
+                <div>Target: <strong>${op.entityType}</strong></div>
+                <div>Performed By: <strong>${op.actorName || 'Admin'}</strong></div>
+                <div>Role: <strong class="font-mono">${op.actorRole || 'SUPER_ADMIN'}</strong></div>
+                <div>Timestamp: <span style="color: var(--text-muted);">${new Date(op.timestamp).toLocaleString()}</span></div>
+                <div>Status: <strong class="font-mono" style="color: ${op.status === 'COMPLETED' ? 'var(--color-green)' : op.status === 'UNDONE' ? 'var(--color-yellow)' : 'var(--color-blue)'};">${op.status}</strong></div>
+              </div>
+              <div style="margin-top: 8px; border-top: 1px solid var(--border-subtle); padding-top: 6px;">
+                Affected Records: <strong>${count}</strong>
+              </div>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <button class="btn btn-secondary" style="font-size: 0.75rem;" onclick="downloadBackupFile('OPERATION_${op.operationId}')">
+                VIEW SNAPSHOT JSON
+              </button>
+              <div style="display: flex; gap: 8px;">
+                ${op.status !== 'UNDONE' ? `
+                  <button class="btn btn-primary" style="font-size: 0.75rem; background: var(--color-green); color: #000; font-weight: 800;" onclick="closeModal(); executeUndoDataOperation('${op.operationId}')">
+                    RESTORE ALL FROM THIS OPERATION
+                  </button>
+                ` : `
+                  <button class="btn btn-secondary" style="font-size: 0.75rem; color: var(--color-blue);" onclick="closeModal(); executeRedoDataOperation('${op.operationId}')">
+                    REDO DELETION
+                  </button>
+                `}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderDataManagementTab() {
+      const isSuperAdmin = currentUser && currentUser.role === 'SUPER_ADMIN';
+
+      // Counts
+      const totalPlayers = players.length;
+      const trashedPlayers = deletedPlayers.length;
+      const totalFranchises = franchises.length;
+      const trashedFranchises = deletedFranchises.length;
+      const totalOps = dataOperations.length;
+
+      // Filtered data for view
+      const q = (dataMgmtSearch || '').trim().toLowerCase();
+
+      let displayPlayers = (dataMgmtFilter === 'ACTIVE' ? players : deletedPlayers).filter(p => {
+        if (!q) return true;
+        return (p.name || '').toLowerCase().includes(q) || (p.roll || '').toLowerCase().includes(q);
+      });
+
+      let displayFranchises = (dataMgmtFilter === 'ACTIVE' ? franchises : deletedFranchises).filter(f => {
+        if (!q) return true;
+        return (f.name || '').toLowerCase().includes(q) || String(f.id).includes(q) || (f.coordinator || f.owner || '').toLowerCase().includes(q);
+      });
+
+      const selectedCount = dataMgmtSubTab === 'PLAYERS' ? selectedDataPlayerIds.size : selectedDataFranchiseIds.size;
+
+      return `
+        <div style="display: flex; flex-direction: column; gap: var(--space-4);">
+          
+          <!-- Top Header & Metrics -->
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 12px;">
+            <div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="status-badge status-live" style="font-size: 0.65rem;">DATABASE-BACKED</span>
+                <span class="label-micro" style="color: var(--color-green);">DATA CONTROL CENTER</span>
+              </div>
+              <h3 style="font-family: var(--font-display); font-size: 1.3rem; font-weight: 800; color: var(--text-bright); margin: 4px 0 0 0;">
+                DATA MANAGEMENT & RECOVERABLE DELETION
+              </h3>
+              <div style="font-size: 0.8125rem; color: var(--text-muted); margin-top: 2px;">
+                Explicit, auditable data management with multi-step Undo/Redo, snapshot protection, and recoverable Trash.
+              </div>
+            </div>
+
+            <!-- Undo / Redo Global Toolbar Controls (Section 13-16, 33) -->
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <button type="button" class="btn btn-secondary" 
+                style="padding: 6px 12px; font-size: 0.75rem; font-weight: 800; min-height: 34px; ${dataUndoStack.length > 0 ? 'color: var(--color-green); border-color: rgba(5,150,105,0.4);' : 'opacity: 0.5;'}"
+                ${dataUndoStack.length === 0 ? 'disabled' : ''}
+                onclick="executeUndoDataOperation()">
+                ↶ UNDO (${dataUndoStack.length})
+              </button>
+              <button type="button" class="btn btn-secondary" 
+                style="padding: 6px 12px; font-size: 0.75rem; font-weight: 800; min-height: 34px; ${dataRedoStack.length > 0 ? 'color: var(--color-blue); border-color: rgba(37,99,235,0.4);' : 'opacity: 0.5;'}"
+                ${dataRedoStack.length === 0 ? 'disabled' : ''}
+                onclick="executeRedoDataOperation()">
+                ↷ REDO (${dataRedoStack.length})
+              </button>
+              <button type="button" class="btn btn-secondary" 
+                style="padding: 6px 12px; font-size: 0.75rem; font-weight: 700; min-height: 34px;"
+                onclick="downloadBackupFile('ALL')">
+                💾 BACKUP ALL
+              </button>
+            </div>
+          </div>
+
+          <!-- Sub-Tabs Strip (Section 1: PLAYERS, FRANCHISES, DELETED / TRASH, BACKUPS, ACTIVITY) -->
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+            <div style="display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px;">
+              ${[
+                { id: 'PLAYERS', label: 'PLAYERS', count: totalPlayers },
+                { id: 'FRANCHISES', label: 'FRANCHISES', count: totalFranchises },
+                { id: 'TRASH', label: 'DELETED / TRASH', count: trashedPlayers + trashedFranchises },
+                { id: 'BACKUPS', label: 'BACKUPS', count: 3 },
+                { id: 'ACTIVITY', label: 'ACTIVITY', count: totalOps }
+              ].map(st => {
+                const isActive = dataMgmtSubTab === st.id;
+                return `
+                  <button type="button" class="btn ${isActive ? 'btn-primary' : 'btn-secondary'}"
+                    style="padding: 6px 12px; font-size: 0.75rem; font-weight: 700; white-space: nowrap; ${isActive ? 'background: var(--color-green); color: #000; font-weight: 800; border-color: var(--color-green);' : ''}"
+                    onclick="dataMgmtSubTab = '${st.id}'; renderCurrentView();">
+                    ${st.label} (${st.count})
+                  </button>
+                `;
+              }).join('')}
+            </div>
+
+            ${(dataMgmtSubTab === 'PLAYERS' || dataMgmtSubTab === 'FRANCHISES') ? `
+              <!-- Filter: ACTIVE vs TRASHED -->
+              <div style="display: flex; gap: 4px; background: var(--surface-2); padding: 3px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
+                <button type="button" class="btn ${dataMgmtFilter === 'ACTIVE' ? 'btn-primary' : 'btn-secondary'}"
+                  style="padding: 3px 8px; font-size: 0.7rem; font-weight: 700; ${dataMgmtFilter === 'ACTIVE' ? 'background: var(--color-green); color: #000;' : ''}"
+                  onclick="dataMgmtFilter = 'ACTIVE'; renderCurrentView();">
+                  ACTIVE
+                </button>
+                <button type="button" class="btn ${dataMgmtFilter === 'TRASHED' ? 'btn-primary' : 'btn-secondary'}"
+                  style="padding: 3px 8px; font-size: 0.7rem; font-weight: 700; ${dataMgmtFilter === 'TRASHED' ? 'background: var(--color-red); color: #fff;' : ''}"
+                  onclick="dataMgmtFilter = 'TRASHED'; renderCurrentView();">
+                  TRASHED
+                </button>
+              </div>
+            ` : ''}
+          </div>
+
+          <!-- Search & Bulk Selection Toolbar -->
+          ${(dataMgmtSubTab === 'PLAYERS' || dataMgmtSubTab === 'FRANCHISES') ? `
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; background: var(--surface-2); padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
+              <div style="flex: 1; max-width: 400px; min-width: 240px;">
+                <input type="text" class="form-input" placeholder="Search by name, roll, or team identifier..."
+                  value="${dataMgmtSearch}"
+                  oninput="dataMgmtSearch = this.value; renderCurrentView();"
+                  style="padding: 6px 12px; font-size: 0.8125rem;">
+              </div>
+
+              <!-- Bulk Selection Actions (Section 9) -->
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 0.75rem; font-weight: 700; color: ${selectedCount > 0 ? 'var(--color-green)' : 'var(--text-muted)'};">
+                  Selected: ${selectedCount}
+                </span>
+                <button type="button" class="btn btn-secondary" 
+                  style="padding: 4px 10px; font-size: 0.75rem; color: var(--color-red); border-color: rgba(225,29,72,0.3);"
+                  ${selectedCount === 0 ? 'disabled' : ''}
+                  onclick="openBulkDeleteModal()">
+                  DELETE SELECTED (${selectedCount})
+                </button>
+                ${selectedCount > 0 ? `
+                  <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.7rem;"
+                    onclick="${dataMgmtSubTab === 'PLAYERS' ? 'selectedDataPlayerIds.clear()' : 'selectedDataFranchiseIds.clear()'}; renderCurrentView();">
+                    CLEAR
+                  </button>
+                ` : ''}
+              </div>
+            </div>
+          ` : ''}
+
+          <!-- ================= TAB CONTENT ================= -->
+
+          ${dataMgmtSubTab === 'PLAYERS' ? `
+            <!-- SUB-TAB: PLAYERS TABLE & CARDS -->
+            <div class="surface-card player-desktop-table" style="padding: 0; overflow-x: auto;">
+              <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.8125rem;">
+                <thead>
+                  <tr style="background: var(--surface-2); border-bottom: 1px solid var(--border-medium); color: var(--text-muted); font-size: 0.72rem; text-transform: uppercase;">
+                    <th style="padding: 10px 14px; width: 40px;">
+                      <input type="checkbox" onchange="const all = ${JSON.stringify(displayPlayers.map(p => p.id))}; if(this.checked) all.forEach(id => selectedDataPlayerIds.add(id)); else selectedDataPlayerIds.clear(); renderCurrentView();">
+                    </th>
+                    <th style="padding: 10px 14px;">Player</th>
+                    <th style="padding: 10px 14px;">Roll Number</th>
+                    <th style="padding: 10px 14px;">Academic / Bucket</th>
+                    <th style="padding: 10px 14px;">Role</th>
+                    <th style="padding: 10px 14px;">Status</th>
+                    <th style="padding: 10px 14px; text-align: right;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${displayPlayers.length === 0 ? `
+                    <tr><td colspan="7" style="padding: 32px; text-align: center; color: var(--text-muted);">No players found in this view.</td></tr>
+                  ` : displayPlayers.map(p => {
+                    const isSelected = selectedDataPlayerIds.has(p.id);
+                    const isTrashed = p.status === 'DELETED' || p.deleted;
+                    return `
+                      <tr style="border-bottom: 1px solid var(--border-subtle); ${isSelected ? 'background: rgba(5,150,105,0.06);' : ''}">
+                        <td style="padding: 10px 14px;">
+                          <input type="checkbox" ${isSelected ? 'checked' : ''} onchange="if(this.checked) selectedDataPlayerIds.add(${p.id}); else selectedDataPlayerIds.delete(${p.id}); renderCurrentView();">
+                        </td>
+                        <td style="padding: 10px 14px; font-weight: 700; color: var(--text-bright);">
+                          <div style="display: flex; align-items: center; gap: 8px;">
+                            ${p.photo ? `<img src="${p.photo}" style="width: 28px; height: 21px; object-fit: cover; border-radius: 2px;">` : ''}
+                            <span>${p.name}</span>
+                          </div>
+                        </td>
+                        <td style="padding: 10px 14px; font-family: var(--font-mono);">${p.roll || '—'}</td>
+                        <td style="padding: 10px 14px;">${p.program || 'B.Tech'} · ${p.branch || p.department || 'CSE'} (${p.bucket || 'B1'})</td>
+                        <td style="padding: 10px 14px;">${p.role || p.derivedType || 'ALL-ROUNDER'}</td>
+                        <td style="padding: 10px 14px;">
+                          <span class="status-badge ${isTrashed ? 'status-closed' : 'status-live'}" style="font-size: 0.65rem;">
+                            ${p.status || 'ACTIVE'}
+                          </span>
+                        </td>
+                        <td style="padding: 10px 14px; text-align: right;">
+                          <div style="display: flex; justify-content: flex-end; gap: 6px;">
+                            <button type="button" class="btn btn-secondary" style="padding: 3px 8px; font-size: 0.7rem;" onclick="openPlayerEditModal('${p.id}')">VIEW</button>
+                            ${isTrashed ? `
+                              <button type="button" class="btn btn-secondary" style="padding: 3px 8px; font-size: 0.7rem; color: var(--color-green);" onclick="executeRestoreFromTrash('PLAYER', '${p.id}')">RESTORE</button>
+                              <button type="button" class="btn btn-secondary" style="padding: 3px 8px; font-size: 0.7rem; color: var(--color-red);" onclick="openPermanentDeleteModal('PLAYER', '${p.id}')">PERMANENT</button>
+                            ` : `
+                              <button type="button" class="btn btn-secondary" style="padding: 3px 8px; font-size: 0.7rem; color: var(--color-red); border-color: rgba(225,29,72,0.3);" onclick="openDeletePlayerModal('${p.id}')">DELETE</button>
+                            `}
+                          </div>
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Mobile Cards for Players (< 768px) -->
+            <div class="player-mobile-cards" style="display: flex; flex-direction: column; gap: 10px;">
+              ${displayPlayers.map(p => `
+                <div class="surface-card" style="padding: 12px; border-left: 3px solid ${p.status === 'DELETED' ? 'var(--color-red)' : 'var(--color-green)'};">
+                  <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                    <div>
+                      <div style="font-weight: 800; font-size: 0.95rem; color: var(--text-bright);">${p.name}</div>
+                      <div style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted);">${p.roll || '—'} · Bucket ${p.bucket || 'B1'}</div>
+                    </div>
+                    <span class="status-badge ${p.status === 'DELETED' ? 'status-closed' : 'status-live'}" style="font-size: 0.65rem;">${p.status || 'ACTIVE'}</span>
+                  </div>
+                  <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px;">
+                    <button type="button" class="btn btn-secondary" style="min-height: 44px; padding: 6px 14px;" onclick="openPlayerEditModal('${p.id}')">VIEW</button>
+                    ${p.status === 'DELETED' ? `
+                      <button type="button" class="btn btn-secondary" style="min-height: 44px; padding: 6px 14px; color: var(--color-green);" onclick="executeRestoreFromTrash('PLAYER', '${p.id}')">RESTORE</button>
+                    ` : `
+                      <button type="button" class="btn btn-secondary" style="min-height: 44px; padding: 6px 14px; color: var(--color-red);" onclick="openDeletePlayerModal('${p.id}')">DELETE</button>
+                    `}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          ` : dataMgmtSubTab === 'FRANCHISES' ? `
+            <!-- SUB-TAB: FRANCHISES TABLE & CARDS -->
+            <div class="surface-card player-desktop-table" style="padding: 0; overflow-x: auto;">
+              <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.8125rem;">
+                <thead>
+                  <tr style="background: var(--surface-2); border-bottom: 1px solid var(--border-medium); color: var(--text-muted); font-size: 0.72rem; text-transform: uppercase;">
+                    <th style="padding: 10px 14px; width: 40px;">
+                      <input type="checkbox" onchange="const all = ${JSON.stringify(displayFranchises.map(f => f.id))}; if(this.checked) all.forEach(id => selectedDataFranchiseIds.add(id)); else selectedDataFranchiseIds.clear(); renderCurrentView();">
+                    </th>
+                    <th style="padding: 10px 14px;">Franchise</th>
+                    <th style="padding: 10px 14px;">Team Number</th>
+                    <th style="padding: 10px 14px;">Owner / Coordinator</th>
+                    <th style="padding: 10px 14px;">Purse Remaining</th>
+                    <th style="padding: 10px 14px;">Squad Count</th>
+                    <th style="padding: 10px 14px;">Status</th>
+                    <th style="padding: 10px 14px; text-align: right;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${displayFranchises.length === 0 ? `
+                    <tr><td colspan="8" style="padding: 32px; text-align: center; color: var(--text-muted);">No franchises found in this view.</td></tr>
+                  ` : displayFranchises.map(f => {
+                    const isSelected = selectedDataFranchiseIds.has(f.id);
+                    const isTrashed = f.status === 'TRASHED' || f.deleted;
+                    return `
+                      <tr style="border-bottom: 1px solid var(--border-subtle); ${isSelected ? 'background: rgba(5,150,105,0.06);' : ''}">
+                        <td style="padding: 10px 14px;">
+                          <input type="checkbox" ${isSelected ? 'checked' : ''} onchange="if(this.checked) selectedDataFranchiseIds.add(${f.id}); else selectedDataFranchiseIds.delete(${f.id}); renderCurrentView();">
+                        </td>
+                        <td style="padding: 10px 14px; font-weight: 700; color: var(--text-bright);">${f.name}</td>
+                        <td style="padding: 10px 14px; font-family: var(--font-mono);">#${String(f.id).padStart(2, '0')}</td>
+                        <td style="padding: 10px 14px;">${f.owner || f.coordinator || 'Coordinator'}</td>
+                        <td style="padding: 10px 14px; font-family: var(--font-mono); color: var(--color-green);">₹${f.purse || 0}</td>
+                        <td style="padding: 10px 14px; font-family: var(--font-mono);">${f.squadCount || (f.squad ? f.squad.length : 0)} / 15</td>
+                        <td style="padding: 10px 14px;">
+                          <span class="status-badge ${isTrashed ? 'status-closed' : 'status-live'}" style="font-size: 0.65rem;">
+                            ${f.status || 'ACTIVE'}
+                          </span>
+                        </td>
+                        <td style="padding: 10px 14px; text-align: right;">
+                          <div style="display: flex; justify-content: flex-end; gap: 6px;">
+                            ${isTrashed ? `
+                              <button type="button" class="btn btn-secondary" style="padding: 3px 8px; font-size: 0.7rem; color: var(--color-green);" onclick="executeRestoreFromTrash('FRANCHISE', '${f.id}')">RESTORE</button>
+                              <button type="button" class="btn btn-secondary" style="padding: 3px 8px; font-size: 0.7rem; color: var(--color-red);" onclick="openPermanentDeleteModal('FRANCHISE', '${f.id}')">PERMANENT</button>
+                            ` : `
+                              <button type="button" class="btn btn-secondary" style="padding: 3px 8px; font-size: 0.7rem; color: var(--color-red); border-color: rgba(225,29,72,0.3);" onclick="openDeleteFranchiseModal('${f.id}')">DELETE</button>
+                            `}
+                          </div>
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Mobile Cards for Franchises -->
+            <div class="player-mobile-cards" style="display: flex; flex-direction: column; gap: 10px;">
+              ${displayFranchises.map(f => `
+                <div class="surface-card" style="padding: 12px; border-left: 3px solid ${f.status === 'TRASHED' ? 'var(--color-red)' : 'var(--color-green)'};">
+                  <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                    <div>
+                      <div style="font-weight: 800; font-size: 0.95rem; color: var(--text-bright);">${f.name}</div>
+                      <div style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted);">Team #${f.id} · ${f.owner || f.coordinator || 'Coordinator'}</div>
+                    </div>
+                    <span class="status-badge ${f.status === 'TRASHED' ? 'status-closed' : 'status-live'}" style="font-size: 0.65rem;">${f.status || 'ACTIVE'}</span>
+                  </div>
+                  <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px;">
+                    ${f.status === 'TRASHED' ? `
+                      <button type="button" class="btn btn-secondary" style="min-height: 44px; padding: 6px 14px; color: var(--color-green);" onclick="executeRestoreFromTrash('FRANCHISE', '${f.id}')">RESTORE</button>
+                    ` : `
+                      <button type="button" class="btn btn-secondary" style="min-height: 44px; padding: 6px 14px; color: var(--color-red);" onclick="openDeleteFranchiseModal('${f.id}')">DELETE</button>
+                    `}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          ` : dataMgmtSubTab === 'TRASH' ? `
+            <!-- SUB-TAB: DELETED / TRASH BIN (Section 23, 24) -->
+            <div class="surface-card player-desktop-table" style="padding: 0; overflow-x: auto;">
+              <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.8125rem;">
+                <thead>
+                  <tr style="background: var(--surface-2); border-bottom: 1px solid var(--border-medium); color: var(--text-muted); font-size: 0.72rem; text-transform: uppercase;">
+                    <th style="padding: 10px 14px;">Entity</th>
+                    <th style="padding: 10px 14px;">Name</th>
+                    <th style="padding: 10px 14px;">ID / Roll</th>
+                    <th style="padding: 10px 14px;">Deleted By</th>
+                    <th style="padding: 10px 14px;">Deleted At</th>
+                    <th style="padding: 10px 14px;">Operation</th>
+                    <th style="padding: 10px 14px; text-align: right;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${(deletedPlayers.length === 0 && deletedFranchises.length === 0) ? `
+                    <tr><td colspan="7" style="padding: 32px; text-align: center; color: var(--text-muted);">Trash is empty. No deleted records.</td></tr>
+                  ` : `
+                    ${deletedPlayers.map(p => `
+                      <tr style="border-bottom: 1px solid var(--border-subtle);">
+                        <td style="padding: 10px 14px;"><span class="status-badge" style="font-size: 0.65rem; background: rgba(59,130,246,0.1); color: var(--color-blue);">PLAYER</span></td>
+                        <td style="padding: 10px 14px; font-weight: 700; color: var(--text-bright);">${p.name}</td>
+                        <td style="padding: 10px 14px; font-family: var(--font-mono);">${p.roll || p.id}</td>
+                        <td style="padding: 10px 14px;">${p.trashedBy || p.deletedBy || 'Admin'}</td>
+                        <td style="padding: 10px 14px; font-size: 0.75rem; color: var(--text-muted);">${p.trashedAt ? new Date(p.trashedAt).toLocaleString() : 'Recent'}</td>
+                        <td style="padding: 10px 14px; font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-yellow);">${p.operationId || 'MANUAL'}</td>
+                        <td style="padding: 10px 14px; text-align: right;">
+                          <div style="display: flex; justify-content: flex-end; gap: 6px;">
+                            <button type="button" class="btn btn-secondary" style="padding: 3px 8px; font-size: 0.7rem; color: var(--color-green);" onclick="executeRestoreFromTrash('PLAYER', '${p.id}')">RESTORE</button>
+                            <button type="button" class="btn btn-secondary" style="padding: 3px 8px; font-size: 0.7rem; color: var(--color-red);" onclick="openPermanentDeleteModal('PLAYER', '${p.id}')">PERMANENT</button>
+                          </div>
+                        </td>
+                      </tr>
+                    `).join('')}
+                    ${deletedFranchises.map(f => `
+                      <tr style="border-bottom: 1px solid var(--border-subtle);">
+                        <td style="padding: 10px 14px;"><span class="status-badge" style="font-size: 0.65rem; background: rgba(245,158,11,0.1); color: var(--color-yellow);">FRANCHISE</span></td>
+                        <td style="padding: 10px 14px; font-weight: 700; color: var(--text-bright);">${f.name}</td>
+                        <td style="padding: 10px 14px; font-family: var(--font-mono);">#${f.id}</td>
+                        <td style="padding: 10px 14px;">${f.trashedBy || 'Admin'}</td>
+                        <td style="padding: 10px 14px; font-size: 0.75rem; color: var(--text-muted);">${f.trashedAt ? new Date(f.trashedAt).toLocaleString() : 'Recent'}</td>
+                        <td style="padding: 10px 14px; font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-yellow);">${f.operationId || 'MANUAL'}</td>
+                        <td style="padding: 10px 14px; text-align: right;">
+                          <div style="display: flex; justify-content: flex-end; gap: 6px;">
+                            <button type="button" class="btn btn-secondary" style="padding: 3px 8px; font-size: 0.7rem; color: var(--color-green);" onclick="executeRestoreFromTrash('FRANCHISE', '${f.id}')">RESTORE</button>
+                            <button type="button" class="btn btn-secondary" style="padding: 3px 8px; font-size: 0.7rem; color: var(--color-red);" onclick="openPermanentDeleteModal('FRANCHISE', '${f.id}')">PERMANENT</button>
+                          </div>
+                        </td>
+                      </tr>
+                    `).join('')}
+                  `}
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Mobile Cards for Trash -->
+            <div class="player-mobile-cards" style="display: flex; flex-direction: column; gap: 10px;">
+              ${deletedPlayers.map(p => `
+                <div class="surface-card" style="padding: 12px; border-left: 3px solid var(--color-red);">
+                  <div style="font-weight: 800; font-size: 0.95rem; color: var(--text-bright);">${p.name} (PLAYER)</div>
+                  <div style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted);">${p.roll || p.id} · Deleted by ${p.trashedBy || 'Admin'}</div>
+                  <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px;">
+                    <button type="button" class="btn btn-secondary" style="min-height: 44px; padding: 6px 14px; color: var(--color-green);" onclick="executeRestoreFromTrash('PLAYER', '${p.id}')">RESTORE</button>
+                    <button type="button" class="btn btn-secondary" style="min-height: 44px; padding: 6px 14px; color: var(--color-red);" onclick="openPermanentDeleteModal('PLAYER', '${p.id}')">PERMANENT</button>
+                  </div>
+                </div>
+              `).join('')}
+              ${deletedFranchises.map(f => `
+                <div class="surface-card" style="padding: 12px; border-left: 3px solid var(--color-red);">
+                  <div style="font-weight: 800; font-size: 0.95rem; color: var(--text-bright);">${f.name} (FRANCHISE #${f.id})</div>
+                  <div style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted);">Deleted by ${f.trashedBy || 'Admin'}</div>
+                  <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px;">
+                    <button type="button" class="btn btn-secondary" style="min-height: 44px; padding: 6px 14px; color: var(--color-green);" onclick="executeRestoreFromTrash('FRANCHISE', '${f.id}')">RESTORE</button>
+                    <button type="button" class="btn btn-secondary" style="min-height: 44px; padding: 6px 14px; color: var(--color-red);" onclick="openPermanentDeleteModal('FRANCHISE', '${f.id}')">PERMANENT</button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          ` : dataMgmtSubTab === 'BACKUPS' ? `
+            <!-- SUB-TAB: BACKUPS & SNAPSHOTS (Section 17, 46) -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px;">
+              <div class="surface-card" style="padding: var(--space-4);">
+                <div style="font-weight: 800; font-size: 1rem; color: var(--text-bright);">PLAYERS DATASET BACKUP</div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin: 6px 0 14px 0;">
+                  Export full JSON snapshot containing ${players.length} active and ${deletedPlayers.length} trashed players.
+                </div>
+                <button type="button" class="btn btn-primary" style="width: 100%; min-height: 38px;" onclick="downloadBackupFile('PLAYERS')">
+                  DOWNLOAD PLAYERS JSON
+                </button>
+              </div>
+
+              <div class="surface-card" style="padding: var(--space-4);">
+                <div style="font-weight: 800; font-size: 1rem; color: var(--text-bright);">FRANCHISES DATASET BACKUP</div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin: 6px 0 14px 0;">
+                  Export full JSON snapshot containing ${franchises.length} active and ${deletedFranchises.length} trashed franchises.
+                </div>
+                <button type="button" class="btn btn-primary" style="width: 100%; min-height: 38px;" onclick="downloadBackupFile('FRANCHISES')">
+                  DOWNLOAD FRANCHISES JSON
+                </button>
+              </div>
+
+              <div class="surface-card" style="padding: var(--space-4);">
+                <div style="font-weight: 800; font-size: 1rem; color: var(--text-bright);">FULL DATABASE SNAPSHOT</div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin: 6px 0 14px 0;">
+                  Complete authoritative export of all players, franchises, deletion operations, and audit records.
+                </div>
+                <button type="button" class="btn btn-primary" style="width: 100%; min-height: 38px; background: var(--color-green); color: #000; font-weight: 800;" onclick="downloadBackupFile('ALL')">
+                  DOWNLOAD FULL DB JSON
+                </button>
+              </div>
+            </div>
+          ` : dataMgmtSubTab === 'ACTIVITY' ? `
+            <!-- SUB-TAB: DELETION OPERATIONS HISTORY (Section 13, 16, 28) -->
+            <div class="surface-card player-desktop-table" style="padding: 0; overflow-x: auto;">
+              <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.8125rem;">
+                <thead>
+                  <tr style="background: var(--surface-2); border-bottom: 1px solid var(--border-medium); color: var(--text-muted); font-size: 0.72rem; text-transform: uppercase;">
+                    <th style="padding: 10px 14px;">Operation ID</th>
+                    <th style="padding: 10px 14px;">Type</th>
+                    <th style="padding: 10px 14px;">Target</th>
+                    <th style="padding: 10px 14px;">Actor</th>
+                    <th style="padding: 10px 14px;">Timestamp</th>
+                    <th style="padding: 10px 14px;">Affected</th>
+                    <th style="padding: 10px 14px;">Status</th>
+                    <th style="padding: 10px 14px; text-align: right;">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${dataOperations.length === 0 ? `
+                    <tr><td colspan="8" style="padding: 32px; text-align: center; color: var(--text-muted);">No deletion operations recorded yet.</td></tr>
+                  ` : dataOperations.map(op => {
+                    const isUndone = op.status === 'UNDONE';
+                    return `
+                      <tr style="border-bottom: 1px solid var(--border-subtle);">
+                        <td style="padding: 10px 14px; font-family: var(--font-mono); font-weight: 800; color: var(--color-green);">
+                          <a href="javascript:void(0)" onclick="openOperationDetailsModal('${op.operationId}')" style="color: inherit; text-decoration: underline;">
+                            ${op.operationId}
+                          </a>
+                        </td>
+                        <td style="padding: 10px 14px; font-family: var(--font-mono); font-size: 0.75rem;">${op.operationType}</td>
+                        <td style="padding: 10px 14px;">${op.entityType}</td>
+                        <td style="padding: 10px 14px;">${op.actorName || 'Admin'} (${op.actorRole || 'SUPER_ADMIN'})</td>
+                        <td style="padding: 10px 14px; font-size: 0.75rem; color: var(--text-muted);">${new Date(op.timestamp).toLocaleString()}</td>
+                        <td style="padding: 10px 14px; font-family: var(--font-mono);">${op.entityIds ? op.entityIds.length : 0}</td>
+                        <td style="padding: 10px 14px;">
+                          <span class="status-badge" style="font-size: 0.65rem; background: ${isUndone ? 'rgba(245,158,11,0.1)' : 'rgba(5,150,105,0.1)'}; color: ${isUndone ? 'var(--color-yellow)' : 'var(--color-green)'};">
+                            ${op.status}
+                          </span>
+                        </td>
+                        <td style="padding: 10px 14px; text-align: right;">
+                          <div style="display: flex; justify-content: flex-end; gap: 6px;">
+                            <button type="button" class="btn btn-secondary" style="padding: 3px 8px; font-size: 0.7rem;" onclick="openOperationDetailsModal('${op.operationId}')">DETAILS</button>
+                            ${!isUndone ? `
+                              <button type="button" class="btn btn-secondary" style="padding: 3px 8px; font-size: 0.7rem; color: var(--color-green);" onclick="executeUndoDataOperation('${op.operationId}')">UNDO</button>
+                            ` : `
+                              <button type="button" class="btn btn-secondary" style="padding: 3px 8px; font-size: 0.7rem; color: var(--color-blue);" onclick="executeRedoDataOperation('${op.operationId}')">REDO</button>
+                            `}
+                          </div>
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Mobile Cards for Operations -->
+            <div class="player-mobile-cards" style="display: flex; flex-direction: column; gap: 10px;">
+              ${dataOperations.map(op => `
+                <div class="surface-card" style="padding: 12px; border-left: 3px solid ${op.status === 'UNDONE' ? 'var(--color-yellow)' : 'var(--color-green)'};">
+                  <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                    <div>
+                      <div style="font-family: var(--font-mono); font-weight: 800; color: var(--color-green);">${op.operationId}</div>
+                      <div style="font-size: 0.8125rem; font-weight: 700; color: var(--text-bright);">${op.operationType} (${op.entityIds?.length || 0} items)</div>
+                      <div style="font-size: 0.72rem; color: var(--text-muted);">${new Date(op.timestamp).toLocaleString()} by ${op.actorName}</div>
+                    </div>
+                    <span class="status-badge" style="font-size: 0.65rem;">${op.status}</span>
+                  </div>
+                  <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px;">
+                    <button type="button" class="btn btn-secondary" style="min-height: 44px; padding: 6px 14px;" onclick="openOperationDetailsModal('${op.operationId}')">DETAILS</button>
+                    ${op.status !== 'UNDONE' ? `
+                      <button type="button" class="btn btn-secondary" style="min-height: 44px; padding: 6px 14px; color: var(--color-green);" onclick="executeUndoDataOperation('${op.operationId}')">UNDO</button>
+                    ` : `
+                      <button type="button" class="btn btn-secondary" style="min-height: 44px; padding: 6px 14px; color: var(--color-blue);" onclick="executeRedoDataOperation('${op.operationId}')">REDO</button>
+                    `}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          ` : ''}
+
+          <!-- ================= DANGER ZONE (Section 32, 50) ================= -->
+          <div style="margin-top: var(--space-6); border: 1.5px solid rgba(225,29,72,0.3); background: rgba(225,29,72,0.03); border-radius: var(--radius-md); padding: var(--space-4);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+              <div>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="color: var(--color-red); font-size: 0.9rem;">⚠️</span>
+                  <span style="font-family: var(--font-display); font-size: 0.95rem; font-weight: 800; color: var(--color-red); letter-spacing: 0.05em;">
+                    DANGER ZONE — MASS DATA CONTROLS (SUPER ADMIN ONLY)
+                  </span>
+                </div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">
+                  High-risk bulk operations require typed phrase confirmation. Fully protected with snapshots and reversible Undo.
+                </div>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px;">
+              
+              <!-- DELETE ALL PLAYERS -->
+              <div style="background: var(--surface-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 14px; display: flex; flex-direction: column; justify-content: space-between; gap: 10px;">
+                <div>
+                  <div style="font-weight: 800; font-size: 0.875rem; color: var(--text-bright);">DELETE ALL PLAYER DATA</div>
+                  <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px;">
+                    Moves all ${players.length} active players into TRASH. Requires typing confirmation.
+                  </div>
+                </div>
+                <button type="button" class="btn btn-secondary" 
+                  style="min-height: 44px; font-size: 0.75rem; font-weight: 800; color: var(--color-red); border-color: rgba(225,29,72,0.4);"
+                  ${!isSuperAdmin ? 'disabled title="Super Admin Only"' : ''}
+                  onclick="openDeleteAllPlayersModal()">
+                  DELETE ALL PLAYERS
+                </button>
+              </div>
+
+              <!-- DELETE ALL FRANCHISES -->
+              <div style="background: var(--surface-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 14px; display: flex; flex-direction: column; justify-content: space-between; gap: 10px;">
+                <div>
+                  <div style="font-weight: 800; font-size: 0.875rem; color: var(--text-bright);">DELETE ALL FRANCHISE DATA</div>
+                  <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px;">
+                    Moves all ${franchises.length} active franchises into TRASH. Requires typing confirmation.
+                  </div>
+                </div>
+                <button type="button" class="btn btn-secondary" 
+                  style="min-height: 44px; font-size: 0.75rem; font-weight: 800; color: var(--color-red); border-color: rgba(225,29,72,0.4);"
+                  ${!isSuperAdmin ? 'disabled title="Super Admin Only"' : ''}
+                  onclick="openDeleteAllFranchisesModal()">
+                  DELETE ALL FRANCHISES
+                </button>
+              </div>
+
+              <!-- RESET PLAYER + FRANCHISE DATA -->
+              <div style="background: var(--surface-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 14px; display: flex; flex-direction: column; justify-content: space-between; gap: 10px;">
+                <div>
+                  <div style="font-weight: 800; font-size: 0.875rem; color: var(--text-bright);">RESET PLAYER + FRANCHISE DATA</div>
+                  <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px;">
+                    Resets players and franchises to TRASH while strictly preserving auction history and audit trail.
+                  </div>
+                </div>
+                <button type="button" class="btn btn-secondary" 
+                  style="min-height: 44px; font-size: 0.75rem; font-weight: 800; color: var(--color-red); border-color: rgba(225,29,72,0.4);"
+                  ${!isSuperAdmin ? 'disabled title="Super Admin Only"' : ''}
+                  onclick="openResetAllDataModal()">
+                  RESET ALL DATA
+                </button>
+              </div>
+
+            </div>
+          </div>
+
+        </div>
+      `;
+    }
+
     function renderAdminConsoleView() {
       const cur = players[lotIndex] || players[0];
       const leader = franchises.find(f => f.id === leadingBidderId);
@@ -8323,7 +10086,7 @@
         return true;
       });
 
-      const navTabs = ['OVERVIEW', 'TEAMS', 'PLAYERS', 'PLAYER VERIFICATION', 'REGISTRATIONS', 'FRANCHISES', 'FRANCHISE MEMBERS', 'ADMIN ACCOUNTS', 'AUCTION', 'ROUND 2', 'UNDO', 'AUDIT', 'EXPORT', 'SETTINGS', 'DATA INTEGRITY'];
+      const navTabs = ['OVERVIEW', 'TEAMS', 'PLAYERS', 'PLAYER VERIFICATION', 'REGISTRATIONS', 'FRANCHISES', 'FRANCHISE MEMBERS', 'ADMIN ACCOUNTS', 'AUCTION', 'ROUND 2', 'UNDO', 'AUDIT', 'DATA MANAGEMENT', 'EXPORT', 'SETTINGS', 'DATA INTEGRITY'];
       const activeFranchisesDisplay = (window.RealtimeStore && window.RealtimeStore.state.presence.activeFranchises) !== undefined
         ? window.RealtimeStore.state.presence.activeFranchises
         : 0;
@@ -8346,11 +10109,21 @@
               <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 6px 12px; min-height: 32px;" onclick="switchView('projector')">Projector</button>
               <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 6px 12px; min-height: 32px;" onclick="openAdminProfileModal()">Profile</button>
               <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 6px 12px; min-height: 32px; color: var(--color-red); border-color: rgba(225,29,72,0.3);" onclick="logoutUser()">Logout</button>
-              ${(lotIndex !== null && auctionState !== 'IDLE' && players[lotIndex]) ? `
-                <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 5px 12px; min-height: 32px; border-color: rgba(225,29,72,0.4); color: var(--color-red); font-weight: 700;" onclick="openUndoModal()">UNDO</button>
-                <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 5px 12px; min-height: 32px; font-weight: 700;" onclick="resetAuctionTimer()">TIMER</button>
-                <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 5px 12px; min-height: 32px; font-weight: 700;" onclick="toggleAuctionPause()">${auctionPaused ? 'RESUME' : 'PAUSE'}</button>
-              ` : ''}
+              <!-- LIVE AUCTION STAGE CONTROLS (Requirement 7) -->
+              <div style="display: flex; align-items: center; gap: 6px;">
+                ${auctionState === 'IDLE' ? `
+                  <button class="btn btn-primary" style="font-size: 0.75rem; padding: 6px 14px; min-height: 32px; background: var(--color-green); color: #000; font-weight: 800;" onclick="adminStartBid()">▶ START BID</button>
+                ` : auctionState === 'RUNNING' ? `
+                  <button class="btn btn-primary" style="font-size: 0.75rem; padding: 6px 14px; min-height: 32px; background: var(--color-yellow); color: #000; font-weight: 800;" onclick="adminPauseBid()">⏸ PAUSE BID</button>
+                ` : auctionState === 'PAUSED' ? `
+                  <button class="btn btn-primary" style="font-size: 0.75rem; padding: 6px 14px; min-height: 32px; background: var(--color-green); color: #000; font-weight: 800;" onclick="adminResumeBid()">▶ RESUME BID</button>
+                ` : `
+                  <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 6px 14px; min-height: 32px;" onclick="adminStartBid()">▶ NEXT LOT</button>
+                `}
+                <span class="status-badge ${auctionState === 'RUNNING' ? 'status-live' : auctionState === 'PAUSED' ? 'status-scarcity' : 'status-offline'}" style="font-size: 0.65rem;">${auctionState}</span>
+              </div>
+              <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 5px 10px; min-height: 32px;" onclick="openUndoModal()">UNDO</button>
+              <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 5px 10px; min-height: 32px;" onclick="resetAuctionTimer()">TIMER</button>
             </div>
           </div>
 
@@ -8441,19 +10214,43 @@
             </div>
           </div>
 
-          <!-- 15-Tab Sub-Navigation Bar (Section 2) -->
-          <div class="admin-nav-tabs-bar" style="display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; border-bottom: 1px solid var(--border-medium); scrollbar-width: none; -ms-overflow-style: none;">
-            ${navTabs.map(tab => {
-              if (!isSuperAdmin && (tab === 'SETTINGS' || tab === 'ADMIN ACCOUNTS')) return '';
-              const isActive = adminNavTab === tab;
-              return `
-                <button type="button" class="btn ${isActive ? 'btn-primary' : 'btn-secondary'}" 
-                  style="padding: 6px 12px; font-size: 0.75rem; font-weight: 700; white-space: nowrap; border-radius: var(--radius-sm); ${isActive ? 'background: var(--color-green); color: #000; font-weight: 800; border-color: var(--color-green);' : 'background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border-subtle);'}"
-                  onclick="adminNavTab = '${tab}'; renderCurrentView();">
-                  ${tab}
-                </button>
-              `;
-            }).join('')}
+          <!-- Structured Logical Navigation (Requirement 11) -->
+          <div class="admin-nav-hierarchy-container" style="display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid var(--border-medium); padding-bottom: 10px;">
+            <!-- Category Group Badges (OPERATIONS, PEOPLE, FRANCHISES, GOVERNANCE, DATA) -->
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+              <span class="label-micro" style="color: var(--text-muted); margin: 0; font-size: 0.65rem; font-weight: 700;">NAVIGATION:</span>
+              ${[
+                { id: 'OPERATIONS', label: 'OPERATIONS', tabs: ['OVERVIEW', 'AUCTION', 'ROUND 2', 'UNDO'] },
+                { id: 'PEOPLE', label: 'PEOPLE', tabs: ['PLAYERS', 'PLAYER VERIFICATION', 'REGISTRATIONS', 'FRANCHISE MEMBERS'] },
+                { id: 'FRANCHISES', label: 'FRANCHISES', tabs: ['TEAMS', 'FRANCHISES'] },
+                { id: 'GOVERNANCE', label: 'GOVERNANCE', tabs: ['ADMIN ACCOUNTS', 'AUDIT', 'SETTINGS'] },
+                { id: 'DATA', label: 'DATA', tabs: ['DATA MANAGEMENT', 'EXPORT', 'DATA INTEGRITY'] }
+              ].map(group => {
+                const isGroupActive = group.tabs.includes(adminNavTab);
+                return `
+                  <button type="button" class="btn ${isGroupActive ? 'btn-primary' : 'btn-secondary'}" 
+                    style="padding: 4px 10px; font-size: 0.7rem; font-weight: 800; border-radius: var(--radius-sm); ${isGroupActive ? 'background: rgba(5, 150, 105, 0.2); color: var(--color-green); border: 1.5px solid var(--color-green);' : 'background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border-subtle);'}"
+                    onclick="adminNavTab = '${group.tabs[0]}'; renderCurrentView();">
+                    ${group.label}
+                  </button>
+                `;
+              }).join('')}
+            </div>
+
+            <!-- Active Sub-Tabs Strip -->
+            <div class="admin-nav-tabs-bar" style="display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; -ms-overflow-style: none;">
+              ${navTabs.map(tab => {
+                if (!isSuperAdmin && (tab === 'SETTINGS' || tab === 'ADMIN ACCOUNTS')) return '';
+                const isActive = adminNavTab === tab;
+                return `
+                  <button type="button" class="btn ${isActive ? 'btn-primary' : 'btn-secondary'}" 
+                    style="padding: 6px 14px; font-size: 0.75rem; font-weight: 700; white-space: nowrap; border-radius: var(--radius-sm); min-height: 36px; ${isActive ? 'background: var(--color-green); color: #000; font-weight: 800; border-color: var(--color-green);' : 'background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border-subtle);'}"
+                    onclick="adminNavTab = '${tab}'; renderCurrentView();">
+                    ${tab}
+                  </button>
+                `;
+              }).join('')}
+            </div>
           </div>
 
           <!-- ================= TAB CONTENT ================= -->
@@ -9064,7 +10861,9 @@
                       <th style="padding: 10px 12px;">BUCKET</th>
                       <th style="padding: 10px 12px;">ROLE</th>
                       <th style="padding: 10px 12px;">BASE PRICE</th>
-                      <th style="padding: 10px 12px;">STATUS</th>
+                      <th style="padding: 10px 12px;">APPROVAL</th>
+                      <th style="padding: 10px 12px;">ACCOUNT</th>
+                      <th style="padding: 10px 12px;">AUCTION</th>
                       <th style="padding: 10px 12px; text-align: right;">ACTIONS</th>
                     </tr>
                   </thead>
@@ -9563,6 +11362,8 @@
                 </table>
               </div>
             </div>
+          ` : adminNavTab === 'DATA MANAGEMENT' ? `
+            ${renderDataManagementTab()}
           ` : adminNavTab === 'EXPORT' ? `
             <!-- TAB: EXPORT DATA CENTER -->
             <div style="display: flex; flex-direction: column; gap: var(--space-4);">
@@ -10709,6 +12510,7 @@
       const currentLotObj = players[lotIndex] || null;
 
       const payload = {
+        auctionState,
         lotIndex,
         currentBid,
         leadingBidderId,
@@ -10741,6 +12543,17 @@
 
     function applyAuthoritativeAuctionState(data, broadcast = false) {
       if (!data) return;
+
+      if (data.auctionState) {
+        auctionState = data.auctionState;
+        if (auctionState === 'PAUSED') {
+          auctionPaused = true;
+          timerRunning = false;
+          if (timerInterval) clearInterval(timerInterval);
+        } else if (auctionState === 'RUNNING') {
+          auctionPaused = false;
+        }
+      }
 
       lotIndex = typeof data.lotIndex === "number" ? data.lotIndex : lotIndex;
       currentBid = typeof data.currentBid === "number" ? data.currentBid : currentBid;
@@ -10793,6 +12606,12 @@
       }
       if (Array.isArray(data.auditLog) && data.auditLog.length > 0) {
         auditLog = data.auditLog;
+      }
+      if (Array.isArray(data.deletedFranchises)) {
+        deletedFranchises = data.deletedFranchises;
+      }
+      if (Array.isArray(data.dataOperations)) {
+        dataOperations = data.dataOperations;
       }
 
       if (window.RealtimeStore) {
@@ -10900,18 +12719,39 @@
       renderHeaderNav();
     }
 
-    function showToast(msg, type = "info") {
+    function showToast(msg, type = "info", actionText = null, actionCallback = null, duration = 4000) {
       const container = document.getElementById("toastContainer");
+      if (!container) return;
       const item = document.createElement("div");
       item.className = "toast-item";
+      item.style.display = "flex";
+      item.style.alignItems = "center";
+      item.style.justifyContent = "space-between";
+      item.style.gap = "12px";
       if (type === "error") item.style.borderColor = "var(--color-red)";
       if (type === "success") item.style.borderColor = "var(--color-green)";
-      item.innerText = msg;
+      
+      const span = document.createElement("span");
+      span.innerText = msg;
+      item.appendChild(span);
+
+      if (actionText && typeof actionCallback === 'function') {
+        const btn = document.createElement("button");
+        btn.innerText = actionText;
+        btn.style.cssText = "background: var(--color-green); color: #000; border: none; font-weight: 800; font-size: 0.72rem; padding: 4px 8px; border-radius: 3px; cursor: pointer; white-space: nowrap;";
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          actionCallback();
+          item.remove();
+        };
+        item.appendChild(btn);
+      }
+
       container.appendChild(item);
       setTimeout(() => {
         item.style.opacity = "0";
         setTimeout(() => item.remove(), 200);
-      }, 3000);
+      }, duration);
     }
 
     // ========================================================
