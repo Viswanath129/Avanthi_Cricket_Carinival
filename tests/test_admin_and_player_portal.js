@@ -41,7 +41,7 @@ const INITIAL_USERS = [
     email: "superadmin@acc.edu",
     passwordHash: "ACC@Admin#2026!",
     role: "SUPER_ADMIN",
-    name: "Dr. K. V. Raman",
+    name: "Mr. Deepak",
     status: "ACTIVE"
   },
   {

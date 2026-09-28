@@ -48,7 +48,7 @@ const users = [
     passwordHash: "ACC@Admin#2026!",
     role: "SUPER_ADMIN",
     identityType: "SUPER_ADMIN",
-    name: "Dr. K. V. Raman",
+    name: "Mr. Deepak",
     status: "ACTIVE"
   },
   {

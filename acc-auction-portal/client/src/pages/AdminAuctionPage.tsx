@@ -148,13 +148,7 @@ export default function AdminAuctionPage() {
             {' '} | Round: {auctionState?.currentRound || 1} | Bucket: {currentLot?.bucket || 'None'}
           </p>
         </div>
-        <div className="flex items-center gap-4">
-          <a href="/admin" className="text-xs font-mono text-orange-400 hover:underline">
-            ← DASHBOARD
-          </a>
-          <a href="/" className="text-xs font-mono text-slate-400 hover:text-white">
-            PUBLIC HOME
-          </a>
+        <div>
           <div className="flex border border-slate-700 rounded overflow-hidden">
             <button className="px-4 py-1 bg-slate-800 text-xs font-bold font-mono">GUEST</button>
             <button className="px-4 py-1 bg-slate-900 text-slate-500 text-xs font-bold font-mono">AUTO</button>

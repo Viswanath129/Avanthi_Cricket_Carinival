@@ -1,6 +1,6 @@
 {
   "hosting": {
-    "public": "acc-auction-portal/dist",
+    "public": "acc-auction-portal/dist/public",
     "ignore": [
       "firebase.json",
       "**/.*",
@@ -36,14 +36,6 @@
       }
     ],
     "rewrites": [
-      {
-        "source": "/portal",
-        "destination": "/portal.html"
-      },
-      {
-        "source": "/portal/**",
-        "destination": "/portal.html"
-      },
       {
         "source": "**",
         "destination": "/index.html"

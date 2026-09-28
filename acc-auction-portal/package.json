@@ -5,7 +5,7 @@
   "license": "MIT",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && node sync-dist.js",
+    "build": "tsc && vite build",
     "preview": "vite preview",
     "check": "tsc --noEmit",
     "format": "prettier --write .",

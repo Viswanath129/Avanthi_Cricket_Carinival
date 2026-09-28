@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils';
 const EDITION_ID = 'acc-2026';
 
 export default function FranchiseBiddingPage() {
-  const { user, userDoc, signOut } = useAuth();
+  const { user, userDoc } = useAuth();
   const [franchiseId, setFranchiseId] = useState<string | null>(null);
   const [lot, setLot] = useState<any>(null);
   const [auctionState, setAuctionState] = useState<any>(null);
@@ -148,25 +148,14 @@ export default function FranchiseBiddingPage() {
   const isActive = lot?.status === 'ACTIVE';
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-neutral-950 text-neutral-100 font-sans px-4 py-4 selection:bg-orange-500/30">
-      {/* 1. Header & Connection Status */}
-      <header className="flex items-center justify-between pb-3 mb-3 border-b border-neutral-900">
-        <div className="flex items-center space-x-2">
-          <div className={cn("w-2 h-2 rounded-full", isConnected ? "bg-green-500" : "bg-red-500 animate-pulse")} />
-          <span className={cn("text-xs font-mono tracking-wide uppercase", isConnected ? "text-green-500" : "text-red-500")}>
-            {isConnected ? "Live Connected" : "Reconnecting..."}
-          </span>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="text-xs font-mono text-neutral-400">{franchise?.name || 'Franchise'}</span>
-          <button 
-            onClick={async () => { await signOut(); window.location.href = '/'; }} 
-            className="text-xs text-red-400 font-semibold hover:text-red-300"
-          >
-            SIGN OUT
-          </button>
-        </div>
-      </header>
+    <div className="flex flex-col h-[100dvh] bg-neutral-950 text-neutral-100 font-sans px-4 py-6 selection:bg-orange-500/30">
+      {/* 1. Connection Status */}
+      <div className="flex items-center space-x-2 mb-4 justify-center">
+        <div className={cn("w-2 h-2 rounded-full", isConnected ? "bg-green-500" : "bg-red-500 animate-pulse")} />
+        <span className={cn("text-sm font-medium tracking-wide uppercase", isConnected ? "text-green-500" : "text-red-500")}>
+          {isConnected ? "Connected" : "Reconnecting..."}
+        </span>
+      </div>
 
       {lot && isActive ? (
         <div className="flex flex-col flex-grow">

@@ -51,7 +51,7 @@ export default function AdminDashboardPage() {
               Auction Control
             </a>
             <span className="text-xs text-[var(--muted-foreground)]">{user?.email}</span>
-            <button onClick={async () => { await signOut(); window.location.href = '/'; }} className="text-xs text-red-400 font-semibold hover:text-red-300">
+            <button onClick={() => signOut()} className="text-xs text-red-400 font-semibold hover:text-red-300">
               SIGN OUT
             </button>
           </div>

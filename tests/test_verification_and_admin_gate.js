@@ -73,8 +73,7 @@ const publicHtml = vm.runInContext("renderPublicView();", ctx);
 const nameInPublic = publicHtml.includes(testPlayer.name);
 console.log('Is unverified player visible on public catalog?', nameInPublic ? 'FAIL (Leak)' : 'PASS (Securely Hidden)');
 
-testPlayer.verificationStatus = 'VERIFIED';
-testPlayer.status = 'AVAILABLE';
+vm.runInContext(`adminVerifyPlayer(${testPlayer.id});`, ctx);
 const publicHtmlVerified = vm.runInContext("renderPublicView();", ctx);
 const verifiedInPublic = publicHtmlVerified.includes(testPlayer.name);
 console.log('Is verified player visible on public catalog?', verifiedInPublic ? 'PASS (Visible)' : 'FAIL');
