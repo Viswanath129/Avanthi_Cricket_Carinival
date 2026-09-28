@@ -161,8 +161,20 @@ function getPlayerAvatar(p, width = 80, height = 100) {
 
 // Evaluate extracted renderPlayerPortalView from index.html
 const startIdx = indexHtml.indexOf("function renderPlayerPortalView()");
-const endIdx = indexHtml.indexOf("function renderAdminConsoleView()", startIdx);
-assert(startIdx !== -1 && endIdx !== -1, "Could not find renderPlayerPortalView or renderAdminConsoleView");
+assert(startIdx !== -1, "Could not find renderPlayerPortalView");
+let depth = 0;
+let endIdx = -1;
+for (let i = indexHtml.indexOf('{', startIdx); i < indexHtml.length; i++) {
+  if (indexHtml[i] === '{') depth++;
+  else if (indexHtml[i] === '}') {
+    depth--;
+    if (depth === 0) {
+      endIdx = i + 1;
+      break;
+    }
+  }
+}
+assert(endIdx !== -1, "Could not find end of renderPlayerPortalView");
 const fullFunc = indexHtml.substring(startIdx, endIdx).trim();
 
 const renderPlayerPortalView = new Function(
