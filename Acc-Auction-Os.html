@@ -1926,7 +1926,7 @@
         if (roll.includes('MTECH') || roll.includes('M.TECH')) pgBranch = 'M.Tech';
         return {
           valid: true, program: 'PG', branch: pgBranch, entryType: 'Regular',
-          admissionYear: 2025, year: 2, bucket: 'M6', label: 'PG — MBA/MCA/M.Tech (M6)'
+          admissionYear: 2025, year: 2, bucket: 'NO_BUCKET', label: 'PG — MBA/MCA/M.Tech (Unrestricted / No Bucket)'
         };
       }
 
@@ -2353,6 +2353,14 @@
     let auctionState = 'IDLE';
     let timerInterval = null;
     let passedFranchiseIds = [];
+    let bidOrder = [];
+    let frozenRemainingSeconds = null;
+    let drawMode = 'AUTO'; // 'AUTO' or 'GUEST'
+    let lotsCompletedCount = 0;
+    window.superAdminName = localStorage.getItem("acc_superadmin_name") || "Mr. Deepak";
+    window.sessionMarker = "Session 2 — Day 1";
+    window.editionMarker = "ACC 2026";
+
     
     let adminNavTab = 'AUCTION'; // OVERVIEW, TEAMS, PLAYERS, REGISTRATIONS, AUCTION, ROUND 2, UNDO, AUDIT, EXPORT, SETTINGS, ADMIN ACCOUNTS
     let selectedPlayerDetailId = null;
@@ -2403,7 +2411,21 @@
         cricHeroesUrl: "",
         cricHeroesMobile: "",
         cricHeroesStatus: "PROFILE AVAILABLE",
-        basePrice: null
+        basePrice: null,
+        referredByFranchise: "None",
+        careerStats: {
+          matches: 0,
+          runs: 0,
+          battingAvg: 0.0,
+          strikeRate: 0.0,
+          highScore: 0,
+          wickets: 0,
+          bowlingAvg: 0.0,
+          economy: 0.0,
+          bestBowling: "0/0",
+          catches: 0,
+          stumpings: 0
+        }
       };
       regActiveSection = 1;
       window.isSubmittingRegistration = false;
@@ -2462,7 +2484,7 @@
     function deriveBucketFromAcademic(program, studyYear) {
       const yr = parseInt(studyYear, 10) || 1;
       if (program === 'Diploma') return 'D5';
-      if (program === 'PG') return 'M6';
+      if (program === 'PG') return 'NO_BUCKET';
       // B.Tech
       if (yr === 1) return 'B1';
       if (yr === 2) return 'B2';
@@ -5902,6 +5924,15 @@
         renderCurrentView();
         return;
       }
+      // Base Price Fixed Ladder Verification (§5)
+      const allowedBasePrices = [20, 30, 40, 50, 60, 70, 80, 90, 100, 120, 140, 160, 180, 200, 230, 250];
+      const parsedBasePrice = Number(regFormData.basePrice);
+      if (!allowedBasePrices.includes(parsedBasePrice)) {
+        showToast("Invalid base price: Must be selected from the fixed ladder: 20, 30, 40, 50, 60, 70, 80, 90, 100, 120, 140, 160, 180, 200, 230, 250", "error");
+        regActiveSection = 2;
+        renderCurrentView();
+        return;
+      }
       if (regFormData.cricHeroesStatus !== "PROFILE CREATION PENDING" && (!regFormData.cricHeroesUrl || !regFormData.cricHeroesUrl.trim())) {
         showToast("CricHeroes profile URL is required (or select 'PROFILE CREATION PENDING')", "error");
         regActiveSection = 2;
@@ -5973,6 +6004,11 @@
         battingPosition: regFormData.battingPosition || "Top Order (1-3)",
         battingArm: regFormData.battingArm || "Right Hand",
         bowlingArm: regFormData.bowlingArm || "Right Arm",
+        referredByFranchise: regFormData.referredByFranchise || "None",
+        careerStats: regFormData.careerStats || {
+          matches: 0, runs: 0, battingAvg: 0.0, strikeRate: 0.0, highScore: 0,
+          wickets: 0, bowlingAvg: 0.0, economy: 0.0, bestBowling: "0/0", catches: 0, stumpings: 0
+        },
         bowlingCategory: regFormData.bowlingCategory || "Medium",
         bowlingType: regFormData.bowlingType || "None",
         bowlingRole: regFormData.bowlingRole || "None",
@@ -8069,6 +8105,14 @@
                   <div style="margin-top: 10px; font-size: 0.8125rem; color: var(--color-green); font-weight: 700;">
                     DERIVED PLAYER ROLE: ${derivedType}
                   </div>
+                  <!-- Mandatory Batting Arm for ALL players (§5.1: Batting arm always asked regardless of Yes/No) -->
+                  <div class="form-group" style="margin-top: 12px; margin-bottom: 0;">
+                    <label class="form-label" style="margin-bottom: 4px;">BATTING HAND / ARM (ALL PLAYERS)</label>
+                    <select class="form-select" onchange="regFormData.battingArm = this.value; regFormData.battingStyle = this.value; renderCurrentView();">
+                      <option value="Right Hand" ${regFormData.battingArm === 'Right Hand' ? 'selected' : ''}>Right Hand</option>
+                      <option value="Left Hand" ${regFormData.battingArm === 'Left Hand' ? 'selected' : ''}>Left Hand</option>
+                    </select>
+                  </div>
                 </div>
 
                 <!-- Batting Branch -->
@@ -8121,6 +8165,77 @@
                     </div>
                   </div>
                 ` : ''}
+
+                <!-- Referral Team Picker (§5.4 & §6.2) -->
+                ${!(regFormData.entryType === 'Lateral' && (regFormData.admissionYear && regFormData.admissionYear < 2026)) ? `
+                  <div class="form-group" style="background: var(--surface-2); padding: var(--space-4); border-radius: var(--radius-md); border: 1px solid var(--border-subtle); margin-top: var(--space-3);">
+                    <label class="form-label">WHICH FRANCHISE REFERRED YOU? (ACC 2026 REFERRAL)</label>
+                    <select class="form-select" onchange="regFormData.referredByFranchise = this.value; renderCurrentView();">
+                      <option value="None" ${regFormData.referredByFranchise === 'None' ? 'selected' : ''}>None (Direct Open Pool Registration)</option>
+                      ${franchises.map(f => `<option value="${f.name}" ${regFormData.referredByFranchise === f.name ? 'selected' : ''}>${f.name} (Team #${f.id})</option>`).join('')}
+                    </select>
+                    <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">
+                      If nominated as a team referred player, declaration must match franchise submission.
+                    </div>
+                  </div>
+                ` : ''}
+
+                <!-- 11 Career Statistics Fields (§5.3: matches, runs, avg, SR, HS, wickets, bowling avg, economy, best bowling, catches, stumpings) -->
+                <div style="background: var(--surface-2); padding: var(--space-4); border-radius: var(--radius-md); border: 1px solid var(--border-subtle); margin-top: var(--space-3);">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <label class="form-label" style="margin-bottom: 0;">CAREER STATISTICS (11 OFFICIAL FIELDS)</label>
+                    <span class="status-badge status-warning" style="font-size: 0.65rem;">SELF-DECLARED</span>
+                  </div>
+                  <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 12px;">
+                    Enter your lifetime/recent cricket performance. Figures are labelled 'Self-Declared' and manually verified by the ACC committee.
+                  </div>
+                  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px;">
+                    <div>
+                      <label style="font-size: 0.7rem; color: var(--text-muted);">Matches</label>
+                      <input type="number" class="form-input font-mono" value="${regFormData.careerStats ? regFormData.careerStats.matches : 0}" oninput="if(!regFormData.careerStats) regFormData.careerStats={}; regFormData.careerStats.matches = parseInt(this.value, 10) || 0;">
+                    </div>
+                    <div>
+                      <label style="font-size: 0.7rem; color: var(--text-muted);">Runs</label>
+                      <input type="number" class="form-input font-mono" value="${regFormData.careerStats ? regFormData.careerStats.runs : 0}" oninput="if(!regFormData.careerStats) regFormData.careerStats={}; regFormData.careerStats.runs = parseInt(this.value, 10) || 0;">
+                    </div>
+                    <div>
+                      <label style="font-size: 0.7rem; color: var(--text-muted);">Batting Avg</label>
+                      <input type="number" step="0.1" class="form-input font-mono" value="${regFormData.careerStats ? regFormData.careerStats.battingAvg : 0}" oninput="if(!regFormData.careerStats) regFormData.careerStats={}; regFormData.careerStats.battingAvg = parseFloat(this.value) || 0;">
+                    </div>
+                    <div>
+                      <label style="font-size: 0.7rem; color: var(--text-muted);">Strike Rate</label>
+                      <input type="number" step="0.1" class="form-input font-mono" value="${regFormData.careerStats ? regFormData.careerStats.strikeRate : 0}" oninput="if(!regFormData.careerStats) regFormData.careerStats={}; regFormData.careerStats.strikeRate = parseFloat(this.value) || 0;">
+                    </div>
+                    <div>
+                      <label style="font-size: 0.7rem; color: var(--text-muted);">High Score</label>
+                      <input type="number" class="form-input font-mono" value="${regFormData.careerStats ? regFormData.careerStats.highScore : 0}" oninput="if(!regFormData.careerStats) regFormData.careerStats={}; regFormData.careerStats.highScore = parseInt(this.value, 10) || 0;">
+                    </div>
+                    <div>
+                      <label style="font-size: 0.7rem; color: var(--text-muted);">Wickets</label>
+                      <input type="number" class="form-input font-mono" value="${regFormData.careerStats ? regFormData.careerStats.wickets : 0}" oninput="if(!regFormData.careerStats) regFormData.careerStats={}; regFormData.careerStats.wickets = parseInt(this.value, 10) || 0;">
+                    </div>
+                    <div>
+                      <label style="font-size: 0.7rem; color: var(--text-muted);">Bowling Avg</label>
+                      <input type="number" step="0.1" class="form-input font-mono" value="${regFormData.careerStats ? regFormData.careerStats.bowlingAvg : 0}" oninput="if(!regFormData.careerStats) regFormData.careerStats={}; regFormData.careerStats.bowlingAvg = parseFloat(this.value) || 0;">
+                    </div>
+                    <div>
+                      <label style="font-size: 0.7rem; color: var(--text-muted);">Economy</label>
+                      <input type="number" step="0.1" class="form-input font-mono" value="${regFormData.careerStats ? regFormData.careerStats.economy : 0}" oninput="if(!regFormData.careerStats) regFormData.careerStats={}; regFormData.careerStats.economy = parseFloat(this.value) || 0;">
+                    </div>
+                    <div>
+                      <label style="font-size: 0.7rem; color: var(--text-muted);">Best Bowling</label>
+                      <input type="text" class="form-input font-mono" value="${regFormData.careerStats ? regFormData.careerStats.bestBowling : '0/0'}" oninput="if(!regFormData.careerStats) regFormData.careerStats={}; regFormData.careerStats.bestBowling = this.value;">
+                    </div>
+                    <div>
+                      <label style="font-size: 0.7rem; color: var(--text-muted);">Catches</label>
+                      <input type="number" class="form-input font-mono" value="${regFormData.careerStats ? regFormData.careerStats.catches : 0}" oninput="if(!regFormData.careerStats) regFormData.careerStats={}; regFormData.careerStats.catches = parseInt(this.value, 10) || 0;">
+                    </div>
+                    <div>
+                      <label style="font-size: 0.7rem; color: var(--text-muted);">Stumpings</label>
+                      <input type="number" class="form-input font-mono" value="${regFormData.careerStats ? regFormData.careerStats.stumpings : 0}" oninput="if(!regFormData.careerStats) regFormData.careerStats={}; regFormData.careerStats.stumpings = parseInt(this.value, 10) || 0;">
+                    </div>
+                  </div>
+                </div>
 
                 <!-- CricHeroes Details -->
                 <div class="form-grid-2col" style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4);">
@@ -8954,6 +9069,332 @@
     }
 
     
+    
+    // ========================================================
+    // ADMIN DASHBOARD EXTENDED RECOVERY & GOVERNANCE FUNCTIONS
+    // ========================================================
+    function openBehalfBidModal() {
+      const cur = players[lotIndex];
+      if (!cur || cur.status !== 'AVAILABLE') {
+        showToast("No active lot available to bid on behalf.", "warning");
+        return;
+      }
+      const modal = document.getElementById("modalContainer");
+      modal.innerHTML = `
+        <div class="modal-overlay" onclick="closeModal()">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 520px;">
+            <span class="status-badge status-warning">FAILED DEVICE RECOVERY (§14 / §5.8)</span>
+            <h2 style="font-family: var(--font-display); font-size: 1.4rem; font-weight: 800; color: var(--text-bright); margin: 6px 0;">
+              BID ON BEHALF OF FRANCHISE
+            </h2>
+            <p style="color: var(--text-muted); font-size: 0.8125rem; margin-bottom: 12px;">
+              For franchises experiencing hardware or network connectivity failure. This bid is logged as an official operator action with full accountability.
+            </p>
+            <div class="form-group" style="margin-bottom: 12px;">
+              <label class="form-label">SELECT FRANCHISE</label>
+              <select id="behalfFranchiseSelect" class="form-select">
+                ${franchises.map(f => {
+                  const maxB = calculateMaxBid(f.id, cur.bucket);
+                  const nextB = currentBid + getBidIncrement(currentBid);
+                  const eligible = maxB >= nextB;
+                  return `<option value="${f.id}" ${!eligible ? 'disabled' : ''}>${f.name} (Purse: ${f.purse}C | Max: ${maxB}C ${!eligible ? '— BLOCKED' : ''})</option>`;
+                }).join('')}
+              </select>
+            </div>
+            <div id="behalfPreviewNotice" style="background: var(--surface-2); padding: 10px; border-radius: 6px; font-size: 0.8125rem; margin-bottom: 16px;">
+              Next Bid: <strong class="font-mono" style="color: var(--color-green);">${currentBid + getBidIncrement(currentBid)}C</strong>
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+              <button class="btn btn-secondary" onclick="closeModal()">CANCEL (Esc)</button>
+              <button class="btn btn-primary" onclick="executeBehalfBid()">SUBMIT BEHALF BID</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function executeBehalfBid() {
+      const sel = document.getElementById("behalfFranchiseSelect");
+      if (!sel) return;
+      const fId = parseInt(sel.value, 10);
+      const f = franchises.find(item => item.id === fId);
+      if (!f) return;
+      const opName = currentUser.role === 'SUPER_ADMIN' ? (window.superAdminName || 'Super Admin — Mr. Deepak') : (currentUser.name || 'Operator');
+      
+      window.currentBidIsBehalf = true;
+      window.currentBidOperator = opName;
+      placeBid(fId);
+      window.currentBidIsBehalf = false;
+      closeModal();
+      showToast(`Behalf bid submitted for ${f.name} by ${opName}`, "info");
+    }
+
+    function openDirectAssignModal() {
+      const cur = players[lotIndex];
+      const modal = document.getElementById("modalContainer");
+      modal.innerHTML = `
+        <div class="modal-overlay" onclick="closeModal()">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 520px;">
+            <span class="status-badge status-blocked">EMERGENCY ASSIGNMENT (§14)</span>
+            <h2 style="font-family: var(--font-display); font-size: 1.4rem; font-weight: 800; color: var(--text-bright); margin: 6px 0;">
+              DIRECT ASSIGN PLAYER
+            </h2>
+            <p style="color: var(--text-muted); font-size: 0.8125rem; margin-bottom: 12px;">
+              Direct-assign any player to any franchise at a typed price. Bypasses standard bidding; writes forensic audit trail.
+            </p>
+            <div class="form-group" style="margin-bottom: 10px;">
+              <label class="form-label">PLAYER</label>
+              <select id="directAssignPlayerSelect" class="form-select">
+                ${players.filter(p => p.status !== 'SOLD').map(p => `<option value="${p.id}" ${cur && p.id === cur.id ? 'selected' : ''}>#${p.id} ${p.name} (${p.bucket || 'PG'}) — Base: ${p.basePrice}C</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group" style="margin-bottom: 10px;">
+              <label class="form-label">ASSIGN TO FRANCHISE</label>
+              <select id="directAssignFranchiseSelect" class="form-select">
+                ${franchises.map(f => `<option value="${f.id}">${f.name} (Purse: ${f.purse}C | Squad: ${(f.squad||[]).length}/18)</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group" style="margin-bottom: 16px;">
+              <label class="form-label">TYPED PRICE (CREDITS)</label>
+              <input type="number" id="directAssignPrice" class="form-input font-mono" value="${cur ? cur.basePrice : 60}" min="20" max="1000">
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+              <button class="btn btn-secondary" onclick="closeModal()">CANCEL (Esc)</button>
+              <button class="btn btn-primary" onclick="executeDirectAssign()">CONFIRM ASSIGNMENT</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function executeDirectAssign() {
+      const pId = parseInt(document.getElementById("directAssignPlayerSelect").value, 10);
+      const fId = parseInt(document.getElementById("directAssignFranchiseSelect").value, 10);
+      const price = parseInt(document.getElementById("directAssignPrice").value, 10);
+      
+      const player = players.find(p => p.id === pId);
+      const franchise = franchises.find(f => f.id === fId);
+      if (!player || !franchise) return;
+      
+      if (isNaN(price) || price < 20) {
+        showToast("Invalid price. Minimum 20 credits required.", "error");
+        return;
+      }
+      if (franchise.purse < price) {
+        showToast(`Insufficient purse: ${franchise.name} only has ${franchise.purse} credits.`, "error");
+        return;
+      }
+      
+      franchise.purse -= price;
+      if (!franchise.squad) franchise.squad = [];
+      const assignedRecord = {
+        ...player,
+        salePrice: price,
+        boughtPrice: price,
+        franchiseId: fId,
+        franchiseName: franchise.name,
+        assignedAt: Date.now(),
+        isDirectAssign: true
+      };
+      franchise.squad.push(assignedRecord);
+      player.status = 'SOLD';
+      player.franchiseId = fId;
+      player.franchiseName = franchise.name;
+      player.salePrice = price;
+      
+      const opName = currentUser.role === 'SUPER_ADMIN' ? (window.superAdminName || 'Super Admin') : (currentUser.name || 'Operator');
+      appendAuditTrail({
+        type: 'DIRECT_ASSIGN',
+        lotId: player.id,
+        playerId: player.id,
+        playerName: player.name,
+        franchiseId: fId,
+        franchiseName: franchise.name,
+        price: price,
+        operator: opName,
+        timestamp: Date.now()
+      });
+      
+      closeModal();
+      saveState();
+      broadcastAuthoritativeState();
+      showToast(`Direct assigned ${player.name} to ${franchise.name} for ${price}C`, "success");
+      renderCurrentView();
+    }
+
+    function openRelaxationModal() {
+      if (currentUser.role !== 'SUPER_ADMIN') {
+        showToast("Access Denied: Uniform quota relaxation is strictly restricted to Super Admin.", "error");
+        return;
+      }
+      const modal = document.getElementById("modalContainer");
+      const bMins = window.bucketMinimums || { B1: 2, B2: 2, B3: 2, B4: 2, D5: 2 };
+      modal.innerHTML = `
+        <div class="modal-overlay" onclick="closeModal()">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 520px;">
+            <span class="status-badge status-warning">TOURNAMENT GOVERNANCE (§7)</span>
+            <h2 style="font-family: var(--font-display); font-size: 1.4rem; font-weight: 800; color: var(--text-bright); margin: 6px 0;">
+              RELAX BUCKET MINIMUM QUOTA
+            </h2>
+            <p style="color: var(--text-muted); font-size: 0.8125rem; margin-bottom: 12px;">
+              <strong>Uniform Rule:</strong> Minimum quota adjustments apply uniformly to all 11 franchises, never to one.
+            </p>
+            <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px;">
+              ${['B1', 'B2', 'B3', 'B4', 'D5'].map(b => `
+                <div style="display: flex; justify-content: space-between; align-items: center; background: var(--surface-2); padding: 8px 12px; border-radius: 6px;">
+                  <strong>Bucket ${b} (${b === 'D5' ? 'Diploma' : 'Year ' + b.slice(1)})</strong>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 0.75rem; color: var(--text-muted);">Current: ${bMins[b] || 2}</span>
+                    <select id="relaxMin_${b}" class="form-select" style="width: 80px; padding: 4px;">
+                      <option value="2" ${(bMins[b] || 2) === 2 ? 'selected' : ''}>2</option>
+                      <option value="1" ${(bMins[b] || 2) === 1 ? 'selected' : ''}>1</option>
+                      <option value="0" ${(bMins[b] || 2) === 0 ? 'selected' : ''}>0</option>
+                    </select>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+              <button class="btn btn-secondary" onclick="closeModal()">CANCEL</button>
+              <button class="btn btn-primary" onclick="executeRelaxBucketMinimum()">APPLY UNIFORMLY</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function executeRelaxBucketMinimum() {
+      if (currentUser.role !== 'SUPER_ADMIN') {
+        showToast("Access Denied: Super Admin only.", "error");
+        return;
+      }
+      if (!window.bucketMinimums) window.bucketMinimums = { B1: 2, B2: 2, B3: 2, B4: 2, D5: 2 };
+      ['B1', 'B2', 'B3', 'B4', 'D5'].forEach(b => {
+        const el = document.getElementById("relaxMin_" + b);
+        if (el) window.bucketMinimums[b] = parseInt(el.value, 10);
+      });
+      localStorage.setItem("acc_bucket_minimums_2026", JSON.stringify(window.bucketMinimums));
+      appendAuditTrail({
+        type: 'UNIFORM_RELAXATION',
+        bucketMinimums: { ...window.bucketMinimums },
+        operator: window.superAdminName || 'Super Admin — Mr. Deepak',
+        timestamp: Date.now()
+      });
+      closeModal();
+      saveState();
+      broadcastAuthoritativeState();
+      showToast("Bucket minimums updated uniformly for all 11 franchises.", "success");
+      renderCurrentView();
+    }
+
+    function downloadSnapshot() {
+      const snapshotData = {
+        edition: window.editionMarker || 'ACC 2026',
+        session: window.sessionMarker || 'Session 2 — Day 1',
+        timestamp: new Date().toISOString(),
+        lotIndex,
+        currentBid,
+        leadingBidderId,
+        auctionPaused,
+        timerSeconds,
+        bucketMinimums: window.bucketMinimums || { B1: 2, B2: 2, B3: 2, B4: 2, D5: 2 },
+        franchises,
+        players,
+        auditTrail: auditLedger
+      };
+      const jsonStr = JSON.stringify(snapshotData, null, 2);
+      const blob = new Blob([jsonStr], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `ACC_Auction_Snapshot_${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast("Auction state snapshot downloaded successfully (Ctrl+S)", "success");
+    }
+
+    function autoSnapshotCheck() {
+      lotsCompletedCount++;
+      if (lotsCompletedCount % 10 === 0) {
+        const key = `acc_snapshot_lot_${lotsCompletedCount}_${Date.now()}`;
+        const data = {
+          lotIndex, currentBid, leadingBidderId, franchises, players, auditTrail: auditLedger
+        };
+        try {
+          localStorage.setItem(key, JSON.stringify(data));
+          console.log(`[ACC] Automatic snapshot saved at lot #${lotsCompletedCount}: ${key}`);
+        } catch (e) {
+          console.warn("Auto-snapshot localStorage quota exceeded", e);
+        }
+      }
+    }
+
+    function toggleDrawMode() {
+      drawMode = drawMode === 'AUTO' ? 'GUEST' : 'AUTO';
+      showToast(`Draw mode switched to: ${drawMode}`, "info");
+      renderCurrentView();
+    }
+
+    function openShortcutsHelpModal() {
+      const modal = document.getElementById("modalContainer");
+      modal.innerHTML = `
+        <div class="modal-overlay" onclick="closeModal()">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 540px;">
+            <span class="status-badge status-connected">ACC AUCTIONEER PRODUCTIVITY</span>
+            <h2 style="font-family: var(--font-display); font-size: 1.4rem; font-weight: 800; color: var(--text-bright); margin: 6px 0;">
+              KEYBOARD SHORTCUTS REFERENCE
+            </h2>
+            <div style="display: grid; grid-template-columns: 80px 1fr; gap: 8px; font-size: 0.8125rem; margin: 16px 0; background: var(--surface-2); padding: 12px; border-radius: 6px;">
+              <div><kbd class="font-mono" style="background: #000; color: #fff; padding: 2px 6px; border-radius: 4px;">H</kbd></div><div>Hammer (Commit Sale modal)</div>
+              <div><kbd class="font-mono" style="background: #000; color: #fff; padding: 2px 6px; border-radius: 4px;">S</kbd></div><div>Skip Lot (Send to recall queue)</div>
+              <div><kbd class="font-mono" style="background: #000; color: #fff; padding: 2px 6px; border-radius: 4px;">P</kbd></div><div>Pause / Resume Timer</div>
+              <div><kbd class="font-mono" style="background: #000; color: #fff; padding: 2px 6px; border-radius: 4px;">U</kbd></div><div>Undo Sale (Pick any sold lot)</div>
+              <div><kbd class="font-mono" style="background: #000; color: #fff; padding: 2px 6px; border-radius: 4px;">B</kbd></div><div>Bid on Behalf (Failed device)</div>
+              <div><kbd class="font-mono" style="background: #000; color: #fff; padding: 2px 6px; border-radius: 4px;">A</kbd></div><div>Direct Assign (Typed price)</div>
+              <div><kbd class="font-mono" style="background: #000; color: #fff; padding: 2px 6px; border-radius: 4px;">D</kbd></div><div>Switch Draw Mode (Guest ↔ Auto)</div>
+              <div><kbd class="font-mono" style="background: #000; color: #fff; padding: 2px 6px; border-radius: 4px;">R</kbd></div><div>Relax Bucket Minimum (Super Admin)</div>
+              <div><kbd class="font-mono" style="background: #000; color: #fff; padding: 2px 6px; border-radius: 4px;">Space</kbd></div><div>Auto Draw Next Lot</div>
+              <div><kbd class="font-mono" style="background: #000; color: #fff; padding: 2px 6px; border-radius: 4px;">Ctrl+E</kbd></div><div>Export Tournament Data</div>
+              <div><kbd class="font-mono" style="background: #000; color: #fff; padding: 2px 6px; border-radius: 4px;">Ctrl+S</kbd></div><div>Download State Snapshot JSON</div>
+              <div><kbd class="font-mono" style="background: #000; color: #fff; padding: 2px 6px; border-radius: 4px;">?</kbd></div><div>Toggle Shortcuts Help</div>
+            </div>
+            <div style="text-align: right;">
+              <button class="btn btn-secondary" onclick="closeModal()">CLOSE (Esc)</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Global Keyboard Shortcut Listener
+    if (!window.accShortcutsListenerBound) {
+      window.accShortcutsListenerBound = true;
+      window.addEventListener('keydown', (e) => {
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+        const key = e.key.toUpperCase();
+        if (e.ctrlKey && key === 'E') { e.preventDefault(); exportTournamentData(); return; }
+        if (e.ctrlKey && key === 'S') { e.preventDefault(); downloadSnapshot(); return; }
+        
+        if (key === 'ESCAPE') { closeModal(); return; }
+        if (key === '?') { e.preventDefault(); openShortcutsHelpModal(); return; }
+
+        if (adminNavTab !== 'AUCTION') return;
+
+        if (key === 'H') { e.preventDefault(); openHammerConfirmModal(); }
+        else if (key === 'S') { e.preventDefault(); skipPlayer(); }
+        else if (key === 'P') { e.preventDefault(); toggleAuctionPause(); }
+        else if (key === 'U') { e.preventDefault(); openUndoModal(); }
+        else if (key === 'B') { e.preventDefault(); openBehalfBidModal(); }
+        else if (key === 'A') { e.preventDefault(); openDirectAssignModal(); }
+        else if (key === 'D') { e.preventDefault(); toggleDrawMode(); }
+        else if (key === 'R') { e.preventDefault(); openRelaxationModal(); }
+        else if (key === ' ') { e.preventDefault(); drawNextPlayer(); }
+      });
+    }
+
+
     function renderAdminConsoleView() {
       const cur = players[lotIndex] || players[0];
       const leader = franchises.find(f => f.id === leadingBidderId);
@@ -9536,98 +9977,369 @@
               `}
             </div>
           ` : adminNavTab === 'AUCTION' ? `
-            <!-- TAB: AUCTION CONTROLS & DESK -->
-            <div style="display: flex; flex-direction: column; gap: var(--space-5);">
-              
-              <!-- Telemetry Bar -->
-              <div class="surface-card" style="padding: var(--space-4); border-left: 3px solid var(--color-green);">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
-                  <span class="label-micro" style="color: var(--color-green); margin: 0;">REALTIME TELEMETRY MONITOR (DEDUPLICATED)</span>
-                  <span class="status-badge status-connected" style="font-size: 0.65rem;">FIREBASE RTDB ACTIVE</span>
+            <!-- ======================================================== -->
+            <!-- ADMIN DASHBOARD: 1-SCREEN LIVE CONTROL SURFACE (§1 - §12) -->
+            <!-- ======================================================== -->
+            <div class="admin-live-control-surface" style="display: flex; flex-direction: column; gap: 8px; width: 100%; box-sizing: border-box;">
+
+              <!-- REGION 1: STATUS BAR (Always Visible) -->
+              <div class="surface-card" style="padding: 8px 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; background: #0b1120; border-color: #1e293b;">
+                <div style="display: flex; align-items: center; gap: 14px; font-size: 0.75rem;">
+                  <div>
+                    <span class="label-micro" style="color: var(--color-green);">EDITION</span>
+                    <strong style="color: #fff;">${window.editionMarker || 'ACC 2026'}</strong>
+                  </div>
+                  <div style="color: #334155;">|</div>
+                  <div>
+                    <span class="label-micro" style="color: var(--color-blue);">SESSION</span>
+                    <strong style="color: #fff;">${window.sessionMarker || 'Session 2 — Day 1'}</strong>
+                  </div>
+                  <div style="color: #334155;">|</div>
+                  <div>
+                    <span class="label-micro" style="color: var(--color-orange);">DRAW MODE</span>
+                    <strong style="color: #fff;">${drawMode}</strong>
+                    <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 0.65rem; margin-left: 4px;" onclick="toggleDrawMode()">[D] TOGGLE</button>
+                  </div>
+                  <div style="color: #334155;">|</div>
+                  <div>
+                    <span class="label-micro">NETWORK</span>
+                    <span style="color: #10b981; font-weight: 700;">● MESH HEALTHY</span>
+                  </div>
+                  <div style="color: #334155;">|</div>
+                  <div>
+                    <span class="label-micro">CLOCK SYNC</span>
+                    <span class="font-mono" style="color: #94a3b8;">Synced ±0ms</span>
+                  </div>
                 </div>
-                <div class="admin-telemetry-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px;">
-                  <div style="background: var(--surface-2); padding: 8px 12px; border-radius: 6px;">
-                    <div class="label-micro" style="font-size: 0.65rem; color: var(--text-muted);">LIVE USERS</div>
-                    <div class="font-mono" style="font-size: 1.3rem; font-weight: 800; color: var(--text-bright);">${(window.RealtimeStore && window.RealtimeStore.state.presence.liveUsers) || liveUsersCount}</div>
+
+                <div style="display: flex; align-items: center; gap: 12px;">
+                  <div>
+                    <span class="label-micro">AUCTION STATE</span>
+                    <span class="status-badge ${auctionPaused ? 'status-warning' : timerSeconds === 0 ? 'status-blocked' : 'status-inplay'}" style="font-size: 0.7rem;">
+                      ${auctionPaused ? 'PAUSED' : timerSeconds === 0 ? 'TIMER EXPIRED' : 'LOT OPEN'}
+                    </span>
                   </div>
-                  <div style="background: var(--surface-2); padding: 8px 12px; border-radius: 6px;">
-                    <div class="label-micro" style="font-size: 0.65rem; color: var(--color-orange);">ACTIVE FRANCHISES</div>
-                    <div class="font-mono" style="font-size: 1.3rem; font-weight: 800; color: var(--color-orange);">${(window.RealtimeStore && window.RealtimeStore.state.presence.activeFranchises) || 0} / 11</div>
-                  </div>
-                  <div style="background: var(--surface-2); padding: 8px 12px; border-radius: 6px;">
-                    <div class="label-micro" style="font-size: 0.65rem; color: var(--color-blue);">ACTIVE TEAM LEADS</div>
-                    <div class="font-mono" style="font-size: 1.3rem; font-weight: 800; color: var(--color-blue);">${(window.RealtimeStore && window.RealtimeStore.state.presence.activeTeamLeads) || 0}</div>
-                  </div>
-                  <div style="background: var(--surface-2); padding: 8px 12px; border-radius: 6px;">
-                    <div class="label-micro" style="font-size: 0.65rem; color: var(--color-purple);">ACTIVE PLAYERS</div>
-                    <div class="font-mono" style="font-size: 1.3rem; font-weight: 800; color: var(--color-purple);">${(window.RealtimeStore && window.RealtimeStore.state.presence.activePlayers) || 0}</div>
-                  </div>
-                  <div style="background: var(--surface-2); padding: 8px 12px; border-radius: 6px;">
-                    <div class="label-micro" style="font-size: 0.65rem; color: var(--text-subtle);">PUBLIC VIEWERS</div>
-                    <div class="font-mono" style="font-size: 1.3rem; font-weight: 800; color: var(--text-muted);">${(window.RealtimeStore && window.RealtimeStore.state.presence.publicViewers) || 1}</div>
+                  <div style="color: #334155;">|</div>
+                  <div style="font-size: 0.75rem; color: #cbd5e1;">
+                    <span class="label-micro">OPERATOR</span>
+                    <strong>${currentUser.role === 'SUPER_ADMIN' ? 'Super Admin — ' + (window.superAdminName || 'Mr. Deepak') : 'Operator — ' + (currentUser.name || 'Official')}</strong>
                   </div>
                 </div>
               </div>
 
-              <!-- Current Lot Operational Arena -->
-              <div class="responsive-split-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--space-5);">
-                <div class="surface-card" style="padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-4);">
-                  <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span class="status-badge status-inplay">ACTIVE LOT #${cur.id}</span>
-                    <div class="auction-timer-widget ${timerSeconds <= 5 ? 'critical' : timerSeconds <= 10 ? 'warning' : 'normal'}" style="padding: 4px 10px; gap: 8px;">
-                      ${getHourglassSvg(24)}
-                      <span class="label-micro font-mono" style="font-weight: 800;">${timerSeconds}s</span>
+              <!-- REGION 2: LOT STRIP -->
+              <div class="surface-card" style="padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; background: #0f172a; border-color: #334155; gap: 12px;">
+                <div style="display: flex; align-items: center; gap: 14px;">
+                  <div style="width: 72px; height: 72px; border-radius: 6px; overflow: hidden; background: #1e293b; display: flex; align-items: center; justify-content: center; border: 1px solid #475569; flex-shrink: 0;">
+                    ${cur.photo ? `<img src="${cur.photo}" style="width: 100%; height: 100%; object-fit: cover;">` : `<span style="font-size: 1.8rem; font-weight: 800; color: #64748b;">${cur.name.charAt(0)}</span>`}
+                  </div>
+                  <div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <span class="status-badge status-inplay" style="font-size: 0.65rem;">LOT #${cur.id}</span>
+                      <span class="status-badge" style="background: rgba(16,185,129,0.15); color: #10b981; border: 1px solid #10b981; font-size: 0.65rem;">
+                        ${cur.bucket === 'NO_BUCKET' ? 'PG (No Bucket)' : cur.bucket}
+                      </span>
+                      <span class="status-badge" style="background: #334155; color: #f8fafc; font-size: 0.65rem;">${cur.derivedType || 'ALL-ROUNDER'}</span>
+                      ${cur.isCurrentYearAdmission ? '<span class="status-badge status-connected" style="font-size: 0.6rem;">CURRENT-YEAR ADMIT</span>' : ''}
+                      ${cur.cricHeroesStatus === 'PROFILE CREATION PENDING' ? '<span class="status-badge status-warning" style="font-size: 0.6rem;">CRICHEROES PENDING</span>' : '<span class="status-badge status-connected" style="font-size: 0.6rem;">CRICHEROES VERIFIED</span>'}
                     </div>
-                  </div>
-
-                  <div style="display: flex; gap: var(--space-3); align-items: center;">
-                    ${getPlayerAvatar(cur, 90, 110)}
-                    <div>
-                      <div class="label-micro" style="color: var(--color-green);">${cur.bucket} • ${cur.derivedType || 'BATTER'}</div>
-                      <h3 style="font-family: var(--font-display); font-size: 1.4rem; font-weight: 800; color: var(--text-bright);">${cur.name}</h3>
-                      <div style="font-size: 0.8125rem; color: var(--text-muted);">${cur.program} · ${cur.branch} · Year ${cur.year}</div>
-                      <div class="font-mono" style="font-size: 0.75rem; color: var(--text-faint);">Roll: ${cur.roll} • Base: ${cur.basePrice}C</div>
+                    <div style="font-family: var(--font-display); font-size: 1.3rem; font-weight: 800; color: #ffffff; margin-top: 2px;">
+                      ${cur.name}
                     </div>
-                  </div>
-
-                  <!-- Primary Execution Controls -->
-                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-2);">
-                    <button class="btn btn-primary" style="min-height: 52px; font-size: 1rem;" onclick="openHammerConfirmModal()">
-                      HAMMER (SOLD)
-                    </button>
-                    <button class="btn btn-danger" style="min-height: 52px; font-size: 1rem;" onclick="executeHammerUnsold()">
-                      MARK UNSOLD
-                    </button>
-                  </div>
-
-                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
-                    <button class="btn btn-secondary" onclick="skipPlayer()">SKIP LOT</button>
-                    <button class="btn btn-secondary" onclick="drawNextPlayer()">NEXT LOT</button>
+                    <div style="font-size: 0.75rem; color: #94a3b8;">
+                      Roll: <strong class="font-mono" style="color: #38bdf8;">${cur.roll}</strong> • ${cur.program} · ${cur.department || cur.branch} · Year ${cur.year} • Bat: ${cur.battingArm || 'Right Hand'} • Bowl: ${cur.bowlingArm || 'Right Arm'}
+                    </div>
                   </div>
                 </div>
 
-                <!-- Current Bid & Direct Injection -->
-                <div class="surface-elevated" style="padding: var(--space-5); display: flex; flex-direction: column; justify-content: space-between;">
+                <div style="text-align: right; display: flex; align-items: center; gap: 20px;">
                   <div>
-                    <span class="label-micro">CURRENT AUCTION STATE</span>
-                    <div class="price-display" style="font-size: 3.5rem; color: var(--color-orange); margin: 6px 0;">
-                      ${currentBid} <span style="font-size: 1.15rem; color: var(--text-muted);">C</span>
+                    <span class="label-micro">BASE PRICE</span>
+                    <div class="font-mono" style="font-size: 1.4rem; font-weight: 800; color: #10b981;">${cur.basePrice}C</div>
+                  </div>
+                  <div>
+                    <span class="label-micro">STATUS</span>
+                    <div><span class="status-badge ${cur.status === 'SOLD' ? 'status-connected' : cur.status === 'UNSOLD' ? 'status-blocked' : 'status-inplay'}">${cur.status}</span></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- REGION 3: LIVE BID, IN-PLAY/PASSED/BLOCKED & SCARCITY -->
+              <div style="display: grid; grid-template-columns: 260px 1fr 280px; gap: 8px; min-height: 280px;">
+                
+                <!-- 3A. LEFT: IN-PLAY, PASSED & BLOCKED FRANCHISES -->
+                <div class="surface-card" style="padding: 10px; display: flex; flex-direction: column; gap: 8px; font-size: 0.75rem; overflow-y: auto; max-height: 310px;">
+                  <div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                      <span class="label-micro" style="color: var(--color-green);">IN-PLAY FRANCHISES</span>
+                      <span class="font-mono" style="font-size: 0.7rem; color: #10b981;">${franchises.filter(f => !passedFranchiseIds.includes(f.id) && calculateMaxBid(f.id, cur.bucket) >= (currentBid + getBidIncrement(currentBid))).length}</span>
                     </div>
-                    <div style="font-size: 0.875rem; color: var(--text-bright);">Held by: <strong>${leader ? leader.name : 'NO BIDS'}</strong></div>
+                    <div style="display: flex; flex-direction: column; gap: 3px;">
+                      ${franchises.map(f => {
+                        const nextB = currentBid + getBidIncrement(currentBid);
+                        const maxB = calculateMaxBid(f.id, cur.bucket);
+                        const isPassed = passedFranchiseIds.includes(f.id);
+                        const isLeader = f.id === leadingBidderId;
+                        let blockedReason = null;
+                        if ((f.squad || []).length >= 22) blockedReason = 'already at 22';
+                        else if (f.purse < nextB) blockedReason = 'no purse';
+                        else if (!checkSlotProtection(f.id, cur.bucket).eligible) blockedReason = 'mandatory slot locked';
+                        else if (nextB > maxB) blockedReason = 'maxBid exceeded';
+
+                        if (blockedReason || isPassed) return '';
+                        return `
+                          <div style="display: flex; justify-content: space-between; align-items: center; background: #1e293b; padding: 4px 8px; border-radius: 4px; border-left: 3px solid ${isLeader ? '#f59e0b' : '#10b981'};">
+                            <span style="font-weight: 700; color: #fff;">${f.name}</span>
+                            <span class="font-mono" style="color: #94a3b8;">${maxB}C ${isLeader ? '★' : ''}</span>
+                          </div>
+                        `;
+                      }).join('')}
+                    </div>
                   </div>
 
-                  <!-- Manual Bid Override Injector -->
-                  <div style="margin-top: var(--space-4); border-top: 1px solid var(--border-subtle); padding-top: var(--space-4);">
-                    <span class="label-micro">DIRECT BID INJECTION (ADMIN OVERRIDE)</span>
-                    <div style="display: flex; gap: var(--space-2); margin-top: 6px;">
-                      <select class="form-select" id="adminInjectFranchise">
-                        ${franchises.map(f => `<option value="${f.id}">${f.name} (Purse: ${f.purse}C)</option>`).join('')}
-                      </select>
-                      <button class="btn btn-auction" onclick="placeBid(parseInt(document.getElementById('adminInjectFranchise').value))">
-                        SUBMIT BID
-                      </button>
+                  <div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; margin-top: 6px;">
+                      <span class="label-micro" style="color: #94a3b8;">PASSED (REVERSIBLE)</span>
+                      <span class="font-mono" style="font-size: 0.7rem; color: #94a3b8;">${passedFranchiseIds.length}</span>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 3px;">
+                      ${passedFranchiseIds.length === 0 ? '<div style="color: #64748b; font-size: 0.7rem;">None passed yet</div>' : ''}
+                      ${passedFranchiseIds.map(fId => {
+                        const f = franchises.find(item => item.id === fId);
+                        if (!f) return '';
+                        return `
+                          <div style="display: flex; justify-content: space-between; align-items: center; background: #0f172a; padding: 3px 6px; border-radius: 4px; border-left: 2px solid #64748b;">
+                            <span style="color: #94a3b8;">${f.name}</span>
+                            <button class="btn btn-secondary" style="font-size: 0.6rem; padding: 1px 4px;" onclick="passedFranchiseIds = passedFranchiseIds.filter(id => id !== ${f.id}); renderCurrentView();">RE-ENTER</button>
+                          </div>
+                        `;
+                      }).join('')}
                     </div>
                   </div>
+
+                  <div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; margin-top: 6px;">
+                      <span class="label-micro" style="color: var(--color-red);">BLOCKED FRANCHISES</span>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 3px;">
+                      ${franchises.map(f => {
+                        const nextB = currentBid + getBidIncrement(currentBid);
+                        const maxB = calculateMaxBid(f.id, cur.bucket);
+                        let blockedReason = null;
+                        if ((f.squad || []).length >= 22) blockedReason = 'already at 22';
+                        else if (f.purse < nextB) blockedReason = 'no purse';
+                        else if (!checkSlotProtection(f.id, cur.bucket).eligible) blockedReason = 'mandatory slot locked';
+                        else if (nextB > maxB) blockedReason = 'maxBid exceeded';
+
+                        if (!blockedReason) return '';
+                        return `
+                          <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(239,68,68,0.08); padding: 3px 6px; border-radius: 4px; border-left: 2px solid #ef4444; font-size: 0.7rem;">
+                            <span style="color: #fca5a5; font-weight: 600;">${f.name}</span>
+                            <span style="color: #ef4444; font-size: 0.65rem;">${blockedReason}</span>
+                          </div>
+                        `;
+                      }).join('')}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 3B. CENTER: CURRENT BID, LEADER, TIMER RING, PRIMARY ACTIONS -->
+                <div class="surface-elevated" style="padding: 12px; display: flex; flex-direction: column; justify-content: space-between; text-align: center; background: #090e17; border-color: #1e293b;">
+                  <div>
+                    <span class="label-micro" style="color: var(--color-orange); letter-spacing: 1px;">CURRENT AUCTION BID</span>
+                    <div class="price-display font-mono" style="font-size: 3.4rem; font-weight: 900; color: #f59e0b; line-height: 1.1; margin: 4px 0;">
+                      ${currentBid} <span style="font-size: 1.1rem; color: #94a3b8;">CREDITS</span>
+                    </div>
+                    <div style="font-size: 0.85rem; color: #f8fafc; margin-bottom: 8px;">
+                      Leading Bidder: <strong style="color: #10b981; font-size: 1rem;">${leader ? leader.name : 'NO ACTIVE BID'}</strong>
+                      ${window.currentBidIsBehalf ? ' <span class="status-badge status-warning" style="font-size: 0.6rem;">BEHALF BID</span>' : ''}
+                    </div>
+
+                    <!-- Circular Countdown Timer Ring -->
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin: 6px 0;">
+                      <div style="position: relative; width: 56px; height: 56px; display: flex; align-items: center; justify-content: center;">
+                        <svg width="56" height="56" viewBox="0 0 56 56">
+                          <circle cx="28" cy="28" r="24" stroke="#1e293b" stroke-width="4" fill="none" />
+                          <circle cx="28" cy="28" r="24" stroke="${timerSeconds <= 5 ? '#ef4444' : timerSeconds <= 10 ? '#f59e0b' : '#10b981'}" stroke-width="4" fill="none" stroke-dasharray="150" stroke-dashoffset="${150 - (150 * timerSeconds / 30)}" stroke-linecap="round" />
+                        </svg>
+                        <span class="font-mono" style="position: absolute; font-size: 1.1rem; font-weight: 800; color: ${timerSeconds <= 5 ? '#ef4444' : timerSeconds <= 10 ? '#f59e0b' : '#10b981'};">
+                          ${timerSeconds}s
+                        </span>
+                      </div>
+                      <div style="text-align: left; font-size: 0.75rem; color: #94a3b8;">
+                        <div>${auctionPaused ? '<span style="color: #f59e0b; font-weight: 700;">CLOCK FROZEN</span>' : timerSeconds === 0 ? '<span style="color: #ef4444; font-weight: 700;">BIDDING CLOSED</span>' : 'TIMER ACTIVE'}</div>
+                        <div style="font-size: 0.65rem; color: #64748b;">(Resets to 20s on any bid)</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- ACTION ROW: Keyboard Accessible Primary Controls -->
+                  <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 8px;">
+                    <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 6px;">
+                      <button class="btn btn-primary" style="padding: 10px; font-weight: 800; font-size: 0.875rem;" onclick="openHammerConfirmModal()">
+                        [H] HAMMER (SOLD)
+                      </button>
+                      <button class="btn btn-secondary" style="padding: 10px; font-size: 0.8125rem;" onclick="skipPlayer()">
+                        [S] SKIP
+                      </button>
+                      <button class="btn btn-secondary" style="padding: 10px; font-size: 0.8125rem;" onclick="toggleAuctionPause()">
+                        [P] ${auctionPaused ? 'RESUME' : 'PAUSE'}
+                      </button>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;">
+                      <button class="btn btn-secondary" style="font-size: 0.7rem; padding: 6px 2px;" onclick="openUndoModal()" title="Revert Any Sold Lot">
+                        [U] UNDO
+                      </button>
+                      <button class="btn btn-secondary" style="font-size: 0.7rem; padding: 6px 2px;" onclick="openBehalfBidModal()" title="Bid for Failed Device">
+                        [B] BEHALF
+                      </button>
+                      <button class="btn btn-secondary" style="font-size: 0.7rem; padding: 6px 2px;" onclick="openDirectAssignModal()" title="Direct Assign Player">
+                        [A] ASSIGN
+                      </button>
+                      <button class="btn btn-secondary" style="font-size: 0.7rem; padding: 6px 2px;" onclick="openRelaxationModal()" title="Relax Minimum Quota">
+                        [R] RELAX
+                      </button>
+                    </div>
+
+                    <div style="display: flex; justify-content: space-between; font-size: 0.6875rem; color: #64748b; padding-top: 2px;">
+                      <span>Space: Draw Next • Enter: Confirm • Esc: Cancel</span>
+                      <a href="javascript:void(0)" onclick="openShortcutsHelpModal()" style="color: var(--color-green); text-decoration: underline;">[?] Shortcuts</a>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 3C. RIGHT: BID ORDER CHRONOLOGY & BUCKET SCARCITY -->
+                <div class="surface-card" style="padding: 10px; display: flex; flex-direction: column; gap: 8px; font-size: 0.75rem; overflow-y: auto; max-height: 310px;">
+                  <div>
+                    <span class="label-micro" style="color: var(--color-blue);">CHRONOLOGICAL BID ORDER</span>
+                    <div style="display: flex; flex-direction: column; gap: 3px; margin-top: 4px;">
+                      ${bidOrder.length === 0 ? '<div style="color: #64748b; font-size: 0.7rem;">No bids placed for this lot yet</div>' : ''}
+                      ${bidOrder.slice(-6).reverse().map(b => `
+                        <div style="display: flex; justify-content: space-between; align-items: center; background: #1e293b; padding: 3px 6px; border-radius: 4px;">
+                          <span style="font-weight: 700; color: #fff;">${b.franchiseName}</span>
+                          <span class="font-mono" style="color: #f59e0b; font-weight: 800;">${b.amount}C</span>
+                        </div>
+                      `).join('')}
+                    </div>
+                  </div>
+
+                  <div style="border-top: 1px solid #1e293b; padding-top: 6px; margin-top: 4px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                      <span class="label-micro" style="color: var(--color-green);">BUCKET SCARCITY (PLAYERS NEEDED)</span>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 3px;">
+                      ${['B1', 'B2', 'B3', 'B4', 'D5'].map(b => {
+                        const unsold = players.filter(p => p.bucket === b && p.status === 'AVAILABLE').length;
+                        const bMin = (window.bucketMinimums && window.bucketMinimums[b] !== undefined) ? window.bucketMinimums[b] : 2;
+                        let playersNeededTotal = 0;
+                        franchises.forEach(f => {
+                          const boughtInB = (f.squad || []).filter(p => !p.isCaptain && !p.isViceCaptain && !p.isReferred && p.bucket === b).length;
+                          playersNeededTotal += Math.max(0, bMin - boughtInB);
+                        });
+                        const isExhausted = unsold === 0 && playersNeededTotal > 0;
+                        const isWarning = !isExhausted && playersNeededTotal > 0 && unsold <= playersNeededTotal;
+
+                        return `
+                          <div style="display: flex; justify-content: space-between; align-items: center; background: ${isExhausted ? 'rgba(239,68,68,0.1)' : isWarning ? 'rgba(245,158,11,0.1)' : '#1e293b'}; padding: 3px 6px; border-radius: 4px; border-left: 2px solid ${isExhausted ? '#ef4444' : isWarning ? '#f59e0b' : '#10b981'}; font-size: 0.7rem;">
+                            <span><strong>${b}</strong> (${unsold} unsold, ${playersNeededTotal} needed)</span>
+                            <span class="badge ${isExhausted ? 'badge-fail' : isWarning ? 'badge-partial' : 'badge-pass'}" style="font-size: 0.6rem; padding: 1px 4px;">
+                              ${isExhausted ? 'EXHAUSTED' : isWarning ? 'WARNING' : 'SAFE'}
+                            </span>
+                          </div>
+                        `;
+                      }).join('')}
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+              <!-- REGION 4: 11-FRANCHISE TABLE (Always Visible) -->
+              <div class="surface-card" style="padding: 0; overflow-x: auto; background: #0b1120; border-color: #1e293b;">
+                <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.75rem;">
+                  <thead>
+                    <tr style="background: #0f172a; border-bottom: 1px solid #1e293b; color: #94a3b8; font-size: 0.7rem; text-transform: uppercase;">
+                      <th style="padding: 6px 10px;">Franchise</th>
+                      <th style="padding: 6px 10px;">Purse Rem.</th>
+                      <th style="padding: 6px 10px;">Max Bid (§12.1)</th>
+                      <th style="padding: 6px 10px;">Purchases</th>
+                      <th style="padding: 6px 10px;">Bucket Quotas</th>
+                      <th style="padding: 6px 10px;">Slots Rem.</th>
+                      <th style="padding: 6px 10px;">Live State</th>
+                      <th style="padding: 6px 10px; text-align: right;">Behalf Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${franchises.map(f => {
+                      const nextB = currentBid + getBidIncrement(currentBid);
+                      const maxB = calculateMaxBid(f.id, cur.bucket);
+                      const isPassed = passedFranchiseIds.includes(f.id);
+                      const isLeader = f.id === leadingBidderId;
+                      const ap = (f.squad || []).filter(p => !p.isCaptain && !p.isViceCaptain && !p.isReferred);
+                      const bMins = window.bucketMinimums || { B1: 2, B2: 2, B3: 2, B4: 2, D5: 2 };
+                      
+                      let unmetMandatory = 0;
+                      const bStatus = ['B1', 'B2', 'B3', 'B4', 'D5'].map(b => {
+                        const count = ap.filter(p => p.bucket === b).length;
+                        const req = bMins[b] !== undefined ? bMins[b] : 2;
+                        const satisfied = count >= req;
+                        if (!satisfied) unmetMandatory += (req - count);
+                        return `<span style="color: ${satisfied ? '#10b981' : '#f59e0b'}; margin-right: 4px;">${b}${satisfied ? '✔' : '✘'}</span>`;
+                      }).join('');
+
+                      const slotsRemaining = Math.max(15 - ap.length, unmetMandatory);
+
+                      let blockedReason = null;
+                      if ((f.squad || []).length >= 22) blockedReason = 'already at 22';
+                      else if (f.purse < nextB) blockedReason = 'no purse';
+                      else if (!checkSlotProtection(f.id, cur.bucket).eligible) blockedReason = 'mandatory slot locked';
+                      else if (nextB > maxB) blockedReason = 'maxBid exceeded';
+
+                      const statusBadge = isLeader 
+                        ? '<span class="status-badge status-inplay" style="font-size: 0.65rem;">HOLDING LEAD</span>'
+                        : isPassed 
+                        ? '<span class="status-badge" style="background: #334155; color: #94a3b8; font-size: 0.65rem;">PASSED</span>'
+                        : blockedReason 
+                        ? `<span class="status-badge status-blocked" style="font-size: 0.65rem;">BLOCKED (${blockedReason})</span>`
+                        : '<span class="status-badge status-connected" style="font-size: 0.65rem;">IN-PLAY</span>';
+
+                      return `
+                        <tr style="border-bottom: 1px solid #1e293b; background: ${isLeader ? 'rgba(245,158,11,0.05)' : 'transparent'};">
+                          <td style="padding: 6px 10px; font-weight: 700; color: #fff;">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                              ${getTeamEmblem(f.id, 20)}
+                              <span>${f.name}</span>
+                            </div>
+                          </td>
+                          <td style="padding: 6px 10px; font-family: var(--font-mono); font-weight: 700; color: #10b981;">${f.purse}C</td>
+                          <td style="padding: 6px 10px; font-family: var(--font-mono); font-weight: 700; color: ${blockedReason ? '#ef4444' : '#10b981'};">${maxB}C</td>
+                          <td style="padding: 6px 10px; font-family: var(--font-mono);">${ap.length} / 15</td>
+                          <td style="padding: 6px 10px; font-size: 0.7rem;">${bStatus}</td>
+                          <td style="padding: 6px 10px; font-family: var(--font-mono);">${slotsRemaining}</td>
+                          <td style="padding: 6px 10px;">${statusBadge}</td>
+                          <td style="padding: 6px 10px; text-align: right;">
+                            <button class="btn btn-secondary" style="font-size: 0.65rem; padding: 2px 6px;" onclick="placeBid(${f.id})" ${blockedReason ? 'disabled' : ''}>
+                              BID
+                            </button>
+                          </td>
+                        </tr>
+                      `;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- REGION 5: AUDIT STREAM (Last 20 Events, Live Append) -->
+              <div class="surface-card" style="padding: 8px 12px; background: #070b14; border-color: #1e293b;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                  <span class="label-micro" style="color: #64748b;">IMMUTABLE AUDIT STREAM (§12.4)</span>
+                  <span style="font-size: 0.65rem; color: #64748b;">SURVIVES BULK PURGES</span>
+                </div>
+                <div class="font-mono" style="font-size: 0.7rem; color: #94a3b8; max-height: 80px; overflow-y: auto; display: flex; flex-direction: column-reverse; gap: 2px;">
+                  ${auditLedger.slice(-15).map(e => `
+                    <div>[${new Date(e.timestamp).toLocaleTimeString()}] <strong>${e.type}</strong>: ${e.playerName || ''} ${e.franchiseName ? '→ ' + e.franchiseName : ''} ${e.price ? '@ ' + e.price + 'C' : ''} ${e.reason ? '(' + e.reason + ')' : ''}</div>
+                  `).join('')}
                 </div>
               </div>
 
