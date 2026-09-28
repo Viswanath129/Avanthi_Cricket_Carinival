@@ -6973,39 +6973,50 @@
     }
 
     function openUndoModal() {
+      const preselectedId = arguments[0];
       if (currentUser.role !== 'SUPER_ADMIN') {
         showToast("ACCESS DENIED: Super Admin privilege required to execute forensic undo.", "error");
         return;
       }
-      const saleEntry = auditLog.find(e => e.action === "PLAYER SOLD");
-      if (!saleEntry) {
-        showToast("No sales found to undo in audit trail.", "error");
+      const soldPlayers = players.filter(p => p.status === "SOLD");
+      if (soldPlayers.length === 0) {
+        showToast("No sales found to undo in auction history.", "error");
         return;
       }
-      let targetPlayer = players.find(p => p.status === "SOLD" && (saleEntry.details.includes(p.name) || saleEntry.details.includes(`#${p.id}`)));
-      if (!targetPlayer) targetPlayer = players.slice().reverse().find(p => p.status === "SOLD");
-      const leaderName = targetPlayer ? targetPlayer.soldTo : "Franchise";
-      const salePrice = targetPlayer ? (targetPlayer.price || targetPlayer.basePrice) : "Current";
+      
+      let targetPlayer = preselectedId ? soldPlayers.find(p => p.id == preselectedId) : null;
+      if (!targetPlayer) targetPlayer = soldPlayers[soldPlayers.length - 1]; // Default to most recent
 
       const modal = document.getElementById("modalContainer");
       modal.innerHTML = `
         <div class="modal-overlay" onclick="closeModal()">
-          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 500px;">
-            <span class="status-badge status-blocked">OPERATIONAL CORRECTION</span>
-            <h2 style="font-family: var(--font-display); font-size: 1.5rem; font-weight: 800; color: var(--text-bright); margin: 6px 0;">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 520px;">
+            <span class="status-badge status-blocked">OPERATIONAL FORENSIC UNDO (§12.4)</span>
+            <h2 style="font-family: var(--font-display); font-size: 1.4rem; font-weight: 800; color: var(--text-bright); margin: 6px 0;">
               REVERT AUCTION SALE
             </h2>
+            <div style="margin: 12px 0;">
+              <label style="font-size: 0.75rem; color: var(--text-muted); display: block; margin-bottom: 4px;">SELECT SOLD LOT TO REVERSE (ANY LOT FROM HISTORY):</label>
+              <select id="undoPlayerSelect" class="form-input" style="width: 100%;" onchange="openUndoModal(this.value)">
+                ${soldPlayers.slice().reverse().map(p => `
+                  <option value="${p.id}" ${p.id == targetPlayer.id ? 'selected' : ''}>
+                    #${p.id} ${p.name} (${p.bucket}) — Sold to ${p.soldTo || 'Franchise'} for ${p.price || p.soldPrice || p.basePrice}C
+                  </option>
+                `).join('')}
+              </select>
+            </div>
             <div style="background: var(--surface-2); border-radius: 8px; padding: 12px; margin: 12px 0; border: 1px solid var(--border-medium);">
-              <div style="font-size: 0.8125rem; color: var(--text-muted); margin-bottom: 2px;">Player to Restore:</div>
-              <div style="font-weight: 800; font-size: 1.15rem; color: var(--text-bright);">${targetPlayer ? targetPlayer.name : 'Last Sold Player'} (#${targetPlayer ? targetPlayer.id : ''})</div>
-              <div style="font-size: 0.875rem; color: var(--color-orange); margin-top: 4px; font-weight: 600;">Sold to ${leaderName} for ${salePrice} Credits</div>
+              <div style="font-size: 0.8125rem; color: var(--text-muted); margin-bottom: 2px;">Selected Sale Details:</div>
+              <div style="font-weight: 800; font-size: 1.15rem; color: var(--text-bright);">${targetPlayer.name} (#${targetPlayer.id})</div>
+              <div style="font-size: 0.875rem; color: var(--color-orange); margin-top: 4px; font-weight: 600;">Sold to: ${targetPlayer.soldTo || 'Franchise'} for ${targetPlayer.price || targetPlayer.soldPrice || targetPlayer.basePrice} Credits</div>
+              <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">Academic Bucket: ${targetPlayer.bucket}</div>
             </div>
             <p style="color: var(--text-muted); font-size: 0.8125rem; margin-bottom: var(--space-4); line-height: 1.5;">
-              Reverting this sale will atomically refund ${salePrice} Credits to ${leaderName}, remove the player from squad roster, return them to AVAILABLE status in the auction pool, and re-open the lot.
+              Reverting this sale will atomically refund ${targetPlayer.price || targetPlayer.soldPrice || targetPlayer.basePrice} Credits to ${targetPlayer.soldTo || 'Franchise'}, remove the player from squad roster, decrement bucket count, return the player to AVAILABLE status, and recalculate all financial and bucket limits immediately.
             </p>
             <div style="display: flex; gap: var(--space-3); justify-content: flex-end;">
               <button class="btn btn-secondary" onclick="closeModal()">CANCEL</button>
-              <button class="btn btn-danger" onclick="executeUndoSale()">EXECUTE FORENSIC UNDO</button>
+              <button class="btn btn-danger" onclick="executeUndoSale('${targetPlayer.id}')">EXECUTE FORENSIC UNDO</button>
             </div>
           </div>
         </div>
@@ -7013,30 +7024,22 @@
     }
 
     function executeUndoSale() {
+      const selectedId = arguments[0];
       if (currentUser.role !== 'SUPER_ADMIN') {
         showToast("ACCESS DENIED: Super Admin privilege required to execute forensic undo.", "error");
         return;
       }
-      const saleEntry = auditLog.find(e => e.action === "PLAYER SOLD");
-      let targetPlayer = null;
-      let leader = null;
-      let refundedAmount = 0;
+      
+      const targetPlayer = players.find(p => p.id == selectedId || (String(selectedId) === String(p.id)));
 
-      if (saleEntry) {
-        targetPlayer = players.find(p => p.status === "SOLD" && (saleEntry.details.includes(p.name) || saleEntry.details.includes(`#${p.id}`)));
-      }
-      if (!targetPlayer) {
-        targetPlayer = players.slice().reverse().find(p => p.status === "SOLD");
-      }
-
-      if (!targetPlayer) {
-        showToast("No active sales available to undo.", "error");
+      if (!targetPlayer || targetPlayer.status !== "SOLD") {
+        showToast("CANNOT UNDO: Player is not in SOLD status (already undone or never sold). Double undo blocked.", "error");
         closeModal();
         return;
       }
 
-      leader = franchises.find(f => f.name === targetPlayer.soldTo || (saleEntry && saleEntry.details && saleEntry.details.includes(f.name)));
-      refundedAmount = targetPlayer.price || targetPlayer.basePrice;
+      const leader = franchises.find(f => f.name === targetPlayer.soldTo || f.id === targetPlayer.soldTo);
+      const refundedAmount = targetPlayer.soldPrice || targetPlayer.price || targetPlayer.basePrice;
 
       if (leader) {
         leader.purse += refundedAmount;
@@ -7045,6 +7048,7 @@
 
       targetPlayer.status = "AVAILABLE";
       targetPlayer.soldTo = null;
+      targetPlayer.soldPrice = null;
       targetPlayer.price = targetPlayer.basePrice;
 
       // Bring active lot back to this player
@@ -7061,7 +7065,7 @@
       auditLog.unshift({
         time: new Date().toLocaleTimeString(),
         action: "UNDO SALE",
-        details: `Reverted sale of ${targetPlayer.name} (#${targetPlayer.id}) to ${leader ? leader.name : 'Team'}. Refunded ${refundedAmount}C.`,
+        details: `Reverted sale of ${targetPlayer.name} (#${targetPlayer.id}) to ${leader ? leader.name : 'Team'}. Refunded ${refundedAmount}C. Limits recalculated.`,
         actorUid: currentUser.uid || 'usr_sys',
         actorRole: currentUser.role,
         identityType: currentUser.identityType || 'OPERATOR',
