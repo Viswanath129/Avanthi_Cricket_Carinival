@@ -5088,27 +5088,106 @@
     function calculateMaxBid(franchiseId, targetBucket) {
       const f = franchises.find(item => item.id === franchiseId);
       if (!f) return 0;
-      const squadSize = f.squad.length;
-      const slotsRemaining = 15 - squadSize;
-      if (slotsRemaining <= 0) return 0;
 
-      // Mandatory slot reservation: minimum 20 credits per remaining slot
-      const reservedPurse = (slotsRemaining - 1) * 20;
-      const maxPermissible = f.purse - reservedPurse;
-      return Math.max(0, maxPermissible);
+      // Filter auction purchases (exclude free Captain, VC, and Referred)
+      const auctionPurchases = (f.squad || []).filter(p => !p.isCaptain && !p.isViceCaptain && !p.isReferred);
+      const boughtCount = auctionPurchases.length;
+
+      // Tally bucket counts for auction purchases
+      const bucketCounts = { B1: 0, B2: 0, B3: 0, B4: 0, D5: 0, M6: 0 };
+      auctionPurchases.forEach(p => {
+        if (bucketCounts[p.bucket] !== undefined) bucketCounts[p.bucket]++;
+      });
+
+      // Calculate unmet mandatory after this lot
+      let unmetAfterLot = 0;
+      const mandatoryBuckets = ['B1', 'B2', 'B3', 'B4', 'D5'];
+      for (const b of mandatoryBuckets) {
+        const min = (window.bucketMinimums && window.bucketMinimums[b] !== undefined) ? window.bucketMinimums[b] : 2;
+        const currentCount = bucketCounts[b] || 0;
+        const countAfter = (b === targetBucket) ? currentCount + 1 : currentCount;
+        unmetAfterLot += Math.max(0, min - countAfter);
+      }
+
+      if (boughtCount >= 15) {
+        if (unmetAfterLot === 0) {
+          return f.purse; // Problem Statement Appendix A Case 6: no restriction applies
+        } else {
+          return Math.max(0, f.purse - (unmetAfterLot * 20));
+        }
+      }
+
+      const regularSlotsAfterLot = Math.max(0, 15 - (boughtCount + 1));
+      const slotsToFillAfterLot = Math.max(regularSlotsAfterLot, unmetAfterLot);
+      const reserveRequired = slotsToFillAfterLot * 20;
+
+      return Math.max(0, f.purse - reserveRequired);
+    }
+
+    function checkSlotProtection(franchiseId, targetBucket) {
+      const f = franchises.find(item => item.id === franchiseId);
+      if (!f) return { eligible: false, reason: 'Franchise not found' };
+
+      const auctionPurchases = (f.squad || []).filter(p => !p.isCaptain && !p.isViceCaptain && !p.isReferred);
+      const boughtCount = auctionPurchases.length;
+      const remainingSlotsBeforeThis = 15 - boughtCount;
+
+      const bucketCounts = { B1: 0, B2: 0, B3: 0, B4: 0, D5: 0, M6: 0 };
+      auctionPurchases.forEach(p => {
+        if (bucketCounts[p.bucket] !== undefined) bucketCounts[p.bucket]++;
+      });
+
+      if (remainingSlotsBeforeThis <= 0) {
+        let unmetTotal = 0;
+        for (const b of ['B1', 'B2', 'B3', 'B4', 'D5']) {
+          const min = (window.bucketMinimums && window.bucketMinimums[b] !== undefined) ? window.bucketMinimums[b] : 2;
+          unmetTotal += Math.max(0, min - (bucketCounts[b] || 0));
+        }
+        if (unmetTotal > 0 && (!['B1', 'B2', 'B3', 'B4', 'D5'].includes(targetBucket) || (bucketCounts[targetBucket] || 0) >= 2)) {
+          return { eligible: false, reason: 'Cannot purchase non-mandatory player; mandatory quotas remain unfilled.' };
+        }
+        return { eligible: true };
+      }
+
+      const remainingSlotsAfterThis = remainingSlotsBeforeThis - 1;
+      let unmetAfterLot = 0;
+      for (const b of ['B1', 'B2', 'B3', 'B4', 'D5']) {
+        const min = (window.bucketMinimums && window.bucketMinimums[b] !== undefined) ? window.bucketMinimums[b] : 2;
+        const currentCount = bucketCounts[b] || 0;
+        const countAfter = (b === targetBucket) ? currentCount + 1 : currentCount;
+        unmetAfterLot += Math.max(0, min - countAfter);
+      }
+
+      if (remainingSlotsAfterThis < unmetAfterLot) {
+        return {
+          eligible: false,
+          reason: 'Cannot purchase this player; remaining slots are needed for mandatory requirements.'
+        };
+      }
+      return { eligible: true };
     }
 
     function getTournamentScarcity() {
-      const buckets = ['B1', 'B2', 'B3', 'B4', 'D5', 'M6'];
+      const buckets = ['B1', 'B2', 'B3', 'B4', 'D5'];
       for (let b of buckets) {
-        let unfilledSlots = 0;
+        const min = (window.bucketMinimums && window.bucketMinimums[b] !== undefined) ? window.bucketMinimums[b] : 2;
+        let totalPlayersNeeded = 0;
         franchises.forEach(f => {
-          const hasB = f.squad.some(p => p.bucket === b);
-          if (!hasB) unfilledSlots++;
+          const auctionPurchases = (f.squad || []).filter(p => !p.isCaptain && !p.isViceCaptain && !p.isReferred);
+          const count = auctionPurchases.filter(p => p.bucket === b).length;
+          totalPlayersNeeded += Math.max(0, min - count);
         });
+
         const available = players.filter(p => p.bucket === b && p.status === 'AVAILABLE').length;
-        if (unfilledSlots > 0 && available <= unfilledSlots) {
-          return { scarce: true, bucket: b, available, unfilledSlots };
+        if (totalPlayersNeeded > 0 && available <= totalPlayersNeeded) {
+          return {
+            scarce: true,
+            bucket: b,
+            available,
+            totalPlayersNeeded,
+            exhausted: (available === 0),
+            routedToScouting: (available === 0)
+          };
         }
       }
       return { scarce: false };
@@ -5133,6 +5212,13 @@
       const cur = players[lotIndex];
       if (!f || !cur || cur.status !== 'AVAILABLE' || auctionPaused) return;
 
+      // Rule 12.2 Mandatory Slot Protection Check
+      const slotProt = checkSlotProtection(franchiseId, cur.bucket);
+      if (!slotProt.eligible) {
+        showToast(`BID BLOCKED: ${slotProt.reason}`, "error");
+        return;
+      }
+
       const increment = getBidIncrement(currentBid);
       const nextBid = currentBid + increment;
       const maxBid = calculateMaxBid(franchiseId, cur.bucket);
@@ -5141,6 +5227,9 @@
         showToast(`BID BLOCKED: Max legal bid for ${f.name} is ${maxBid}C`, "error");
         return;
       }
+
+      // Re-enter franchise into play if previously passed
+      passedFranchiseIds = passedFranchiseIds.filter(id => id !== franchiseId);
 
       currentBid = nextBid;
       leadingBidderId = franchiseId;
@@ -5955,13 +6044,14 @@
     }
 
     function exportSquadsCSV() {
-      let csv = "FranchiseID,FranchiseName,PurseRemaining,SquadCount,PlayerID,PlayerName,Bucket,PurchasePrice\n";
+      let csv = "FranchiseID,FranchiseName,PurseRemaining,SquadCount,PlayerID,PlayerName,Bucket,PurchasePrice,AcquisitionType\n";
       franchises.forEach(f => {
         if (f.squad.length === 0) {
-          csv += `"${f.id}","${f.name}","${f.purse}","0","","","",""\n`;
+          csv += `"${f.id}","${f.name}","${f.purse}","0","","","","",""\n`;
         } else {
           f.squad.forEach(p => {
-            csv += `"${f.id}","${f.name}","${f.purse}","${f.squad.length}","${p.id}","${(p.name || '').replace(/"/g, '""')}","${p.bucket || ''}","${p.soldPrice || p.basePrice || 0}"\n`;
+            const acqType = p.status === 'ALLOTTED' || p.isAllotted ? 'ALLOTTED' : p.isCaptain ? 'CAPTAIN_RETAINED' : p.isViceCaptain ? 'VC_RETAINED' : p.isReferred ? 'REFERRED_FREE' : 'AUCTION_PURCHASE';
+            csv += `"${f.id}","${f.name}","${f.purse}","${f.squad.length}","${p.id}","${(p.name || '').replace(/"/g, '""')}","${p.bucket || ''}","${p.soldPrice || p.price || p.basePrice || 0}","${acqType}"\n`;
           });
         }
       });
@@ -7645,8 +7735,11 @@
                     ${f.squad.length === 0 ? `
                       <span style="font-size: 0.75rem; color: var(--text-faint); font-style: italic;">No players acquired yet</span>
                     ` : f.squad.map(sp => `
-                      <div style="display: flex; justify-content: space-between; font-size: 0.75rem; padding: 3px 0; border-bottom: 1px solid var(--border-subtle);">
-                        <span style="color: var(--text-bright); font-weight: 600;">${sp.name} (${sp.bucket})</span>
+                      <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; padding: 3px 0; border-bottom: 1px solid var(--border-subtle);">
+                        <span style="color: var(--text-bright); font-weight: 600;">
+                          ${sp.name} (${sp.bucket})
+                          ${sp.status === 'ALLOTTED' || sp.isAllotted ? '<span class="status-badge" style="background: rgba(245, 158, 11, 0.2); color: #f59e0b; font-size: 0.6rem; padding: 1px 4px; margin-left: 4px;">ALLOTTED</span>' : ''}
+                        </span>
                         <span class="font-mono" style="color: var(--color-orange);">${sp.price || sp.basePrice} C</span>
                       </div>
                     `).join('')}
@@ -8074,6 +8167,586 @@
     // ========================================================
     // VIEW 6: PLAYER PERSONAL PORTAL & VERIFICATION WORKSPACE
     // ========================================================
+    // ========================================================
+    // DATA MANAGEMENT CENTER & DELETION ENGINE (§3-6, Master Prompt)
+    // ========================================================
+    let deletedFranchises = [];
+
+    function openDeletePlayerDataModal(playerId) {
+      if (currentUser.role !== 'SUPER_ADMIN') {
+        showToast("ACCESS DENIED: Super Admin privilege required to delete player data.", "error");
+        return;
+      }
+      const p = players.find(x => x.id == playerId);
+      if (!p) { showToast("Player not found", "error"); return; }
+      const m = document.getElementById("modalContainer");
+      m.innerHTML = `
+        <div class="modal-overlay" onclick="closeModal()">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 520px;">
+            <div style="border-left: 4px solid var(--color-red); padding-left: 12px; margin-bottom: 16px;">
+              <h3 style="font-family: var(--font-display); font-size: 1.3rem; font-weight: 800; color: var(--color-red); margin: 0;">
+                DELETE PLAYER DATA
+              </h3>
+              <div style="font-size: 0.875rem; color: var(--text-bright); margin-top: 6px;">
+                You are deleting player: <strong>${p.name}</strong> (${p.roll || 'No Roll'})
+              </div>
+              <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">
+                Department: ${p.department || p.branch || '—'} · Bucket: ${p.bucket || '—'} · Status: ${p.status || 'AVAILABLE'}
+              </div>
+              <p style="font-size: 0.8125rem; color: var(--color-orange); margin-top: 10px; line-height: 1.5;">
+                This action modifies the actual database record. You may send the record to the <strong>Trash (recoverable)</strong> or execute a <strong>Permanent Purge</strong>.
+              </p>
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;">
+              <button class="btn btn-secondary" onclick="closeModal()">CANCEL</button>
+              <button class="btn btn-warning" onclick="executeDeletePlayerData('${p.id}', false)">MOVE TO TRASH</button>
+              <button class="btn btn-danger" onclick="executeDeletePlayerData('${p.id}', true)">PERMANENT PURGE</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function executeDeletePlayerData(playerId, permanent = false) {
+      const idx = players.findIndex(x => x.id == playerId);
+      if (idx === -1) return;
+      const p = players[idx];
+
+      if (permanent) {
+        players.splice(idx, 1);
+        deletedPlayers = deletedPlayers.filter(x => x.id != playerId);
+      } else {
+        p.status = 'DELETED';
+        p.deletedAt = new Date().toISOString();
+        deletedPlayers.push(p);
+        players.splice(idx, 1);
+      }
+
+      auditLog.unshift({
+        time: new Date().toLocaleTimeString(),
+        action: permanent ? "PLAYER_DATA_PURGED" : "PLAYER_DATA_DELETED",
+        details: `${permanent ? 'Permanently purged' : 'Soft-deleted'} player #${p.id} ${p.name} (${p.roll})`,
+        actorUid: currentUser.uid || 'usr_sys',
+        actorRole: currentUser.role
+      });
+
+      saveDatabase();
+      broadcastAuthoritativeState();
+      closeModal();
+      renderCurrentView();
+      showToast(permanent ? "Player permanently purged." : "Player moved to Trash.", "success");
+    }
+
+    function openDeleteFranchiseDataModal(franchiseId) {
+      if (currentUser.role !== 'SUPER_ADMIN') {
+        showToast("ACCESS DENIED: Super Admin privilege required to delete franchise data.", "error");
+        return;
+      }
+      const f = franchises.find(x => x.id == franchiseId);
+      if (!f) { showToast("Franchise not found", "error"); return; }
+      const m = document.getElementById("modalContainer");
+      m.innerHTML = `
+        <div class="modal-overlay" onclick="closeModal()">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 520px;">
+            <div style="border-left: 4px solid var(--color-red); padding-left: 12px; margin-bottom: 16px;">
+              <h3 style="font-family: var(--font-display); font-size: 1.3rem; font-weight: 800; color: var(--color-red); margin: 0;">
+                DELETE FRANCHISE DATA
+              </h3>
+              <div style="font-size: 0.875rem; color: var(--text-bright); margin-top: 6px;">
+                You are deleting franchise: <strong>${f.name}</strong> (Team #${f.teamNumber || '—'})
+              </div>
+              <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">
+                Coordinator: ${f.coordinatorName || '—'} · Purse: ${f.purse || 1000}C · Squad: ${(f.squad || []).length} players
+              </div>
+              <p style="font-size: 0.8125rem; color: var(--color-orange); margin-top: 10px; line-height: 1.5;">
+                This will remove the franchise record from active tournament participation.
+              </p>
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;">
+              <button class="btn btn-secondary" onclick="closeModal()">CANCEL</button>
+              <button class="btn btn-warning" onclick="executeDeleteFranchiseData('${f.id}', false)">MOVE TO TRASH</button>
+              <button class="btn btn-danger" onclick="executeDeleteFranchiseData('${f.id}', true)">PERMANENT PURGE</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function executeDeleteFranchiseData(franchiseId, permanent = false) {
+      const idx = franchises.findIndex(x => x.id == franchiseId);
+      if (idx === -1) return;
+      const f = franchises[idx];
+
+      if (permanent) {
+        franchises.splice(idx, 1);
+        deletedFranchises = deletedFranchises.filter(x => x.id != franchiseId);
+      } else {
+        f.status = 'DELETED';
+        f.deletedAt = new Date().toISOString();
+        deletedFranchises.push(f);
+        franchises.splice(idx, 1);
+      }
+
+      auditLog.unshift({
+        time: new Date().toLocaleTimeString(),
+        action: permanent ? "FRANCHISE_DATA_PURGED" : "FRANCHISE_DATA_DELETED",
+        details: `${permanent ? 'Permanently purged' : 'Soft-deleted'} franchise ${f.name} (Team #${f.teamNumber})`,
+        actorUid: currentUser.uid || 'usr_sys',
+        actorRole: currentUser.role
+      });
+
+      saveDatabase();
+      broadcastAuthoritativeState();
+      closeModal();
+      renderCurrentView();
+      showToast(permanent ? "Franchise permanently purged." : "Franchise moved to Trash.", "success");
+    }
+
+    function openDeleteAllPlayersModal() {
+      if (currentUser.role !== 'SUPER_ADMIN') {
+        showToast("ACCESS DENIED: Super Admin authorization required.", "error");
+        return;
+      }
+      const total = players.length;
+      const approved = players.filter(p => p.verificationStatus === 'VERIFIED' || p.approvalStatus === 'APPROVED' || p.status === 'AVAILABLE' || p.status === 'SOLD' || p.status === 'UNSOLD').length;
+      const pending = players.filter(p => p.approvalStatus === 'PENDING' || p.verificationStatus === 'PENDING_VERIFICATION' || p.status === 'PENDING_VERIFICATION').length;
+      const blocked = players.filter(p => p.approvalStatus === 'BLOCKED' || p.verificationStatus === 'BLOCKED' || p.status === 'BLOCKED').length;
+      const deleted = deletedPlayers.length;
+
+      const m = document.getElementById("modalContainer");
+      m.innerHTML = `
+        <div class="modal-overlay" onclick="closeModal()">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 540px;">
+            <div style="border-left: 4px solid var(--color-red); padding-left: 12px; margin-bottom: 16px;">
+              <h3 style="font-family: var(--font-display); font-size: 1.3rem; font-weight: 800; color: var(--color-red); margin: 0;">
+                DELETE ALL PLAYERS? (HIGH RISK)
+              </h3>
+              <p style="font-size: 0.8125rem; color: var(--color-orange); margin-top: 8px; line-height: 1.5;">
+                WARNING: This operation will remove all current player records from the active player dataset.
+              </p>
+              <div style="background: var(--surface-2); padding: 12px; border-radius: 6px; margin: 12px 0; font-family: var(--font-mono); font-size: 0.8125rem; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                <div>Total players: <strong>${total}</strong></div>
+                <div>Approved: <strong>${approved}</strong></div>
+                <div>Pending: <strong>${pending}</strong></div>
+                <div>Blocked: <strong>${blocked}</strong></div>
+                <div style="grid-column: span 2;">Deleted/Archived: <strong>${deleted}</strong></div>
+              </div>
+              <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 8px;">
+                To confirm, type <strong>DELETE ALL PLAYERS</strong> below:
+              </div>
+              <input type="text" id="confirmDeleteAllPlayersInput" class="form-input" placeholder="DELETE ALL PLAYERS" style="text-transform: uppercase;">
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+              <button class="btn btn-secondary" onclick="closeModal()">CANCEL</button>
+              <button class="btn btn-danger" onclick="executeDeleteAllPlayers()">CONFIRM DELETE ALL</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function executeDeleteAllPlayers() {
+      const input = (document.getElementById("confirmDeleteAllPlayersInput")?.value || '').trim();
+      if (input !== 'DELETE ALL PLAYERS') {
+        showToast("Confirmation string did not match. Action aborted.", "error");
+        return;
+      }
+
+      const count = players.length;
+      players.forEach(p => {
+        p.status = 'DELETED';
+        p.deletedAt = new Date().toISOString();
+        deletedPlayers.push(p);
+      });
+      players = [];
+
+      auditLog.unshift({
+        time: new Date().toLocaleTimeString(),
+        action: "ALL_PLAYERS_DELETED",
+        details: `Deleted all active player records (${count} players moved to Trash)`,
+        actorUid: currentUser.uid || 'usr_sys',
+        actorRole: currentUser.role
+      });
+
+      saveDatabase();
+      broadcastAuthoritativeState();
+      closeModal();
+      renderCurrentView();
+      showToast(`DELETED: ${count} players moved to Trash.`, "success");
+    }
+
+    function openDeleteAllFranchisesModal() {
+      if (currentUser.role !== 'SUPER_ADMIN') {
+        showToast("ACCESS DENIED: Super Admin authorization required.", "error");
+        return;
+      }
+      const total = franchises.length;
+      const active = franchises.filter(f => f.status === 'ACTIVE' || !f.status).length;
+      const pending = franchises.filter(f => f.status === 'PENDING').length;
+
+      const m = document.getElementById("modalContainer");
+      m.innerHTML = `
+        <div class="modal-overlay" onclick="closeModal()">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 520px;">
+            <div style="border-left: 4px solid var(--color-red); padding-left: 12px; margin-bottom: 16px;">
+              <h3 style="font-family: var(--font-display); font-size: 1.3rem; font-weight: 800; color: var(--color-red); margin: 0;">
+                DELETE ALL FRANCHISES? (HIGH RISK)
+              </h3>
+              <p style="font-size: 0.8125rem; color: var(--color-orange); margin-top: 8px; line-height: 1.5;">
+                WARNING: This will remove all franchise records from active tournament standing.
+              </p>
+              <div style="background: var(--surface-2); padding: 12px; border-radius: 6px; margin: 12px 0; font-family: var(--font-mono); font-size: 0.8125rem;">
+                <div>Total franchises: <strong>${total}</strong></div>
+                <div>Active: <strong>${active}</strong></div>
+                <div>Pending: <strong>${pending}</strong></div>
+              </div>
+              <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 8px;">
+                To confirm, type <strong>DELETE ALL FRANCHISES</strong> below:
+              </div>
+              <input type="text" id="confirmDeleteAllFranchisesInput" class="form-input" placeholder="DELETE ALL FRANCHISES" style="text-transform: uppercase;">
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+              <button class="btn btn-secondary" onclick="closeModal()">CANCEL</button>
+              <button class="btn btn-danger" onclick="executeDeleteAllFranchises()">CONFIRM DELETE ALL</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function executeDeleteAllFranchises() {
+      const input = (document.getElementById("confirmDeleteAllFranchisesInput")?.value || '').trim();
+      if (input !== 'DELETE ALL FRANCHISES') {
+        showToast("Confirmation string did not match. Action aborted.", "error");
+        return;
+      }
+
+      const count = franchises.length;
+      franchises.forEach(f => {
+        f.status = 'DELETED';
+        f.deletedAt = new Date().toISOString();
+        deletedFranchises.push(f);
+      });
+      franchises = [];
+
+      auditLog.unshift({
+        time: new Date().toLocaleTimeString(),
+        action: "ALL_FRANCHISES_DELETED",
+        details: `Deleted all franchise records (${count} franchises moved to Trash)`,
+        actorUid: currentUser.uid || 'usr_sys',
+        actorRole: currentUser.role
+      });
+
+      saveDatabase();
+      broadcastAuthoritativeState();
+      closeModal();
+      renderCurrentView();
+      showToast(`DELETED: ${count} franchises moved to Trash.`, "success");
+    }
+
+    function openResetAllDataModal() {
+      if (currentUser.role !== 'SUPER_ADMIN') {
+        showToast("ACCESS DENIED: Super Admin authorization required.", "error");
+        return;
+      }
+      const m = document.getElementById("modalContainer");
+      m.innerHTML = `
+        <div class="modal-overlay" onclick="closeModal()">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 540px;">
+            <div style="border-left: 4px solid var(--color-red); padding-left: 12px; margin-bottom: 16px;">
+              <h3 style="font-family: var(--font-display); font-size: 1.3rem; font-weight: 800; color: var(--color-red); margin: 0;">
+                RESET PLAYER + FRANCHISE DATA
+              </h3>
+              <p style="font-size: 0.8125rem; color: var(--color-orange); margin-top: 8px; line-height: 1.5;">
+                This resets all player profiles, registrations, and franchise squads back to a clean state.
+              </p>
+              <div style="background: var(--surface-2); padding: 12px; border-radius: 6px; margin: 12px 0; font-size: 0.8125rem;">
+                <div style="color: var(--color-green); font-weight: 700;">PRESERVED:</div>
+                <ul style="margin: 4px 0 0 16px; padding: 0; color: var(--text-muted); font-size: 0.75rem;">
+                  <li>Super Admin & Operator accounts</li>
+                  <li>Tournament settings & rules</li>
+                  <li>Security audit logs & ledgers</li>
+                </ul>
+              </div>
+              <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 8px;">
+                To confirm, type <strong>RESET ALL DATA</strong> below:
+              </div>
+              <input type="text" id="confirmResetAllDataInput" class="form-input" placeholder="RESET ALL DATA" style="text-transform: uppercase;">
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+              <button class="btn btn-secondary" onclick="closeModal()">CANCEL</button>
+              <button class="btn btn-danger" onclick="executeResetAllData()">EXECUTE RESET</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function executeResetAllData() {
+      const input = (document.getElementById("confirmResetAllDataInput")?.value || '').trim();
+      if (input !== 'RESET ALL DATA') {
+        showToast("Confirmation did not match. Reset cancelled.", "error");
+        return;
+      }
+
+      players = [];
+      deletedPlayers = [];
+      franchises.forEach(f => {
+        f.purse = 1000;
+        f.squad = [];
+      });
+
+      auditLog.unshift({
+        time: new Date().toLocaleTimeString(),
+        action: "COMPLETE_RESET_DATA",
+        details: "Super Admin executed complete reset of player and franchise squad datasets.",
+        actorUid: currentUser.uid || 'usr_sys',
+        actorRole: currentUser.role
+      });
+
+      saveDatabase();
+      broadcastAuthoritativeState();
+      closeModal();
+      renderCurrentView();
+      showToast("Data reset complete. Ready for new registrations.", "success");
+    }
+
+    function restorePlayerFromTrash(playerId) {
+      const idx = deletedPlayers.findIndex(x => x.id == playerId);
+      if (idx === -1) return;
+      const p = deletedPlayers.splice(idx, 1)[0];
+      p.status = 'AVAILABLE';
+      delete p.deletedAt;
+      players.push(p);
+
+      auditLog.unshift({
+        time: new Date().toLocaleTimeString(),
+        action: "PLAYER_RESTORED",
+        details: `Restored player #${p.id} ${p.name} from Trash`,
+        actorUid: currentUser.uid || 'usr_sys',
+        actorRole: currentUser.role
+      });
+
+      saveDatabase();
+      broadcastAuthoritativeState();
+      renderCurrentView();
+      showToast(`Restored ${p.name} to active players.`, "success");
+    }
+
+    function permanentlyPurgePlayer(playerId) {
+      deletedPlayers = deletedPlayers.filter(x => x.id != playerId);
+      auditLog.unshift({
+        time: new Date().toLocaleTimeString(),
+        action: "PLAYER_PERMANENTLY_PURGED",
+        details: `Permanently purged player #${playerId} from Trash`,
+        actorUid: currentUser.uid || 'usr_sys',
+        actorRole: currentUser.role
+      });
+      saveDatabase();
+      broadcastAuthoritativeState();
+      renderCurrentView();
+      showToast("Record permanently deleted from database.", "info");
+    }
+
+    function restoreFranchiseFromTrash(franchiseId) {
+      const idx = deletedFranchises.findIndex(x => x.id == franchiseId);
+      if (idx === -1) return;
+      const f = deletedFranchises.splice(idx, 1)[0];
+      f.status = 'ACTIVE';
+      delete f.deletedAt;
+      franchises.push(f);
+      saveDatabase();
+      broadcastAuthoritativeState();
+      renderCurrentView();
+      showToast(`Restored franchise ${f.name}.`, "success");
+    }
+
+    function permanentlyPurgeFranchise(franchiseId) {
+      deletedFranchises = deletedFranchises.filter(x => x.id != franchiseId);
+      saveDatabase();
+      broadcastAuthoritativeState();
+      renderCurrentView();
+      showToast("Franchise permanently deleted from database.", "info");
+    }
+
+    // ========================================================
+    // ROUND 2 & AUTO-ALLOTMENT CASCADE (§13)
+    // ========================================================
+    function initializeRound2() {
+      if (currentUser.role !== 'SUPER_ADMIN') {
+        showToast("ACCESS DENIED: Super Admin required to initialize Round 2.", "error");
+        return;
+      }
+
+      let count = 0;
+      players.forEach(p => {
+        if (p.status === 'UNSOLD' || p.status === 'SKIPPED') {
+          p.status = 'AVAILABLE';
+          p.basePrice = 20; // Problem Statement §13: every base price reset to 20
+          p.round = 2;
+          count++;
+        }
+      });
+
+      auditLog.unshift({
+        time: new Date().toLocaleTimeString(),
+        action: "ROUND_2_INITIALIZE",
+        details: `Round 2 initialized: ${count} unsold/skipped lots reopened with base price reset to 20C`,
+        actorUid: currentUser.uid || 'usr_sys',
+        actorRole: currentUser.role
+      });
+
+      saveDatabase();
+      broadcastAuthoritativeState();
+      renderCurrentView();
+      showToast(`ROUND 2 INITIALIZED: ${count} players reopened at 20C base price.`, "success");
+    }
+
+    function executeAutoAllotmentCascade() {
+      if (currentUser.role !== 'SUPER_ADMIN') {
+        showToast("ACCESS DENIED: Super Admin authorization required for auto-allotment.", "error");
+        return;
+      }
+
+      const mandatoryBuckets = ['B1', 'B2', 'B3', 'B4', 'D5'];
+      let totalAllotted = 0;
+
+      for (const b of mandatoryBuckets) {
+        const min = (window.bucketMinimums && window.bucketMinimums[b] !== undefined) ? window.bucketMinimums[b] : 2;
+        let availableInBucket = players.filter(p => p.bucket === b && (p.status === 'UNSOLD' || p.status === 'AVAILABLE'));
+
+        if (availableInBucket.length === 0) continue;
+
+        let needingFranchises = franchises.map(f => {
+          const auctionPurchases = (f.squad || []).filter(p => !p.isCaptain && !p.isViceCaptain && !p.isReferred);
+          const inBucket = auctionPurchases.filter(p => p.bucket === b).length;
+          const deficit = Math.max(0, min - inBucket);
+          const unfilledSlots = Math.max(0, 15 - auctionPurchases.length);
+          return { franchise: f, deficit, unfilledSlots, purse: f.purse };
+        }).filter(item => item.deficit > 0 && item.unfilledSlots > 0 && item.purse >= 20);
+
+        // Problem Statement §13: Sort by most unfilled slots first, ties broken by smallest remaining purse
+        needingFranchises.sort((a, b) => {
+          if (b.unfilledSlots !== a.unfilledSlots) {
+            return b.unfilledSlots - a.unfilledSlots;
+          }
+          return a.purse - b.purse;
+        });
+
+        for (const item of needingFranchises) {
+          if (availableInBucket.length === 0) break;
+          const playerToAllot = availableInBucket.shift();
+
+          playerToAllot.status = 'ALLOTTED';
+          playerToAllot.soldTo = item.franchise.id;
+          playerToAllot.soldPrice = 20;
+
+          item.franchise.purse -= 20;
+          item.franchise.squad.push({
+            id: playerToAllot.id,
+            name: playerToAllot.name,
+            roll: playerToAllot.roll,
+            bucket: playerToAllot.bucket,
+            price: 20,
+            status: 'ALLOTTED',
+            isAllotted: true
+          });
+
+          totalAllotted++;
+          auditLog.unshift({
+            time: new Date().toLocaleTimeString(),
+            action: "AUTO_ALLOTMENT",
+            details: `Allotted #${playerToAllot.id} ${playerToAllot.name} to ${item.franchise.name} for 20C (Auto-allotment cascade §13)`,
+            actorUid: currentUser.uid || 'usr_sys',
+            actorRole: currentUser.role
+          });
+        }
+      }
+
+      saveDatabase();
+      broadcastAuthoritativeState();
+      renderCurrentView();
+
+      if (totalAllotted > 0) {
+        showToast(`AUTO-ALLOTMENT COMPLETE: ${totalAllotted} players allotted at 20C each.`, "success");
+      } else {
+        showToast("No eligible deficits or unsold bucket players available for auto-allotment.", "info");
+      }
+    }
+
+    function triggerAcademicRollover() {
+      if (currentUser.role !== 'SUPER_ADMIN') {
+        showToast("ACCESS DENIED: Super Admin authorization required for academic rollover.", "error");
+        return;
+      }
+
+      let advancedCount = 0;
+      let graduatedCount = 0;
+
+      players.forEach(p => {
+        if (p.roll) {
+          const parsed = parseRollNumber(p.roll);
+          if (parsed) {
+            const newYear = (p.year || parsed.studyYear || 1) + 1;
+            p.year = newYear;
+            if (p.program === 'B.Tech') {
+              if (newYear === 2) p.bucket = 'B2';
+              else if (newYear === 3) p.bucket = 'B3';
+              else if (newYear === 4) p.bucket = 'B4';
+              else if (newYear > 4) {
+                p.bucket = 'ALUMNI';
+                p.status = 'ARCHIVED';
+                graduatedCount++;
+              }
+              advancedCount++;
+            } else if (p.program === 'Diploma') {
+              p.bucket = 'D5';
+              if (newYear > 3) {
+                p.bucket = 'ALUMNI';
+                p.status = 'ARCHIVED';
+                graduatedCount++;
+              }
+              advancedCount++;
+            }
+          }
+        }
+      });
+
+      auditLog.unshift({
+        time: new Date().toLocaleTimeString(),
+        action: "ACADEMIC_ROLLOVER_JULY_1",
+        details: `Academic year rollover executed: ${advancedCount} students advanced one year, ${graduatedCount} graduated/archived.`,
+        actorUid: currentUser.uid || 'usr_sys',
+        actorRole: currentUser.role
+      });
+
+      saveDatabase();
+      broadcastAuthoritativeState();
+      renderCurrentView();
+      showToast(`ROLLOVER EXECUTED: ${advancedCount} students advanced one year.`, "success");
+    }
+
+    
+    function openUniformRelaxationModal(bucket) {
+      if (currentUser.role !== 'SUPER_ADMIN') return;
+      window.bucketMinimums = window.bucketMinimums || {};
+      const current = window.bucketMinimums[bucket] !== undefined ? window.bucketMinimums[bucket] : 2;
+      const nextMin = Math.max(1, current - 1);
+      window.bucketMinimums[bucket] = nextMin;
+      auditLog.unshift({
+        time: new Date().toLocaleTimeString(),
+        action: "UNIFORM_BUCKET_RELAXED",
+        details: `Super Admin uniformly relaxed Bucket ${bucket} minimum from ${current} to ${nextMin} for all 11 franchises (§7, §13)`,
+        actorUid: currentUser.uid || 'usr_sys',
+        actorRole: currentUser.role
+      });
+      saveDatabase();
+      broadcastAuthoritativeState();
+      renderCurrentView();
+      showToast(`UNIFORM RELAXATION: Bucket ${bucket} minimum reduced to ${nextMin} for all teams.`, "success");
+    }
+
+    
     function renderPlayerPortalView() {
       // Find the player object corresponding to currentUser
       const p = players.find(item => 
@@ -8276,6 +8949,7 @@
       `;
     }
 
+    
     function renderAdminConsoleView() {
       const cur = players[lotIndex] || players[0];
       const leader = franchises.find(f => f.id === leadingBidderId);
@@ -8327,7 +9001,7 @@
         return true;
       });
 
-      const navTabs = ['OVERVIEW', 'TEAMS', 'PLAYERS', 'PLAYER VERIFICATION', 'REGISTRATIONS', 'FRANCHISES', 'FRANCHISE MEMBERS', 'ADMIN ACCOUNTS', 'AUCTION', 'ROUND 2', 'UNDO', 'AUDIT', 'EXPORT', 'SETTINGS', 'DATA INTEGRITY'];
+      const navTabs = isSuperAdmin ? ['OVERVIEW', 'PLAYERS', 'PLAYER VERIFICATION', 'REGISTRATIONS', 'FRANCHISES', 'FRANCHISE MEMBERS', 'AUCTION', 'ROUND 2', 'UNDO', 'DATA MANAGEMENT', 'AUDIT', 'EXPORT', 'SETTINGS', 'ADMIN ACCOUNTS'] : ['AUCTION', 'OVERVIEW', 'ROUND 2', 'AUDIT'];
       const activeFranchisesDisplay = (window.RealtimeStore && window.RealtimeStore.state.presence.activeFranchises) !== undefined
         ? window.RealtimeStore.state.presence.activeFranchises
         : 0;
@@ -8641,95 +9315,221 @@
                 </table>
               </div>
             </div>
-          ` : adminNavTab === 'DATA INTEGRITY' ? `
-            <!-- TAB: DATA INTEGRITY & MIGRATION ENGINE (SECTIONS 11 & 41) -->
+          ` : (adminNavTab === 'DATA MANAGEMENT' || adminNavTab === 'DATA INTEGRITY') ? `
+            <!-- TAB: DATA MANAGEMENT CENTER (SECTIONS 3-6, Master Prompt) -->
             <div style="display: flex; flex-direction: column; gap: var(--space-4);">
               <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
                 <div>
                   <h3 style="font-family: var(--font-display); font-size: 1.3rem; font-weight: 800; color: var(--text-bright); margin: 0;">
-                    DATA INTEGRITY & HISTORICAL MIGRATION CENTER
+                    DATA MANAGEMENT & DELETION CENTER
                   </h3>
                   <div style="font-size: 0.8125rem; color: var(--text-muted); margin-top: 2px;">
-                    Enforce One Roll = One Identity, scan case-variants, audit orphaned users, and migrate historical editions.
+                    Database-backed deletion, trash recovery, bulk operations, backups, and audit verification.
                   </div>
                 </div>
-                <div style="display: flex; gap: 8px;">
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                   <button class="btn btn-secondary" onclick="runDataIntegrityScan()" style="font-size: 0.75rem; padding: 6px 14px; min-height: 32px;">
-                    🔍 RUN INTEGRITY SCAN
+                    🔍 INTEGRITY SCAN
                   </button>
                   ${isSuperAdmin ? `
-                    <button class="btn btn-primary" onclick="runMigrateExistingPlayerAccounts()" style="font-size: 0.75rem; padding: 6px 14px; min-height: 32px;">
-                      ⚡ MIGRATE EXISTING PLAYER ACCOUNTS
+                    <button class="btn btn-danger" onclick="openDeleteAllPlayersModal()" style="font-size: 0.75rem; padding: 6px 14px; min-height: 32px;">
+                      ⚠️ DELETE ALL PLAYERS
+                    </button>
+                    <button class="btn btn-danger" onclick="openDeleteAllFranchisesModal()" style="font-size: 0.75rem; padding: 6px 14px; min-height: 32px;">
+                      ⚠️ DELETE ALL FRANCHISES
+                    </button>
+                    <button class="btn btn-secondary" onclick="openResetAllDataModal()" style="font-size: 0.75rem; padding: 6px 14px; min-height: 32px; border-color: var(--color-orange); color: var(--color-orange);">
+                      🔄 RESET ALL DATA
                     </button>
                   ` : ''}
                 </div>
               </div>
 
-              <!-- Integrity Metrics Grid -->
-              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-3);">
-                <div class="surface-card" style="padding: 16px;">
-                  <span class="label-micro" style="color: var(--color-green);">CANONICAL EDITION</span>
-                  <div style="font-size: 1.25rem; font-weight: 800; color: var(--text-bright); margin-top: 4px;">ACC 2026 OFFICIAL</div>
-                  <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">Edition isolation active</div>
-                </div>
-
-                <div class="surface-card" style="padding: 16px;">
-                  <span class="label-micro" style="color: var(--color-blue);">TOTAL PLAYERS EVALUATED</span>
-                  <div class="font-mono" style="font-size: 1.25rem; font-weight: 800; color: var(--color-blue); margin-top: 4px;">${players.length}</div>
-                  <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">All roll numbers normalized</div>
-                </div>
-
-                <div class="surface-card" style="padding: 16px;">
-                  <span class="label-micro" style="color: var(--color-orange);">CASE-VARIANT ROLLS</span>
-                  <div class="font-mono" style="font-size: 1.25rem; font-weight: 800; color: var(--color-orange); margin-top: 4px;">
-                    ${dataIntegrityResults ? dataIntegrityResults.caseVariantRolls.length : 0}
-                  </div>
-                  <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">Case differences unified</div>
-                </div>
-
-                <div class="surface-card" style="padding: 16px;">
-                  <span class="label-micro" style="color: var(--color-yellow);">ORPHANED AUTH IDENTITIES</span>
-                  <div class="font-mono" style="font-size: 1.25rem; font-weight: 800; color: var(--color-yellow); margin-top: 4px;">
-                    ${dataIntegrityResults ? dataIntegrityResults.orphanedUsers.length : 0}
-                  </div>
-                  <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">Users mapped to canonical record</div>
-                </div>
+              <!-- DATA MANAGEMENT SUB-TABS: PLAYERS, FRANCHISES, DELETED / TRASH, BACKUPS, ACTIVITY -->
+              <div style="display: flex; gap: 6px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px; overflow-x: auto;">
+                ${['PLAYERS', 'FRANCHISES', 'DELETED / TRASH', 'BACKUPS', 'ACTIVITY'].map(st => `
+                  <button type="button" class="btn ${dataManagementSubTab === st ? 'btn-primary' : 'btn-secondary'}" 
+                          style="font-size: 0.75rem; padding: 6px 14px; min-height: 30px; letter-spacing: 0.04em;"
+                          onclick="dataManagementSubTab = '${st}'; renderCurrentView();">
+                    ${st}
+                    ${st === 'DELETED / TRASH' && (deletedPlayers.length > 0 || (deletedFranchises || []).length > 0) ? `
+                      <span class="badge" style="background: var(--color-red); color: #fff; margin-left: 6px; padding: 1px 6px; font-size: 0.65rem; border-radius: 10px;">
+                        ${deletedPlayers.length + (deletedFranchises || []).length}
+                      </span>
+                    ` : ''}
+                  </button>
+                `).join('')}
               </div>
 
-              <!-- Integrity Scan Diagnostic Report -->
-              <div class="surface-card" style="padding: 20px;">
-                <h4 style="font-family: var(--font-display); font-size: 1.1rem; font-weight: 800; color: var(--text-bright); margin: 0 0 12px;">
-                  DIAGNOSTIC SCAN LOG ${dataIntegrityResults ? `(Last scanned at ${dataIntegrityResults.scannedAt})` : ''}
-                </h4>
-                ${!dataIntegrityResults ? `
-                  <div style="color: var(--text-muted); font-size: 0.8125rem;">
-                    Click <strong>RUN INTEGRITY SCAN</strong> to verify roll casing, duplicate mobile entries, and orphaned authentication mappings.
+              <!-- SUB-TAB CONTENT -->
+              ${dataManagementSubTab === 'PLAYERS' ? `
+                <div class="surface-card" style="padding: 0; overflow-x: auto;">
+                  <div style="padding: 12px 16px; background: var(--surface-2); border-bottom: 1px solid var(--border-medium); display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-weight: 700; font-size: 0.8125rem;">Active Players Database Records (${players.length})</span>
+                    <span style="font-size: 0.75rem; color: var(--text-muted);">Real database deletions modify actual records</span>
                   </div>
-                ` : `
-                  <div style="display: flex; flex-direction: column; gap: 10px; font-size: 0.8125rem;">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                      <span class="status-badge ${dataIntegrityResults.duplicateRolls.length === 0 ? 'status-connected' : 'status-blocked'}">
-                        ${dataIntegrityResults.duplicateRolls.length === 0 ? '✓ ZERO DUPLICATE ROLLS' : '⚠️ ' + dataIntegrityResults.duplicateRolls.length + ' DUPLICATE ROLL(S) DETECTED'}
-                      </span>
-                      <span style="color: var(--text-muted);">One Roll = One Player enforced.</span>
-                    </div>
-
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                      <span class="status-badge ${dataIntegrityResults.duplicateMobiles.length === 0 ? 'status-connected' : 'status-warning'}">
-                        ${dataIntegrityResults.duplicateMobiles.length === 0 ? '✓ ALL MOBILES UNIQUE' : '⚠️ ' + dataIntegrityResults.duplicateMobiles.length + ' SHARED MOBILE(S)'}
-                      </span>
-                      <span style="color: var(--text-muted);">Student player contact numbers verified.</span>
-                    </div>
-
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                      <span class="status-badge status-connected">
-                        ✓ 11 CANONICAL FRANCHISES VERIFIED
-                      </span>
-                      <span style="color: var(--text-muted);">FR001 through FR011 assigned and active.</span>
-                    </div>
+                  <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.8125rem;">
+                    <thead>
+                      <tr style="background: var(--surface-2); border-bottom: 1px solid var(--border-medium); color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase;">
+                        <th style="padding: 10px 14px;">Player</th>
+                        <th style="padding: 10px 14px;">Roll</th>
+                        <th style="padding: 10px 14px;">Bucket</th>
+                        <th style="padding: 10px 14px;">Status</th>
+                        <th style="padding: 10px 14px; text-align: right;">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${players.length === 0 ? `
+                        <tr><td colspan="5" style="padding: 24px; text-align: center; color: var(--text-muted);">No active players in database.</td></tr>
+                      ` : players.slice(0, 50).map(p => `
+                        <tr style="border-bottom: 1px solid var(--border-subtle);">
+                          <td style="padding: 10px 14px;"><strong>${p.name}</strong></td>
+                          <td style="padding: 10px 14px; font-family: var(--font-mono); color: var(--color-green);">${p.roll || '—'}</td>
+                          <td style="padding: 10px 14px; font-weight: 700;">${p.bucket || '—'}</td>
+                          <td style="padding: 10px 14px;"><span class="status-badge status-live" style="font-size: 0.65rem;">${p.status}</span></td>
+                          <td style="padding: 10px 14px; text-align: right;">
+                            <button class="btn btn-danger" style="font-size: 0.6875rem; padding: 4px 8px; min-height: 26px;" onclick="openDeletePlayerDataModal('${p.id}')">
+                              DELETE PLAYER DATA
+                            </button>
+                          </td>
+                        </tr>
+                      `).join('')}
+                    </tbody>
+                  </table>
+                  ${players.length > 50 ? `
+                    <div style="padding: 8px 16px; font-size: 0.75rem; color: var(--text-muted); text-align: center;">Showing first 50 of ${players.length} players</div>
+                  ` : ''}
+                </div>
+              ` : dataManagementSubTab === 'FRANCHISES' ? `
+                <div class="surface-card" style="padding: 0; overflow-x: auto;">
+                  <div style="padding: 12px 16px; background: var(--surface-2); border-bottom: 1px solid var(--border-medium);">
+                    <span style="font-weight: 700; font-size: 0.8125rem;">Franchises Database Records (${franchises.length})</span>
                   </div>
-                `}
-              </div>
+                  <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.8125rem;">
+                    <thead>
+                      <tr style="background: var(--surface-2); border-bottom: 1px solid var(--border-medium); color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase;">
+                        <th style="padding: 10px 14px;">Team #</th>
+                        <th style="padding: 10px 14px;">Franchise</th>
+                        <th style="padding: 10px 14px;">Coordinator</th>
+                        <th style="padding: 10px 14px;">Purse</th>
+                        <th style="padding: 10px 14px; text-align: right;">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${franchises.length === 0 ? `
+                        <tr><td colspan="5" style="padding: 24px; text-align: center; color: var(--text-muted);">No franchises found.</td></tr>
+                      ` : franchises.map(f => `
+                        <tr style="border-bottom: 1px solid var(--border-subtle);">
+                          <td style="padding: 10px 14px; font-family: var(--font-mono); font-weight: 700;">#${f.teamNumber || '—'}</td>
+                          <td style="padding: 10px 14px;"><strong>${f.name}</strong></td>
+                          <td style="padding: 10px 14px;">${f.coordinatorName || '—'}</td>
+                          <td style="padding: 10px 14px; font-family: var(--font-mono); color: var(--color-green);">${f.purse}C</td>
+                          <td style="padding: 10px 14px; text-align: right;">
+                            <button class="btn btn-danger" style="font-size: 0.6875rem; padding: 4px 8px; min-height: 26px;" onclick="openDeleteFranchiseDataModal('${f.id}')">
+                              DELETE FRANCHISE DATA
+                            </button>
+                          </td>
+                        </tr>
+                      `).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              ` : dataManagementSubTab === 'DELETED / TRASH' ? `
+                <div class="surface-card" style="padding: 0; overflow-x: auto;">
+                  <div style="padding: 12px 16px; background: var(--surface-2); border-bottom: 1px solid var(--border-medium); display: flex; justify-content: space-between;">
+                    <span style="font-weight: 700; font-size: 0.8125rem;">Deleted Records / Trash Bin (${deletedPlayers.length} players, ${(deletedFranchises || []).length} franchises)</span>
+                  </div>
+                  <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.8125rem;">
+                    <thead>
+                      <tr style="background: var(--surface-2); border-bottom: 1px solid var(--border-medium); color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase;">
+                        <th style="padding: 10px 14px;">Record</th>
+                        <th style="padding: 10px 14px;">Type</th>
+                        <th style="padding: 10px 14px;">Identifier</th>
+                        <th style="padding: 10px 14px;">Deleted At</th>
+                        <th style="padding: 10px 14px; text-align: right;">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${deletedPlayers.length === 0 && (deletedFranchises || []).length === 0 ? `
+                        <tr><td colspan="5" style="padding: 32px; text-align: center; color: var(--text-muted);">Trash is empty. No deleted records.</td></tr>
+                      ` : `
+                        ${deletedPlayers.map(p => `
+                          <tr style="border-bottom: 1px solid var(--border-subtle);">
+                            <td style="padding: 10px 14px;"><strong>${p.name}</strong></td>
+                            <td style="padding: 10px 14px;"><span class="status-badge status-warning" style="font-size: 0.625rem;">PLAYER</span></td>
+                            <td style="padding: 10px 14px; font-family: var(--font-mono); color: var(--color-green);">${p.roll || p.id}</td>
+                            <td style="padding: 10px 14px; font-size: 0.75rem; color: var(--text-muted);">${p.deletedAt ? new Date(p.deletedAt).toLocaleString() : 'Recent'}</td>
+                            <td style="padding: 10px 14px; text-align: right;">
+                              <div style="display: flex; gap: 6px; justify-content: flex-end;">
+                                <button class="btn btn-secondary" style="font-size: 0.6875rem; padding: 4px 8px; min-height: 26px;" onclick="restorePlayerFromTrash('${p.id}')">RESTORE</button>
+                                <button class="btn btn-danger" style="font-size: 0.6875rem; padding: 4px 8px; min-height: 26px;" onclick="permanentlyPurgePlayer('${p.id}')">PURGE</button>
+                              </div>
+                            </td>
+                          </tr>
+                        `).join('')}
+                        ${(deletedFranchises || []).map(f => `
+                          <tr style="border-bottom: 1px solid var(--border-subtle);">
+                            <td style="padding: 10px 14px;"><strong>${f.name}</strong></td>
+                            <td style="padding: 10px 14px;"><span class="status-badge status-blocked" style="font-size: 0.625rem;">FRANCHISE</span></td>
+                            <td style="padding: 10px 14px; font-family: var(--font-mono);">#${f.teamNumber || f.id}</td>
+                            <td style="padding: 10px 14px; font-size: 0.75rem; color: var(--text-muted);">${f.deletedAt ? new Date(f.deletedAt).toLocaleString() : 'Recent'}</td>
+                            <td style="padding: 10px 14px; text-align: right;">
+                              <div style="display: flex; gap: 6px; justify-content: flex-end;">
+                                <button class="btn btn-secondary" style="font-size: 0.6875rem; padding: 4px 8px; min-height: 26px;" onclick="restoreFranchiseFromTrash('${f.id}')">RESTORE</button>
+                                <button class="btn btn-danger" style="font-size: 0.6875rem; padding: 4px 8px; min-height: 26px;" onclick="permanentlyPurgeFranchise('${f.id}')">PURGE</button>
+                              </div>
+                            </td>
+                          </tr>
+                        `).join('')}
+                      `}
+                    </tbody>
+                  </table>
+                </div>
+              ` : dataManagementSubTab === 'BACKUPS' ? `
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--space-4);">
+                  <div class="surface-card" style="padding: var(--space-5);">
+                    <span class="label-micro" style="color: var(--color-green);">BACKUP SNAPSHOT</span>
+                    <h4 style="font-size: 1.1rem; font-weight: 800; color: var(--text-bright); margin: 6px 0;">Create Snapshot</h4>
+                    <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 12px;">Capture instant state of all players, squads, purses, and settings.</p>
+                    <button class="btn btn-primary" onclick="exportAuditLogCSV(); showToast('Backup snapshot downloaded.', 'success');" style="width: 100%; font-size: 0.75rem;">DOWNLOAD FULL DATABASE JSON</button>
+                  </div>
+                  <div class="surface-card" style="padding: var(--space-5);">
+                    <span class="label-micro" style="color: var(--color-blue);">HISTORICAL MIGRATION</span>
+                    <h4 style="font-size: 1.1rem; font-weight: 800; color: var(--text-bright); margin: 6px 0;">Account Migration</h4>
+                    <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 12px;">Provision initial credentials for existing players without accounts.</p>
+                    <button class="btn btn-secondary" onclick="runMigrateExistingPlayerAccounts()" style="width: 100%; font-size: 0.75rem;">MIGRATE EXISTING ACCOUNTS</button>
+                  </div>
+                </div>
+              ` : `
+                <!-- ACTIVITY SUB-TAB -->
+                <div class="surface-card" style="padding: 0; overflow-x: auto;">
+                  <div style="padding: 12px 16px; background: var(--surface-2); border-bottom: 1px solid var(--border-medium);">
+                    <span style="font-weight: 700; font-size: 0.8125rem;">Data Management & Deletion Activity Ledger</span>
+                  </div>
+                  <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.8125rem;">
+                    <thead>
+                      <tr style="background: var(--surface-2); border-bottom: 1px solid var(--border-medium); color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase;">
+                        <th style="padding: 10px 14px;">Timestamp</th>
+                        <th style="padding: 10px 14px;">Action</th>
+                        <th style="padding: 10px 14px;">Details</th>
+                        <th style="padding: 10px 14px;">Actor</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${auditLog.filter(a => (a.action || '').includes('DELETE') || (a.action || '').includes('PURGE') || (a.action || '').includes('RESTORE') || (a.action || '').includes('RESET')).length === 0 ? `
+                        <tr><td colspan="4" style="padding: 24px; text-align: center; color: var(--text-muted);">No deletion activity recorded yet.</td></tr>
+                      ` : auditLog.filter(a => (a.action || '').includes('DELETE') || (a.action || '').includes('PURGE') || (a.action || '').includes('RESTORE') || (a.action || '').includes('RESET')).map(a => `
+                        <tr style="border-bottom: 1px solid var(--border-subtle);">
+                          <td style="padding: 10px 14px; font-family: var(--font-mono); color: var(--text-faint);">${a.time}</td>
+                          <td style="padding: 10px 14px; font-weight: 700; color: var(--color-orange);">${a.action}</td>
+                          <td style="padding: 10px 14px; font-family: var(--font-mono); color: var(--color-green);">${a.details}</td>
+                          <td style="padding: 10px 14px;">${a.actorRole || 'SUPER_ADMIN'}</td>
+                        </tr>
+                      `).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              `}
             </div>
           ` : adminNavTab === 'AUCTION' ? `
             <!-- TAB: AUCTION CONTROLS & DESK -->
@@ -9450,17 +10250,65 @@
               </div>
             </div>
           ` : adminNavTab === 'ROUND 2' ? `
-            <!-- TAB: ROUND 2 ACCELERATED AUCTION -->
+            <!-- TAB: ROUND 2 ACCELERATED AUCTION & ENDGAME CASCADE (§13) -->
             <div style="display: flex; flex-direction: column; gap: var(--space-4);">
-              <div>
-                <h3 style="font-family: var(--font-display); font-size: 1.3rem; font-weight: 800; color: var(--text-bright); margin: 0;">
-                  ROUND 2: UNSOLD PLAYERS ACCELERATED RE-AUCTION
-                </h3>
-                <div style="font-size: 0.8125rem; color: var(--text-muted); margin-top: 2px;">
-                  Re-introduce unsold candidate lots back into the active bidding pool.
+              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                <div>
+                  <h3 style="font-family: var(--font-display); font-size: 1.3rem; font-weight: 800; color: var(--text-bright); margin: 0;">
+                    ROUND 2: ACCELERATED AUCTION & AUTO-ALLOTMENT CASCADE (§13)
+                  </h3>
+                  <div style="font-size: 0.8125rem; color: var(--text-muted); margin-top: 2px;">
+                    Reopens all unsold/skipped lots at 20C base price. Completes squad quotas via auto-allotment and bucket remedies.
+                  </div>
+                </div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                  ${isSuperAdmin ? `
+                    <button class="btn btn-primary" onclick="initializeRound2()" style="font-size: 0.75rem; padding: 6px 14px; min-height: 32px;">
+                      ⚡ RESET BASE PRICES TO 20C & INITIALIZE ROUND 2
+                    </button>
+                    <button class="btn btn-secondary" onclick="executeAutoAllotmentCascade()" style="font-size: 0.75rem; padding: 6px 14px; min-height: 32px; border-color: var(--color-green); color: var(--color-green);">
+                      ⚡ RUN AUTO-ALLOTMENT CASCADE
+                    </button>
+                  ` : ''}
                 </div>
               </div>
 
+              <!-- Bucket Health & Scarcity Tracker -->
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--space-3);">
+                ${['B1', 'B2', 'B3', 'B4', 'D5'].map(b => {
+                  const min = (window.bucketMinimums && window.bucketMinimums[b] !== undefined) ? window.bucketMinimums[b] : 2;
+                  let needed = 0;
+                  franchises.forEach(f => {
+                    const ap = (f.squad || []).filter(p => !p.isCaptain && !p.isViceCaptain && !p.isReferred);
+                    const inB = ap.filter(p => p.bucket === b).length;
+                    needed += Math.max(0, min - inB);
+                  });
+                  const available = players.filter(p => p.bucket === b && (p.status === 'AVAILABLE' || p.status === 'UNSOLD')).length;
+                  const isExhausted = (available === 0 && needed > 0);
+                  const isScarce = (available <= needed && needed > 0);
+                  return `
+                    <div class="surface-card" style="padding: 12px; border-top: 3px solid ${isExhausted ? 'var(--color-red)' : isScarce ? 'var(--color-orange)' : 'var(--color-green)'};">
+                      <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-weight: 800; font-size: 0.875rem;">Bucket ${b}</span>
+                        <span class="status-badge ${isExhausted ? 'status-blocked' : isScarce ? 'status-warning' : 'status-connected'}" style="font-size: 0.625rem;">
+                          ${isExhausted ? 'EXHAUSTED' : isScarce ? 'SCARCE' : 'SUFFICIENT'}
+                        </span>
+                      </div>
+                      <div style="margin-top: 6px; font-size: 0.75rem; display: flex; justify-content: space-between;">
+                        <span>Pool: <strong>${available}</strong></span>
+                        <span>Needed: <strong>${needed}</strong></span>
+                      </div>
+                      ${isExhausted && isSuperAdmin ? `
+                        <div style="margin-top: 8px; display: flex; gap: 4px;">
+                          <button class="btn btn-secondary" style="font-size: 0.65rem; padding: 2px 6px; flex: 1;" onclick="openUniformRelaxationModal('${b}')">RELAX MIN</button>
+                        </div>
+                      ` : ''}
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+
+              <!-- Unsold Candidates Queue -->
               <div class="surface-card" style="padding: 0; overflow-x: auto;">
                 <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.8125rem;">
                   <thead>
@@ -9474,13 +10322,13 @@
                     </tr>
                   </thead>
                   <tbody>
-                    ${players.filter(p => p.status === 'UNSOLD').length === 0 ? `
+                    ${players.filter(p => p.status === 'UNSOLD' || p.status === 'SKIPPED').length === 0 ? `
                       <tr>
                         <td colspan="6" style="padding: 24px; text-align: center; color: var(--text-muted);">
-                          No unsold players currently in Round 2 queue. All lots either available or sold!
+                          No unsold or skipped players currently in queue. All lots either available, sold, or allotted!
                         </td>
                       </tr>
-                    ` : players.filter(p => p.status === 'UNSOLD').map(p => `
+                    ` : players.filter(p => p.status === 'UNSOLD' || p.status === 'SKIPPED').map(p => `
                       <tr style="border-bottom: 1px solid var(--border-subtle);">
                         <td style="padding: 12px 16px;">
                           <div style="display: flex; align-items: center; gap: 8px;">
@@ -9492,7 +10340,7 @@
                         <td style="padding: 12px 16px; font-weight: 800; color: var(--color-green);">${p.bucket}</td>
                         <td style="padding: 12px 16px; font-family: var(--font-mono);">${p.basePrice}C</td>
                         <td style="padding: 12px 16px;">
-                          <span class="status-badge status-blocked" style="font-size: 0.625rem;">UNSOLD</span>
+                          <span class="status-badge ${p.status === 'SKIPPED' ? 'status-warning' : 'status-blocked'}" style="font-size: 0.625rem;">${p.status}</span>
                         </td>
                         <td style="padding: 12px 16px; text-align: right;">
                           <button class="btn btn-primary" style="font-size: 0.6875rem; padding: 4px 10px; min-height: 28px;" onclick="loadPlayerToLot('${p.id}')">
@@ -9605,13 +10453,20 @@
           ` : adminNavTab === 'SETTINGS' ? `
             <!-- TAB: TOURNAMENT SETTINGS (SUPER ADMIN ONLY) -->
             <div style="display: flex; flex-direction: column; gap: var(--space-4); max-width: 680px;">
-              <div>
-                <h3 style="font-family: var(--font-display); font-size: 1.3rem; font-weight: 800; color: var(--text-bright); margin: 0;">
-                  TOURNAMENT RULES & ENGINE CONFIGURATION
-                </h3>
-                <div style="font-size: 0.8125rem; color: var(--text-muted); margin-top: 2px;">
-                  Authoritative tournament parameters for Avanthi Cricket Carnival 2026.
+              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                <div>
+                  <h3 style="font-family: var(--font-display); font-size: 1.3rem; font-weight: 800; color: var(--text-bright); margin: 0;">
+                    TOURNAMENT RULES & ENGINE CONFIGURATION
+                  </h3>
+                  <div style="font-size: 0.8125rem; color: var(--text-muted); margin-top: 2px;">
+                    Authoritative parameters and academic calendar governance.
+                  </div>
                 </div>
+                ${isSuperAdmin ? `
+                  <button class="btn btn-primary" onclick="triggerAcademicRollover()" style="font-size: 0.75rem; padding: 6px 14px; min-height: 32px;">
+                    📅 ADVANCE ACADEMIC YEAR (JULY 1 ROLLOVER)
+                  </button>
+                ` : ''}
               </div>
 
               <div class="surface-card" style="padding: var(--space-5); display: flex; flex-direction: column; gap: 14px;">
@@ -9634,11 +10489,33 @@
                   </div>
                   <div class="surface-subtle" style="padding: 12px;">
                     <div class="label-micro" style="font-size: 0.65rem;">SQUAD CAPACITY</div>
-                    <div style="font-weight: 800; color: var(--text-bright); margin-top: 2px;">Min 12 · Max 15</div>
+                    <div style="font-weight: 800; color: var(--text-bright); margin-top: 2px;">Min 17 · Max 22 (15 Purchases + Free Captain/VC/Referred)</div>
                   </div>
                   <div class="surface-subtle" style="padding: 12px;">
                     <div class="label-micro" style="font-size: 0.65rem;">BID INCREMENTS</div>
                     <div style="font-weight: 800; color: var(--text-bright); margin-top: 2px;">&lt;100: +10 | 100-199: +20 | &ge;200: +30</div>
+                  </div>
+                </div>
+
+                <!-- Uniform Bucket Minimum Relaxation Sliders (§7, §13) -->
+                <div style="margin-top: 8px; border-top: 1px solid var(--border-subtle); padding-top: 12px;">
+                  <span class="label-micro" style="color: var(--color-orange);">UNIFORM BUCKET MINIMUMS (ALL 11 FRANCHISES)</span>
+                  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin-top: 8px;">
+                    ${['B1', 'B2', 'B3', 'B4', 'D5'].map(b => {
+                      const curMin = (window.bucketMinimums && window.bucketMinimums[b] !== undefined) ? window.bucketMinimums[b] : 2;
+                      return `
+                        <div style="background: var(--surface-2); padding: 8px; border-radius: 4px; text-align: center;">
+                          <div style="font-weight: 800; font-size: 0.8125rem;">${b}</div>
+                          <div style="font-size: 0.75rem; color: var(--color-green); margin: 2px 0;">Min: ${curMin}</div>
+                          ${isSuperAdmin ? `
+                            <button class="btn btn-secondary" style="font-size: 0.625rem; padding: 2px 6px;" 
+                                    onclick="window.bucketMinimums = window.bucketMinimums || {}; window.bucketMinimums['${b}'] = Math.max(1, ${curMin} - 1); showToast('Uniformly relaxed ${b} min to ' + window.bucketMinimums['${b}'], 'success'); renderCurrentView();">
+                              REDUCE -1
+                            </button>
+                          ` : ''}
+                        </div>
+                      `;
+                    }).join('')}
                   </div>
                 </div>
               </div>
