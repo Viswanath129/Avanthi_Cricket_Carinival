@@ -52,8 +52,10 @@ export default function LoginPage() {
     if (user && userDoc) {
       switch (userDoc.role) {
         case 'SUPER_ADMIN':
+          setLocation(activeTab === 'OPERATOR' ? '/operator' : '/admin');
+          break;
         case 'ADMIN':
-          setLocation('/admin');
+          setLocation('/operator');
           break;
         case 'FRANCHISE_COORDINATOR':
         case 'FRANCHISE_TEAM_LEADER':

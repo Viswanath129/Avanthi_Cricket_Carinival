@@ -3,8 +3,8 @@ import { db, verifyCaller } from '../utils/auth';
 import * as admin from 'firebase-admin';
 
 export const hammerLot = onCall({ maxInstances: 5 }, async (request) => {
-  // Only Super Admin can hammer
-  const caller = await verifyCaller(request.auth?.uid, ['SUPER_ADMIN']);
+  // Super Admin or Operator can hammer
+  const caller = await verifyCaller(request.auth?.uid, ['SUPER_ADMIN', 'ADMIN']);
   
   const { lotId } = request.data;
   if (!lotId) throw new HttpsError('invalid-argument', 'lotId is required.');

@@ -8,6 +8,7 @@ import TeamsBoardPage from "./pages/TeamsBoardPage";
 import LiveAuctionPage from "./pages/LiveAuctionPage";
 import AdminAuctionPage from "./pages/AdminAuctionPage";
 import AdminDashboardPage from "./pages/AdminDashboardPage";
+import AdminLiveDashboard from "./pages/AdminLiveDashboard";
 import FranchiseBiddingPage from "./pages/FranchiseBiddingPage";
 import FranchiseRegistrationPage from "./pages/FranchiseRegistrationPage";
 import PlayerRegistrationPage from "./pages/PlayerRegistrationPage";
@@ -170,15 +171,25 @@ function Router() {
       <Route path="/franchise/register" component={FranchiseRegistrationPage} />
       <Route path="/register" component={PlayerRegistrationPage} />
 
-      {/* Admin Routes */}
+      {/* Admin & Operator Live Dashboards */}
       <Route path="/admin">
         <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN']}>
-          <AdminDashboardPage />
+          <AdminLiveDashboard mode="SUPER_ADMIN" />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/operator">
+        <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN']}>
+          <AdminLiveDashboard mode="OPERATOR" />
         </ProtectedRoute>
       </Route>
       <Route path="/admin/auction">
         <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN']}>
-          <AdminAuctionPage />
+          <AdminLiveDashboard mode="SUPER_ADMIN" />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/admin/management">
+        <ProtectedRoute allowedRoles={['SUPER_ADMIN']}>
+          <AdminDashboardPage />
         </ProtectedRoute>
       </Route>
 

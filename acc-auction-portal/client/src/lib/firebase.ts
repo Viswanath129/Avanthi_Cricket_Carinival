@@ -3,6 +3,7 @@ import { getAuth, connectAuthEmulator } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getStorage, connectStorageEmulator } from 'firebase/storage';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
+import { getDatabase, connectDatabaseEmulator } from 'firebase/database';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyC3HX53aAbeWqYGTSUvl59xEBeQNefx0sA',
@@ -11,6 +12,7 @@ const firebaseConfig = {
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'studio-6471864054-30ce7.firebasestorage.app',
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '830366253821',
   appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:830366253821:web:74186cd15282b396053494',
+  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL || 'https://studio-6471864054-30ce7-default-rtdb.firebaseio.com',
 };
 
 export const app = initializeApp(firebaseConfig);
@@ -18,6 +20,7 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
 export const functions = getFunctions(app);
+export const rtdb = getDatabase(app);
 
 // Connect to emulators in development
 if (import.meta.env.DEV && import.meta.env.VITE_USE_EMULATORS === 'true') {
@@ -25,4 +28,5 @@ if (import.meta.env.DEV && import.meta.env.VITE_USE_EMULATORS === 'true') {
   connectFirestoreEmulator(db, 'localhost', 8080);
   connectStorageEmulator(storage, 'localhost', 9199);
   connectFunctionsEmulator(functions, 'localhost', 5001);
+  connectDatabaseEmulator(rtdb, 'localhost', 9000);
 }

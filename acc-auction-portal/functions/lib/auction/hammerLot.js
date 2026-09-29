@@ -38,8 +38,8 @@ const https_1 = require("firebase-functions/v2/https");
 const auth_1 = require("../utils/auth");
 const admin = __importStar(require("firebase-admin"));
 exports.hammerLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => {
-    // Only Super Admin can hammer
-    const caller = await (0, auth_1.verifyCaller)(request.auth?.uid, ['SUPER_ADMIN']);
+    // Super Admin or Operator can hammer
+    const caller = await (0, auth_1.verifyCaller)(request.auth?.uid, ['SUPER_ADMIN', 'ADMIN']);
     const { lotId } = request.data;
     if (!lotId)
         throw new https_1.HttpsError('invalid-argument', 'lotId is required.');

@@ -3,7 +3,7 @@ import { db, verifyCaller } from '../utils/auth';
 import * as admin from 'firebase-admin';
 
 export const undoSale = onCall({ maxInstances: 5 }, async (request) => {
-  const caller = await verifyCaller(request.auth?.uid, ['SUPER_ADMIN']);
+  const caller = await verifyCaller(request.auth?.uid, ['SUPER_ADMIN', 'ADMIN']);
   
   const { acquisitionId, reason } = request.data;
   if (!acquisitionId) throw new HttpsError('invalid-argument', 'acquisitionId is required.');

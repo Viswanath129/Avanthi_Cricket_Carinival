@@ -41,7 +41,7 @@ const admin = __importStar(require("firebase-admin"));
 exports.placeBid = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => {
     // 1. Authenticate
     const caller = await (0, auth_1.verifyCaller)(request.auth?.uid, [
-        'FRANCHISE_COORDINATOR', 'FRANCHISE_TEAM_LEADER',
+        'FRANCHISE_COORDINATOR', 'FRANCHISE_TEAM_LEADER', 'SUPER_ADMIN', 'ADMIN'
     ]);
     // 2. Extract input
     const { lotId, clientActionId } = request.data;
@@ -49,7 +49,16 @@ exports.placeBid = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => 
         throw new https_1.HttpsError('invalid-argument', 'lotId and clientActionId are required.');
     }
     // 3. Resolve franchise
-    const franchiseId = await (0, auth_1.resolveFranchiseId)(caller);
+    let franchiseId;
+    if (caller.role === 'SUPER_ADMIN' || caller.role === 'ADMIN') {
+        if (!request.data.franchiseId) {
+            throw new https_1.HttpsError('invalid-argument', 'franchiseId is required when placing bid on behalf.');
+        }
+        franchiseId = request.data.franchiseId;
+    }
+    else {
+        franchiseId = await (0, auth_1.resolveFranchiseId)(caller);
+    }
     // 4. Execute as Firestore transaction
     const result = await auth_1.db.runTransaction(async (txn) => {
         // Read lot

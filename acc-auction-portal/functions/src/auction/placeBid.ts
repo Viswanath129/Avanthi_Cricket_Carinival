@@ -6,7 +6,7 @@ import * as admin from 'firebase-admin';
 export const placeBid = onCall({ maxInstances: 10 }, async (request) => {
   // 1. Authenticate
   const caller = await verifyCaller(request.auth?.uid, [
-    'FRANCHISE_COORDINATOR', 'FRANCHISE_TEAM_LEADER',
+    'FRANCHISE_COORDINATOR', 'FRANCHISE_TEAM_LEADER', 'SUPER_ADMIN', 'ADMIN'
   ]);
   
   // 2. Extract input
@@ -16,7 +16,15 @@ export const placeBid = onCall({ maxInstances: 10 }, async (request) => {
   }
   
   // 3. Resolve franchise
-  const franchiseId = await resolveFranchiseId(caller);
+  let franchiseId: string;
+  if (caller.role === 'SUPER_ADMIN' || caller.role === 'ADMIN') {
+    if (!request.data.franchiseId) {
+      throw new HttpsError('invalid-argument', 'franchiseId is required when placing bid on behalf.');
+    }
+    franchiseId = request.data.franchiseId;
+  } else {
+    franchiseId = await resolveFranchiseId(caller);
+  }
   
   // 4. Execute as Firestore transaction
   const result = await db.runTransaction(async (txn) => {
