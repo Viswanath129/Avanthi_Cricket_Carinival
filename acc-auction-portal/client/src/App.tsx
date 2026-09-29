@@ -9,6 +9,7 @@ import LiveAuctionPage from "./pages/LiveAuctionPage";
 import AdminAuctionPage from "./pages/AdminAuctionPage";
 import AdminDashboardPage from "./pages/AdminDashboardPage";
 import FranchiseBiddingPage from "./pages/FranchiseBiddingPage";
+import FranchiseRegistrationPage from "./pages/FranchiseRegistrationPage";
 import PlayerRegistrationPage from "./pages/PlayerRegistrationPage";
 import ProjectorPage from "./pages/ProjectorPage";
 
@@ -165,6 +166,8 @@ function Router() {
       <Route path="/live" component={LiveAuctionPage} />
       <Route path="/login" component={LoginPage} />
       <Route path="/projector" component={ProjectorPage} />
+      <Route path="/franchise/register" component={FranchiseRegistrationPage} />
+      <Route path="/register" component={PlayerRegistrationPage} />
 
       {/* Admin Routes */}
       <Route path="/admin">
