@@ -45,6 +45,38 @@
         "destination": "/portal.html"
       },
       {
+        "source": "/admin",
+        "destination": "/portal.html"
+      },
+      {
+        "source": "/admin/**",
+        "destination": "/portal.html"
+      },
+      {
+        "source": "/operator",
+        "destination": "/portal.html"
+      },
+      {
+        "source": "/operator/**",
+        "destination": "/portal.html"
+      },
+      {
+        "source": "/login",
+        "destination": "/portal.html"
+      },
+      {
+        "source": "/register",
+        "destination": "/portal.html"
+      },
+      {
+        "source": "/franchise/**",
+        "destination": "/portal.html"
+      },
+      {
+        "source": "/player/**",
+        "destination": "/portal.html"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

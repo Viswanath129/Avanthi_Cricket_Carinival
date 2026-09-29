@@ -177,7 +177,17 @@ function Router() {
           <AdminLiveDashboard mode="SUPER_ADMIN" />
         </ProtectedRoute>
       </Route>
+      <Route path="/portal/admin">
+        <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN']}>
+          <AdminLiveDashboard mode="SUPER_ADMIN" />
+        </ProtectedRoute>
+      </Route>
       <Route path="/operator">
+        <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN']}>
+          <AdminLiveDashboard mode="OPERATOR" />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/portal/operator">
         <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN']}>
           <AdminLiveDashboard mode="OPERATOR" />
         </ProtectedRoute>
@@ -187,7 +197,17 @@ function Router() {
           <AdminLiveDashboard mode="SUPER_ADMIN" />
         </ProtectedRoute>
       </Route>
+      <Route path="/portal/admin/auction">
+        <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN']}>
+          <AdminLiveDashboard mode="SUPER_ADMIN" />
+        </ProtectedRoute>
+      </Route>
       <Route path="/admin/management">
+        <ProtectedRoute allowedRoles={['SUPER_ADMIN']}>
+          <AdminDashboardPage />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/portal/admin/management">
         <ProtectedRoute allowedRoles={['SUPER_ADMIN']}>
           <AdminDashboardPage />
         </ProtectedRoute>
