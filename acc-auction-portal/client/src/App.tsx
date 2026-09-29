@@ -11,6 +11,7 @@ import AdminDashboardPage from "./pages/AdminDashboardPage";
 import FranchiseBiddingPage from "./pages/FranchiseBiddingPage";
 import FranchiseRegistrationPage from "./pages/FranchiseRegistrationPage";
 import PlayerRegistrationPage from "./pages/PlayerRegistrationPage";
+import PlayerDashboardPage from "./pages/PlayerDashboardPage";
 import ProjectorPage from "./pages/ProjectorPage";
 
 const PublicHeader = () => (
@@ -194,16 +195,9 @@ function Router() {
       </Route>
 
       {/* Player Routes */}
-      <Route path="/player">
-        <ProtectedRoute allowedRoles={['PLAYER']}>
-          <PlayerProfilePage />
-        </ProtectedRoute>
-      </Route>
-      <Route path="/player/register">
-        <ProtectedRoute allowedRoles={['PLAYER']}>
-          <PlayerRegistrationPage />
-        </ProtectedRoute>
-      </Route>
+      <Route path="/player" component={PlayerDashboardPage} />
+      <Route path="/player/dashboard" component={PlayerDashboardPage} />
+      <Route path="/player/register" component={PlayerRegistrationPage} />
 
       {/* 404 */}
       <Route>

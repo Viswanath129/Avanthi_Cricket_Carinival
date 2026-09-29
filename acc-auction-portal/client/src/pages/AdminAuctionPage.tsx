@@ -6,6 +6,8 @@ import { db, functions } from '@/lib/firebase';
 // import { calculateMaxBid } from '@shared/engine/bidEngine';
 // import { checkBucketEligibility } from '@shared/engine/bucketEligibility';
 
+import { calculateNextBid } from '@shared/engine/bidEngine';
+
 // Hardcoded for now as requested
 const EDITION_ID = 'acc-2026';
 
@@ -19,6 +21,8 @@ export default function AdminAuctionPage() {
   const [undoModalOpen, setUndoModalOpen] = useState(false);
   const [undoReason, setUndoReason] = useState('');
   const [selectedUndoSale, setSelectedUndoSale] = useState<any>(null);
+  const [hammerModalOpen, setHammerModalOpen] = useState(false);
+  const [drawMode, setDrawMode] = useState<'GUEST' | 'AUTO'>('GUEST');
 
   const openLotFn = httpsCallable(functions, 'openLot');
   const skipLotFn = httpsCallable(functions, 'skipLot');
@@ -104,9 +108,15 @@ export default function AdminAuctionPage() {
   const handleSkipLot = async () => {
     try { await skipLotFn({ editionId: EDITION_ID, lotId: currentLot?.id }); } catch (e) { console.error(e); }
   };
-  const handleHammerLot = async () => {
-    if (window.confirm('Are you sure you want to HAMMER this lot?')) {
-      try { await hammerLotFn({ editionId: EDITION_ID, lotId: currentLot?.id }); } catch (e) { console.error(e); }
+  const handleHammerLot = () => {
+    setHammerModalOpen(true);
+  };
+  const confirmHammerLot = async () => {
+    try {
+      await hammerLotFn({ editionId: EDITION_ID, lotId: currentLot?.id });
+      setHammerModalOpen(false);
+    } catch (e) {
+      console.error(e);
     }
   };
   const handleTogglePause = async () => {
@@ -149,9 +159,23 @@ export default function AdminAuctionPage() {
           </p>
         </div>
         <div>
-          <div className="flex border border-slate-700 rounded overflow-hidden">
-            <button className="px-4 py-1 bg-slate-800 text-xs font-bold font-mono">GUEST</button>
-            <button className="px-4 py-1 bg-slate-900 text-slate-500 text-xs font-bold font-mono">AUTO</button>
+          <div className="flex border border-slate-700 rounded-xl overflow-hidden shadow-sm">
+            <button
+              onClick={() => setDrawMode('GUEST')}
+              className={`px-4 py-1.5 text-xs font-bold font-mono transition-all ${
+                drawMode === 'GUEST' ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-slate-400 hover:text-white'
+              }`}
+            >
+              GUEST
+            </button>
+            <button
+              onClick={() => setDrawMode('AUTO')}
+              className={`px-4 py-1.5 text-xs font-bold font-mono transition-all ${
+                drawMode === 'AUTO' ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-slate-400 hover:text-white'
+              }`}
+            >
+              AUTO
+            </button>
           </div>
         </div>
       </header>
@@ -205,7 +229,7 @@ export default function AdminAuctionPage() {
               <div className="mt-6 flex justify-between w-full border-t border-slate-800 pt-4">
                 <div className="text-left">
                   <span className="block font-mono text-xs text-slate-500">NEXT BID</span>
-                  <span className="font-mono text-lg text-slate-300">{/* calc next bid here */} {((highestBid?.amount || currentLot?.basePrice || 0) + 100)}</span>
+                  <span className="font-mono text-lg text-emerald-400 font-bold">{calculateNextBid(highestBid?.amount || currentLot?.basePrice || 20)} Credits</span>
                 </div>
                 <div className="text-right">
                   <span className="block font-mono text-xs text-slate-500">TIME REMAINING</span>
@@ -383,6 +407,60 @@ export default function AdminAuctionPage() {
                 className="px-4 py-2 bg-red-900/50 border border-red-800 rounded font-mono text-sm text-red-200 hover:bg-red-900 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 CONFIRM UNDO
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 2-STEP HAMMER CONFIRMATION MODAL */}
+      {hammerModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-orange-500/50 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-orange-500/20 text-orange-500 flex items-center justify-center text-xl font-bold">
+                \uD83D\uDD28
+              </div>
+              <div>
+                <h3 className="font-space font-bold text-lg text-white">CONFIRM HAMMER COMMIT</h3>
+                <p className="text-xs font-mono text-slate-400">Two-Step Authority Verification</p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 font-mono text-xs space-y-2">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Player:</span>
+                <span className="font-bold text-white">{currentLot?.playerName || 'Active Player'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Committed Price:</span>
+                <span className="font-bold text-orange-400">{highestBid?.amount || currentLot?.basePrice || 0} Credits</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Winning Franchise:</span>
+                <span className="font-bold text-emerald-400">{highestBid?.franchiseName || 'NO BIDS (MARK UNSOLD)'}</span>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-400">
+              {highestBid
+                ? 'Committing hammer will atomically deduct purse credits, allocate player into squad roster, and log immutable transaction.'
+                : 'No bids placed. Committing hammer will officially mark this player as UNSOLD.'}
+            </p>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                autoFocus
+                onClick={() => setHammerModalOpen(false)}
+                className="px-4 py-2 border border-slate-700 hover:bg-slate-800 text-slate-300 rounded-xl font-mono text-xs font-bold"
+              >
+                CANCEL
+              </button>
+              <button
+                onClick={confirmHammerLot}
+                className="px-5 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-xl font-mono text-xs font-bold shadow-lg shadow-orange-600/30"
+              >
+                [ CONFIRM HAMMER ]
               </button>
             </div>
           </div>
