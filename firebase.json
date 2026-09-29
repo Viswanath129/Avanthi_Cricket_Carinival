@@ -1,6 +1,6 @@
 {
   "hosting": {
-    "public": "acc-auction-portal/dist/public",
+    "public": "acc-auction-portal/dist",
     "ignore": [
       "firebase.json",
       "**/.*",
