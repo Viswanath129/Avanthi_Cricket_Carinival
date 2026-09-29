@@ -1970,30 +1970,32 @@
     // 1. DATA MODELS & INITIAL STATE
     // ========================================================
     const DEFAULT_FRANCHISES = [
-      { id: 1, name: "Titans", short: "TIT", purse: 1000, squad: [] },
-      { id: 2, name: "Warriors", short: "WAR", purse: 1000, squad: [] },
-      { id: 3, name: "Strikers", short: "STR", purse: 1000, squad: [] },
-      { id: 4, name: "Blasters", short: "BLA", purse: 1000, squad: [] },
-      { id: 5, name: "Super Kings", short: "CSK", purse: 1000, squad: [] },
-      { id: 6, name: "Royals", short: "RR", purse: 1000, squad: [] },
-      { id: 7, name: "Challengers", short: "RCB", purse: 1000, squad: [] },
-      { id: 8, name: "Knights", short: "KKR", purse: 1000, squad: [] },
-      { id: 9, name: "Daredevils", short: "DD", purse: 1000, squad: [] },
-      { id: 10, name: "Sunrisers", short: "SRH", purse: 1000, squad: [] },
-      { id: 11, name: "Giants", short: "GNT", purse: 1000, squad: [] }
+      { id: 1, name: "Titans", short: "TIT", purse: 1000, squad: [], coordinatorName: "Prof. K. V. Rao", coordinatorDept: "CSE", coordinatorMobile: "9876500001", coordinatorEmail: "titans.coord@acc.edu", approvalStatus: "APPROVED", status: "ACTIVE" },
+      { id: 2, name: "Warriors", short: "WAR", purse: 1000, squad: [], coordinatorName: "Prof. M. Srinivas", coordinatorDept: "ECE", coordinatorMobile: "9876500002", coordinatorEmail: "warriors.coord@acc.edu", approvalStatus: "APPROVED", status: "ACTIVE" },
+      { id: 3, name: "Strikers", short: "STR", purse: 1000, squad: [], coordinatorName: "Prof. G. Suresh", coordinatorDept: "MECH", coordinatorMobile: "9876500003", coordinatorEmail: "strikers.coord@acc.edu", approvalStatus: "APPROVED", status: "ACTIVE" },
+      { id: 4, name: "Blasters", short: "BLA", purse: 1000, squad: [], coordinatorName: "Prof. P. V. Ramana", coordinatorDept: "EEE", coordinatorMobile: "9876500004", coordinatorEmail: "blasters.coord@acc.edu", approvalStatus: "APPROVED", status: "ACTIVE" },
+      { id: 5, name: "Super Kings", short: "CSK", purse: 1000, squad: [], coordinatorName: "Prof. D. Anand", coordinatorDept: "CIVIL", coordinatorMobile: "9876500005", coordinatorEmail: "csk.coord@acc.edu", approvalStatus: "APPROVED", status: "ACTIVE" },
+      { id: 6, name: "Royals", short: "RR", purse: 1000, squad: [], coordinatorName: "Prof. B. Naidu", coordinatorDept: "IT", coordinatorMobile: "9876500006", coordinatorEmail: "royals.coord@acc.edu", approvalStatus: "APPROVED", status: "ACTIVE" },
+      { id: 7, name: "Challengers", short: "RCB", purse: 1000, squad: [], coordinatorName: "Prof. T. Satyanarayana", coordinatorDept: "CSM", coordinatorMobile: "9876500007", coordinatorEmail: "rcb.coord@acc.edu", approvalStatus: "APPROVED", status: "ACTIVE" },
+      { id: 8, name: "Knights", short: "KKR", purse: 1000, squad: [], coordinatorName: "Prof. A. V. Prasad", coordinatorDept: "CSD", coordinatorMobile: "9876500008", coordinatorEmail: "kkr.coord@acc.edu", approvalStatus: "APPROVED", status: "ACTIVE" },
+      { id: 9, name: "Daredevils", short: "DD", purse: 1000, squad: [], coordinatorName: "Prof. N. Rajesh", coordinatorDept: "MBA", coordinatorMobile: "9876500009", coordinatorEmail: "dd.coord@acc.edu", approvalStatus: "APPROVED", status: "ACTIVE" },
+      { id: 10, name: "Sunrisers", short: "SRH", purse: 1000, squad: [], coordinatorName: "Prof. Ch. Venkat", coordinatorDept: "Diploma", coordinatorMobile: "9876500010", coordinatorEmail: "srh.coord@acc.edu", approvalStatus: "APPROVED", status: "ACTIVE" },
+      { id: 11, name: "Giants", short: "GNT", purse: 1000, squad: [], coordinatorName: "Prof. R. K. Varma", coordinatorDept: "Sports", coordinatorMobile: "9876500011", coordinatorEmail: "giants.coord@acc.edu", approvalStatus: "APPROVED", status: "ACTIVE" }
     ];
 
     const DEFAULT_PLAYERS = [
-      { id: 1, name: "Sai Teja", roll: "26811A0501", program: "B.Tech", branch: "CSE", year: "1", bucket: "B1", derivedType: "ALL-ROUNDER", battingStyle: "RIGHT HAND", bowlingArm: "RIGHT ARM", bowlingType: "MEDIUM FAST", basePrice: 60, status: "AVAILABLE", photo: "", bio: "Leading top-order batter and medium pace asset in Avanthi 2026." },
-      { id: 2, name: "Karthik Verma", roll: "25811A0412", program: "B.Tech", branch: "ECE", year: "2", bucket: "B2", derivedType: "BATTER", battingStyle: "LEFT HAND", bowlingArm: "", bowlingType: "NONE", basePrice: 80, status: "AVAILABLE", photo: "", bio: "Explosive power hitter with extensive district tournament experience." },
-      { id: 3, name: "Rohit Nambiar", roll: "24811A0304", program: "B.Tech", branch: "MECH", year: "3", bucket: "B3", derivedType: "BOWLER", battingStyle: "RIGHT HAND", bowlingArm: "RIGHT ARM", bowlingType: "FAST", basePrice: 100, status: "AVAILABLE", photo: "", bio: "Senior express bowler touching 130km/h with high wicket yield." },
-      { id: 4, name: "Praneeth Reddy", roll: "23811A0205", program: "B.Tech", branch: "EEE", year: "4", bucket: "B4", derivedType: "ALL-ROUNDER", battingStyle: "RIGHT HAND", bowlingArm: "RIGHT ARM", bowlingType: "OFF SPIN", basePrice: 120, status: "AVAILABLE", photo: "", bio: "Captaincy material with 4 consecutive carnival tournament trophies." },
-      { id: 5, name: "Venkatesh Rao", roll: "26811D0102", program: "Diploma", branch: "CIVIL", year: "2", bucket: "D5", derivedType: "BATTER", battingStyle: "RIGHT HAND", bowlingArm: "", bowlingType: "NONE", basePrice: 40, status: "AVAILABLE", photo: "", bio: "Technical anchor batter capable of stabilizing middle overs." },
-      { id: 6, name: "Mohammed Zeeshan", roll: "25811E0015", program: "MBA", branch: "MANAGEMENT", year: "1", bucket: "M6", derivedType: "BOWLER", battingStyle: "LEFT HAND", bowlingArm: "LEFT ARM", bowlingType: "SPIN", basePrice: 50, status: "AVAILABLE", photo: "", bio: "Experienced left-arm orthodox spinner with lethal economy." },
-      { id: 7, name: "Aditya Sharma", roll: "26811A1208", program: "B.Tech", branch: "IT", year: "1", bucket: "B1", derivedType: "WICKET-KEEPER", battingStyle: "RIGHT HAND", bowlingArm: "", bowlingType: "NONE", basePrice: 60, status: "AVAILABLE", photo: "", bio: "Lightning-fast reflexes behind the stumps with middle order resilience." },
-      { id: 8, name: "Naveen Kumar", roll: "25811A0588", program: "B.Tech", branch: "CSE", year: "2", bucket: "B2", derivedType: "ALL-ROUNDER", battingStyle: "RIGHT HAND", bowlingArm: "RIGHT ARM", bowlingType: "MEDIUM FAST", basePrice: 70, status: "AVAILABLE", photo: "", bio: "Consistent performer with match-winning strike rate in death overs." },
-      { id: 9, name: "Suresh Goud", roll: "24811A0440", program: "B.Tech", branch: "ECE", year: "3", bucket: "B3", derivedType: "BOWLER", battingStyle: "RIGHT HAND", bowlingArm: "RIGHT ARM", bowlingType: "FAST", basePrice: 90, status: "AVAILABLE", photo: "", bio: "Accurate yorker specialist in collegiate tournaments." },
-      { id: 10, name: "Bhanu Prakash", roll: "23811A0311", program: "B.Tech", branch: "MECH", year: "4", bucket: "B4", derivedType: "BATTER", battingStyle: "LEFT HAND", bowlingArm: "", bowlingType: "NONE", basePrice: 110, status: "AVAILABLE", photo: "", bio: "Senior left-handed opener with prolific boundary scoring capability." }
+      { id: 1, name: "Sai Teja", roll: "26811A0501", program: "B.Tech", branch: "CSE", department: "CSE", year: "1", bucket: "B1", derivedType: "ALL-ROUNDER", role: "ALL-ROUNDER", battingStyle: "RIGHT HAND", battingArm: "RIGHT ARM", bowlingArm: "RIGHT ARM", bowlingType: "MEDIUM FAST", basePrice: 60, status: "AVAILABLE", approvalStatus: "APPROVED", verificationStatus: "VERIFIED", accountStatus: "ACTIVE", paymentStatus: "PAID", cricHeroesStatus: "VERIFIED", mobile: "9876543201", publicVisibility: true, photo: "", bio: "Leading top-order batter and medium pace asset in Avanthi 2026." },
+      { id: 2, name: "Karthik Verma", roll: "25811A0412", program: "B.Tech", branch: "ECE", department: "ECE", year: "2", bucket: "B2", derivedType: "BATTER", role: "BATTER", battingStyle: "LEFT HAND", battingArm: "LEFT ARM", bowlingArm: "", bowlingType: "NONE", basePrice: 80, status: "AVAILABLE", approvalStatus: "APPROVED", verificationStatus: "VERIFIED", accountStatus: "ACTIVE", paymentStatus: "PAID", cricHeroesStatus: "VERIFIED", mobile: "9876543202", publicVisibility: true, photo: "", bio: "Explosive power hitter with extensive district tournament experience." },
+      { id: 3, name: "Rohit Nambiar", roll: "24811A0304", program: "B.Tech", branch: "MECH", department: "MECH", year: "3", bucket: "B3", derivedType: "BOWLER", role: "BOWLER", battingStyle: "RIGHT HAND", battingArm: "RIGHT ARM", bowlingArm: "RIGHT ARM", bowlingType: "FAST", basePrice: 50, status: "AVAILABLE", approvalStatus: "APPROVED", verificationStatus: "VERIFIED", accountStatus: "ACTIVE", paymentStatus: "PAID", cricHeroesStatus: "VERIFIED", mobile: "9876543203", publicVisibility: true, photo: "", bio: "Senior express bowler touching 130km/h with high wicket yield." },
+      { id: 4, name: "Praneeth Reddy", roll: "23811A0205", program: "B.Tech", branch: "EEE", department: "EEE", year: "4", bucket: "B4", derivedType: "ALL-ROUNDER", role: "ALL-ROUNDER", battingStyle: "RIGHT HAND", battingArm: "RIGHT ARM", bowlingArm: "RIGHT ARM", bowlingType: "OFF SPIN", basePrice: 100, status: "AVAILABLE", approvalStatus: "APPROVED", verificationStatus: "VERIFIED", accountStatus: "ACTIVE", paymentStatus: "PAID", cricHeroesStatus: "VERIFIED", mobile: "9876543204", publicVisibility: true, photo: "", bio: "Captaincy material with 4 consecutive carnival tournament trophies." },
+      { id: 5, name: "Venkatesh Rao", roll: "26597-CM-015", program: "Diploma", branch: "Comp. Eng.", department: "Comp. Eng.", year: "1", bucket: "D5", derivedType: "WICKET-KEEPER", role: "WICKET-KEEPER", battingStyle: "RIGHT HAND", battingArm: "RIGHT ARM", bowlingArm: "", bowlingType: "NONE", basePrice: 40, status: "AVAILABLE", approvalStatus: "APPROVED", verificationStatus: "VERIFIED", accountStatus: "ACTIVE", paymentStatus: "PAID", cricHeroesStatus: "VERIFIED", mobile: "9876543205", publicVisibility: true, photo: "", bio: "Technical anchor batter capable of stabilizing middle overs." },
+      { id: 6, name: "Mohammed Zeeshan", roll: "25811E0015", program: "PG", branch: "MBA", department: "MBA", year: "2", bucket: "NO_BUCKET", derivedType: "BATTER", role: "BATTER", battingStyle: "LEFT HAND", battingArm: "LEFT ARM", bowlingArm: "LEFT ARM", bowlingType: "SPIN", basePrice: 50, status: "AVAILABLE", approvalStatus: "APPROVED", verificationStatus: "VERIFIED", accountStatus: "ACTIVE", paymentStatus: "PAID", cricHeroesStatus: "VERIFIED", mobile: "9876543206", publicVisibility: true, photo: "", bio: "Experienced left-arm orthodox spinner with lethal economy." },
+      { id: 7, name: "Aditya Sharma", roll: "26811A1208", program: "B.Tech", branch: "IT", department: "IT", year: "1", bucket: "B1", derivedType: "BOWLER", role: "BOWLER", battingStyle: "RIGHT HAND", battingArm: "RIGHT ARM", bowlingArm: "RIGHT ARM", bowlingType: "NONE", basePrice: 30, status: "AVAILABLE", approvalStatus: "APPROVED", verificationStatus: "VERIFIED", accountStatus: "ACTIVE", paymentStatus: "PAID", cricHeroesStatus: "VERIFIED", mobile: "9876543207", publicVisibility: true, photo: "", bio: "Lightning-fast reflexes behind the stumps with middle order resilience." },
+      { id: 8, name: "Naveen Kumar", roll: "25811A0588", program: "B.Tech", branch: "CSE", department: "CSE", year: "2", bucket: "B2", derivedType: "ALL-ROUNDER", role: "ALL-ROUNDER", battingStyle: "RIGHT HAND", battingArm: "RIGHT ARM", bowlingArm: "RIGHT ARM", bowlingType: "MEDIUM FAST", basePrice: 70, status: "AVAILABLE", approvalStatus: "APPROVED", verificationStatus: "VERIFIED", accountStatus: "ACTIVE", paymentStatus: "PAID", cricHeroesStatus: "VERIFIED", mobile: "9876543208", publicVisibility: true, photo: "", bio: "Consistent performer with match-winning strike rate in death overs." },
+      { id: 9, name: "Suresh Goud", roll: "24811A0440", program: "B.Tech", branch: "ECE", department: "ECE", year: "3", bucket: "B3", derivedType: "BATTER", role: "BATTER", battingStyle: "RIGHT HAND", battingArm: "RIGHT ARM", bowlingArm: "RIGHT ARM", bowlingType: "FAST", basePrice: 90, status: "AVAILABLE", approvalStatus: "APPROVED", verificationStatus: "VERIFIED", accountStatus: "ACTIVE", paymentStatus: "PAID", cricHeroesStatus: "VERIFIED", mobile: "9876543209", publicVisibility: true, photo: "", bio: "Accurate yorker specialist in collegiate tournaments." },
+      { id: 10, name: "Bhanu Prakash", roll: "23811A0311", program: "B.Tech", branch: "MECH", department: "MECH", year: "4", bucket: "B4", derivedType: "BOWLER", role: "BOWLER", battingStyle: "LEFT HAND", battingArm: "LEFT ARM", bowlingArm: "RIGHT ARM", bowlingType: "NONE", basePrice: 60, status: "AVAILABLE", approvalStatus: "APPROVED", verificationStatus: "VERIFIED", accountStatus: "ACTIVE", paymentStatus: "PAID", cricHeroesStatus: "VERIFIED", mobile: "9876543210", publicVisibility: true, photo: "", bio: "Senior left-handed opener with prolific boundary scoring capability." },
+      { id: 11, name: "Ravi Teja", roll: "24597-EC-022", program: "Diploma", branch: "ECE", department: "ECE", year: "3", bucket: "D5", derivedType: "ALL-ROUNDER", role: "ALL-ROUNDER", battingStyle: "RIGHT HAND", battingArm: "RIGHT ARM", bowlingArm: "RIGHT ARM", bowlingType: "MEDIUM", basePrice: 50, status: "AVAILABLE", approvalStatus: "APPROVED", verificationStatus: "VERIFIED", accountStatus: "ACTIVE", paymentStatus: "PAID", cricHeroesStatus: "VERIFIED", mobile: "9876543211", publicVisibility: true, photo: "", bio: "Dependable middle-order batsman and effective swing bowler." },
+      { id: 12, name: "Kiran Kumar", roll: "25597-EE-008", program: "Diploma", branch: "EEE", department: "EEE", year: "2", bucket: "D5", derivedType: "BOWLER", role: "BOWLER", battingStyle: "RIGHT HAND", battingArm: "RIGHT ARM", bowlingArm: "RIGHT ARM", bowlingType: "OFF SPIN", basePrice: 40, status: "AVAILABLE", approvalStatus: "APPROVED", verificationStatus: "VERIFIED", accountStatus: "ACTIVE", paymentStatus: "PAID", cricHeroesStatus: "VERIFIED", mobile: "9876543212", publicVisibility: true, photo: "", bio: "Specialist spin bowler with exceptional line and length discipline." }
     ];
 
     
@@ -2053,6 +2055,19 @@
     // ========================================================
     // CENTRALIZED PUBLIC VISIBILITY & PLAYER LIFECYCLE ENGINE
     // ========================================================
+    function isPlayerApproved(p) {
+      if (!p) return false;
+      if (p.status === 'DELETED' || p.approvalStatus === 'DELETED') return false;
+      if (p.status === 'BLOCKED' || p.approvalStatus === 'BLOCKED' || p.verificationStatus === 'BLOCKED') return false;
+      return p.approvalStatus === 'APPROVED' || p.verificationStatus === 'VERIFIED' || p.status === 'AVAILABLE' || p.status === 'SOLD' || p.status === 'UNSOLD';
+    }
+
+    function isPlayerPending(p) {
+      if (!p || isPlayerApproved(p)) return false;
+      if (p.status === 'DELETED' || p.approvalStatus === 'DELETED' || p.status === 'BLOCKED' || p.approvalStatus === 'BLOCKED' || p.verificationStatus === 'BLOCKED') return false;
+      return p.approvalStatus === 'PENDING' || p.approvalStatus === 'PENDING_APPROVAL' || p.verificationStatus === 'PENDING_VERIFICATION' || p.status === 'PENDING_VERIFICATION' || !p.approvalStatus;
+    }
+
     function isPlayerPubliclyVisible(player) {
       if (!player) return false;
       const s = String(player.status || '').toUpperCase();
@@ -2078,9 +2093,15 @@
       return true;
     }
 
-    // Initialize player state integrity
-    players.forEach(p => {
-      if (!p.status) p.status = 'APPROVED';
+    // Initialize player state integrity and repair legacy stored players
+    players.forEach((p, idx) => {
+      if (!p.approvalStatus) p.approvalStatus = (p.status === 'AVAILABLE' || p.status === 'SOLD' || p.status === 'UNSOLD') ? 'APPROVED' : 'PENDING';
+      if (!p.verificationStatus) p.verificationStatus = (p.status === 'AVAILABLE' || p.status === 'SOLD' || p.status === 'UNSOLD') ? 'VERIFIED' : 'PENDING_VERIFICATION';
+      if (!p.accountStatus) p.accountStatus = 'ACTIVE';
+      if (!p.paymentStatus) p.paymentStatus = 'PAID';
+      if (!p.cricHeroesStatus) p.cricHeroesStatus = 'VERIFIED';
+      if (!p.mobile) p.mobile = '98765432' + String(p.id || (idx + 1)).padStart(2, '0');
+      if (!p.status) p.status = 'AVAILABLE';
       if (p.publicVisibility === undefined) p.publicVisibility = isPlayerPubliclyVisible(p);
     });
     // Remove any previously deleted players that may be lingering in players
@@ -2205,8 +2226,30 @@
     // Ensure ACC website tournament logo is never used as player avatar placeholder
     players.forEach(p => { if (p.photo === 'acc-logo.png' || p.photo === 'acc-logo.png') p.photo = ''; });
     let auditLog = JSON.parse(localStorage.getItem("acc_audit_2026")) || [
-      { time: "09:00:00", action: "AUCTION INITIALIZED", details: "Engine booted with 11 Franchises & Official Rules." }
+      { time: "09:00:00", timestamp: Date.now() - 3600000, type: "AUCTION INITIALIZED", action: "AUCTION INITIALIZED", details: "Engine booted with 11 Franchises & Official Rules." }
     ];
+    let auditLedger = auditLog;
+    let dataManagementSubTab = 'PLAYERS';
+
+    function appendAuditTrail(event) {
+      if (!event) return;
+      const now = Date.now();
+      const item = {
+        time: event.time || new Date(event.timestamp || now).toLocaleTimeString(),
+        timestamp: event.timestamp || now,
+        type: event.type || event.action || 'AUDIT_EVENT',
+        action: event.action || event.type || 'AUDIT_EVENT',
+        details: event.details || event.reason || '',
+        playerName: event.playerName || '',
+        franchiseName: event.franchiseName || '',
+        price: event.price || 0,
+        reason: event.reason || event.details || '',
+        actorUid: event.operator || (currentUser && currentUser.uid) || 'usr_sys'
+      };
+      auditLog.unshift(item);
+      auditLedger = auditLog;
+      saveDatabase();
+    }
 
     function saveDatabase() {
       localStorage.setItem("acc_franchises_2026", JSON.stringify(franchises));
@@ -9988,12 +10031,11 @@
       }
 
       let filteredPlayers = sourcePlayers.filter(p => {
-        const app = p.approvalStatus || (p.status === 'DELETED' ? 'DELETED' : p.verificationStatus === 'VERIFIED' ? 'APPROVED' : p.verificationStatus === 'BLOCKED' ? 'BLOCKED' : 'PENDING');
-        const isDel = p.status === 'DELETED' || app === 'DELETED';
-        const isPend = !isDel && (app === 'PENDING' || app === 'PENDING_APPROVAL' || p.verificationStatus === 'PENDING_VERIFICATION' || p.status === 'PENDING_VERIFICATION');
-        const isAppr = !isDel && (app === 'APPROVED' || p.verificationStatus === 'VERIFIED' || p.status === 'AVAILABLE' || p.status === 'SOLD' || p.status === 'UNSOLD');
-        const isChg = !isDel && (app === 'CHANGES_REQUIRED' || p.verificationStatus === 'CHANGES_REQUIRED');
-        const isBlk = !isDel && (app === 'BLOCKED' || p.verificationStatus === 'BLOCKED' || p.status === 'BLOCKED');
+        const isDel = p.status === 'DELETED' || p.approvalStatus === 'DELETED';
+        const isPend = !isDel && isPlayerPending(p);
+        const isAppr = !isDel && isPlayerApproved(p);
+        const isChg = !isDel && (p.approvalStatus === 'CHANGES_REQUIRED' || p.verificationStatus === 'CHANGES_REQUIRED');
+        const isBlk = !isDel && (p.approvalStatus === 'BLOCKED' || p.verificationStatus === 'BLOCKED' || p.status === 'BLOCKED');
 
         if (playerApprovalFilter === 'PENDING' && !isPend) return false;
         if (playerApprovalFilter === 'APPROVED' && !isAppr) return false;
@@ -10039,6 +10081,8 @@
               <div style="display: flex; align-items: center; gap: 8px;">
                 <span class="status-badge ${isSuperAdmin ? 'status-connected' : 'status-live'}" style="font-size: 0.65rem; padding: 2px 6px;">${isSuperAdmin ? 'SUPER ADMIN' : 'ADMIN OPERATOR'}</span>
                 <span class="label-micro" style="color: var(--color-green); font-size: 0.75rem; font-weight: 800;">ACC 2026</span>
+                <span class="status-badge" style="background: rgba(56, 189, 248, 0.12); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); font-size: 0.65rem; padding: 1px 6px; font-family: var(--font-mono); font-weight: 700;">v2.4.0</span>
+                <span style="font-size: 0.7rem; color: var(--text-muted); font-family: var(--font-mono);">Build 2026.09-PROD</span>
               </div>
               <h2 class="section-title" style="margin-top: 2px; font-size: 1.25rem;">ADMIN CONSOLE <span style="font-size: 0.8125rem; font-weight: 400; color: var(--text-muted);">(${currentUser.name || 'Admin'})</span></h2>
             </div>
@@ -10069,7 +10113,7 @@
             <div class="surface-card" style="padding: 10px 12px; text-align: center; border-top: 3px solid var(--color-orange); cursor: pointer;" onclick="adminNavTab = 'PLAYERS'; playerApprovalFilter = 'PENDING'; renderCurrentView();">
               <div class="label-micro" style="font-size: 0.65rem; color: var(--text-muted);">PENDING PLAYERS</div>
               <div class="font-mono" style="font-size: 1.35rem; font-weight: 800; color: var(--color-orange); margin-top: 2px;">
-                ${players.filter(p => p.approvalStatus === 'PENDING_APPROVAL' || p.approvalStatus === 'PENDING' || p.verificationStatus === 'PENDING_VERIFICATION' || p.status === 'PENDING_VERIFICATION').length}
+                ${players.filter(p => isPlayerPending(p)).length}
               </div>
             </div>
 
@@ -10090,11 +10134,11 @@
             <div class="surface-card" style="padding: 10px 12px; text-align: center; border-top: 3px solid var(--color-green); cursor: pointer;" onclick="adminNavTab = 'PLAYERS'; playerApprovalFilter = 'APPROVED'; renderCurrentView();">
               <div class="label-micro" style="font-size: 0.65rem; color: var(--text-muted);">APPROVED PLAYERS</div>
               <div class="font-mono" style="font-size: 1.35rem; font-weight: 800; color: var(--color-green); margin-top: 2px;">
-                ${players.filter(p => (p.approvalStatus === 'APPROVED' || p.verificationStatus === 'VERIFIED') && p.status !== 'BLOCKED' && p.status !== 'DELETED').length}
+                ${players.filter(p => isPlayerApproved(p)).length}
               </div>
             </div>
 
-            <div class="surface-card" style="padding: 10px 12px; text-align: center; border-top: 3px solid var(--color-green); cursor: pointer;" onclick="adminNavTab = 'TEAMS'; renderCurrentView();">
+            <div class="surface-card" style="padding: 10px 12px; text-align: center; border-top: 3px solid var(--color-green); cursor: pointer;" onclick="adminNavTab = 'FRANCHISES'; renderCurrentView();">
               <div class="label-micro" style="font-size: 0.65rem; color: var(--text-muted);">ACTIVE FRANCHISES</div>
               <div class="font-mono" style="font-size: 1.35rem; font-weight: 800; color: var(--color-green); margin-top: 2px;">
                 ${franchises.filter(f => f.status === 'ACTIVE' || (!f.status && f.id <= 11)).length} / 11
@@ -10104,7 +10148,7 @@
             <div class="surface-card" style="padding: 10px 12px; text-align: center; border-top: 3px solid var(--color-red); cursor: pointer;" onclick="adminNavTab = 'PLAYERS'; playerApprovalFilter = 'BLOCKED'; renderCurrentView();">
               <div class="label-micro" style="font-size: 0.65rem; color: var(--text-muted);">BLOCKED ACCOUNTS</div>
               <div class="font-mono" style="font-size: 1.35rem; font-weight: 800; color: var(--color-red); margin-top: 2px;">
-                ${players.filter(p => p.approvalStatus === 'BLOCKED' || p.status === 'BLOCKED').length + (users || []).filter(u => u.status === 'DISABLED' || u.status === 'BLOCKED').length}
+                ${players.filter(p => p.approvalStatus === 'BLOCKED' || p.status === 'BLOCKED' || p.verificationStatus === 'BLOCKED').length + (users || []).filter(u => u.status === 'DISABLED' || u.status === 'BLOCKED').length}
               </div>
             </div>
           </div>
@@ -10129,7 +10173,7 @@
               <div style="color: var(--border-medium);">|</div>
               <div>
                 <span class="label-micro" style="color: var(--color-green); font-size: 0.625rem;">ACTIVE PLAYERS</span>
-                <span class="font-mono" style="font-weight: 800; font-size: 0.95rem; color: var(--text-bright); margin-left: 4px;">${players.filter(p => (p.approvalStatus === 'APPROVED' || p.verificationStatus === 'VERIFIED') && p.status !== 'BLOCKED').length}</span>
+                <span class="font-mono" style="font-weight: 800; font-size: 0.95rem; color: var(--text-bright); margin-left: 4px;">${players.filter(p => isPlayerApproved(p)).length}</span>
               </div>
               <div style="color: var(--border-medium);">|</div>
               <div>
@@ -10955,12 +10999,13 @@
               <div class="surface-card" style="padding: var(--space-5);">
                 <span class="label-micro" style="color: var(--color-green);">BUCKET SCARCITY & MANDATORY QUOTAS</span>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 10px;">
-                  ${['B1', 'B2', 'B3', 'B4', 'D5', 'M6'].map(b => {
+                  ${['B1', 'B2', 'B3', 'B4', 'D5', 'NO_BUCKET'].map(b => {
+                    const label = b === 'NO_BUCKET' ? 'PG' : b;
                     const avail = players.filter(p => p.bucket === b && p.status === 'AVAILABLE').length;
                     const sold = players.filter(p => p.bucket === b && p.status === 'SOLD').length;
                     return `
                       <div style="background: var(--surface-2); padding: 12px; border-radius: 6px; text-align: center;">
-                        <div style="font-weight: 800; font-size: 1.2rem; color: var(--color-green);">${b}</div>
+                        <div style="font-weight: 800; font-size: 1.2rem; color: var(--color-green);">${label}</div>
                         <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">Available: <strong>${avail}</strong></div>
                         <div style="font-size: 0.75rem; color: var(--text-muted);">Sold: <strong>${sold}</strong></div>
                       </div>
@@ -11080,10 +11125,10 @@
               <div style="display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; border-bottom: 1px solid var(--border-medium);">
                 ${[
                   { id: 'ALL', label: 'All', count: players.length + deletedPlayers.length },
-                  { id: 'PENDING', label: 'Pending', count: players.filter(p => p.approvalStatus === 'PENDING' || p.approvalStatus === 'PENDING_APPROVAL' || p.verificationStatus === 'PENDING_VERIFICATION' || p.status === 'PENDING_VERIFICATION').length },
-                  { id: 'APPROVED', label: 'Approved', count: players.filter(p => (p.approvalStatus === 'APPROVED' || p.verificationStatus === 'VERIFIED') && p.status !== 'BLOCKED' && p.status !== 'DELETED').length },
+                  { id: 'PENDING', label: 'Pending', count: players.filter(p => isPlayerPending(p)).length },
+                  { id: 'APPROVED', label: 'Approved', count: players.filter(p => isPlayerApproved(p)).length },
                   { id: 'CHANGES_REQUIRED', label: 'Changes Required', count: players.filter(p => p.approvalStatus === 'CHANGES_REQUIRED' || p.verificationStatus === 'CHANGES_REQUIRED').length },
-                  { id: 'BLOCKED', label: 'Blocked', count: players.filter(p => p.approvalStatus === 'BLOCKED' || p.status === 'BLOCKED').length },
+                  { id: 'BLOCKED', label: 'Blocked', count: players.filter(p => p.approvalStatus === 'BLOCKED' || p.status === 'BLOCKED' || p.verificationStatus === 'BLOCKED').length },
                   { id: 'DELETED', label: 'Deleted', count: deletedPlayers.length }
                 ].map(st => `
                   <button type="button" class="btn ${playerApprovalFilter === st.id ? 'btn-primary' : 'btn-secondary'}" 
