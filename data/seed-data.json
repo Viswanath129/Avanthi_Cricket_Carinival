@@ -444,7 +444,7 @@
       "franchiseName": "Titans",
       "price": 90,
       "status": "SOLD",
-      "createdAt": "2026-09-29T15:58:22.423Z"
+      "createdAt": "2026-09-30T17:56:01.626Z"
     },
     {
       "id": "s2",
@@ -455,7 +455,7 @@
       "franchiseName": "Titans",
       "price": 50,
       "status": "SOLD",
-      "createdAt": "2026-09-29T16:08:22.424Z"
+      "createdAt": "2026-09-30T18:06:01.627Z"
     },
     {
       "id": "s3",
@@ -466,7 +466,7 @@
       "franchiseName": "Warriors",
       "price": 80,
       "status": "SOLD",
-      "createdAt": "2026-09-29T16:18:22.424Z"
+      "createdAt": "2026-09-30T18:16:01.627Z"
     }
   ],
   "auditLogs": [
@@ -476,7 +476,7 @@
       "action": "CREATE_EDITION",
       "entity": "EDITION",
       "entityId": "acc-2026",
-      "timestamp": "2026-09-29T14:58:22.424Z"
+      "timestamp": "2026-09-30T16:56:01.627Z"
     },
     {
       "id": "a2",
@@ -484,7 +484,7 @@
       "action": "APPROVE_FRANCHISE",
       "entity": "FRANCHISE",
       "entityId": "1",
-      "timestamp": "2026-09-29T15:28:22.424Z"
+      "timestamp": "2026-09-30T17:26:01.627Z"
     },
     {
       "id": "a3",
@@ -493,7 +493,7 @@
       "entity": "LOT",
       "entityId": "lot-1",
       "details": "Sold to Titans @ 90",
-      "timestamp": "2026-09-29T15:58:22.424Z"
+      "timestamp": "2026-09-30T17:56:01.627Z"
     },
     {
       "id": "a4",
@@ -502,7 +502,7 @@
       "entity": "LOT",
       "entityId": "lot-2",
       "details": "Sold to Titans @ 50",
-      "timestamp": "2026-09-29T16:08:22.424Z"
+      "timestamp": "2026-09-30T18:06:01.627Z"
     },
     {
       "id": "a5",
@@ -511,8 +511,8 @@
       "entity": "LOT",
       "entityId": "lot-3",
       "details": "Sold to Warriors @ 80",
-      "timestamp": "2026-09-29T16:18:22.424Z"
+      "timestamp": "2026-09-30T18:16:01.627Z"
     }
   ],
-  "generatedAt": "2026-09-29T16:58:22.432Z"
+  "generatedAt": "2026-09-30T18:56:01.635Z"
 }
