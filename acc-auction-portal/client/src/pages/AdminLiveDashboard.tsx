@@ -81,6 +81,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
   const [relaxModalOpen, setRelaxModalOpen] = useState(false);
   const [relaxBucket, setRelaxBucket] = useState<BucketId>('B1');
   const [relaxNewMin, setRelaxNewMin] = useState<number>(1);
+  const [helpModalOpen, setHelpModalOpen] = useState(false);
 
   // Cloud Functions
   const openLotFn = httpsCallable(functions, 'openLot');
@@ -732,10 +733,22 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
         return;
       }
 
+      if (e.key === 'Escape') {
+        if (helpModalOpen) {
+          e.preventDefault();
+          setHelpModalOpen(false);
+          return;
+        }
+      }
+
       if (isInput) return;
       if (hammerModalOpen || undoModalOpen || behalfModalOpen || directAssignModalOpen || relaxModalOpen) return;
 
       switch (e.key.toLowerCase()) {
+        case '?':
+          e.preventDefault();
+          setHelpModalOpen(prev => !prev);
+          break;
         case 'h':
           e.preventDefault();
           if (capabilities.canHammer && currentLot) setHammerModalOpen(true);
@@ -1758,6 +1771,86 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
                 className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-slate-900 rounded font-bold text-xs shadow-md shadow-purple-600/30"
               >
                 {isActionLoading ? 'APPLYING...' : 'APPLY RELAXATION'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 6. KEYBOARD SHORTCUTS HELP MODAL */}
+      {helpModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-300 rounded-xl p-6 w-full max-w-lg font-mono space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <h3 className="font-bold text-slate-900 text-base flex items-center gap-2">
+                <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded text-xs font-bold">HOTKEYS</span>
+                Admin Auction Keyboard Shortcuts
+              </h3>
+              <button
+                onClick={() => setHelpModalOpen(false)}
+                className="text-slate-400 hover:text-slate-700 text-sm font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="flex items-center justify-between p-2 rounded bg-slate-50 border border-slate-200">
+                <span className="text-slate-600">Hammer Sale</span>
+                <kbd className="px-2 py-0.5 bg-white border border-slate-300 rounded shadow-xs font-bold text-slate-800">H</kbd>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded bg-slate-50 border border-slate-200">
+                <span className="text-slate-600">Skip Lot</span>
+                <kbd className="px-2 py-0.5 bg-white border border-slate-300 rounded shadow-xs font-bold text-slate-800">S</kbd>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded bg-slate-50 border border-slate-200">
+                <span className="text-slate-600">Pause / Resume</span>
+                <kbd className="px-2 py-0.5 bg-white border border-slate-300 rounded shadow-xs font-bold text-slate-800">P</kbd>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded bg-slate-50 border border-slate-200">
+                <span className="text-slate-600">Undo Sale</span>
+                <kbd className="px-2 py-0.5 bg-white border border-slate-300 rounded shadow-xs font-bold text-slate-800">U</kbd>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded bg-slate-50 border border-slate-200">
+                <span className="text-slate-600">Bid on Behalf</span>
+                <kbd className="px-2 py-0.5 bg-white border border-slate-300 rounded shadow-xs font-bold text-slate-800">B</kbd>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded bg-slate-50 border border-slate-200">
+                <span className="text-slate-600">Direct Assign</span>
+                <kbd className="px-2 py-0.5 bg-white border border-slate-300 rounded shadow-xs font-bold text-slate-800">A</kbd>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded bg-slate-50 border border-slate-200">
+                <span className="text-slate-600">Toggle Draw Mode</span>
+                <kbd className="px-2 py-0.5 bg-white border border-slate-300 rounded shadow-xs font-bold text-slate-800">D</kbd>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded bg-slate-50 border border-slate-200">
+                <span className="text-slate-600">Relax Bucket Min</span>
+                <kbd className="px-2 py-0.5 bg-white border border-slate-300 rounded shadow-xs font-bold text-slate-800">R</kbd>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded bg-slate-50 border border-slate-200">
+                <span className="text-slate-600">Auto Next Lot</span>
+                <kbd className="px-2 py-0.5 bg-white border border-slate-300 rounded shadow-xs font-bold text-slate-800">Space</kbd>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded bg-slate-50 border border-slate-200">
+                <span className="text-slate-600">Export CSV</span>
+                <kbd className="px-2 py-0.5 bg-white border border-slate-300 rounded shadow-xs font-bold text-slate-800">Ctrl+E</kbd>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded bg-slate-50 border border-slate-200">
+                <span className="text-slate-600">Snapshot JSON</span>
+                <kbd className="px-2 py-0.5 bg-white border border-slate-300 rounded shadow-xs font-bold text-slate-800">Ctrl+S</kbd>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded bg-slate-50 border border-slate-200">
+                <span className="text-slate-600">Toggle Help</span>
+                <kbd className="px-2 py-0.5 bg-white border border-slate-300 rounded shadow-xs font-bold text-slate-800">?</kbd>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-200">
+              <button
+                onClick={() => setHelpModalOpen(false)}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-bold text-xs"
+              >
+                CLOSE [ ESC ]
               </button>
             </div>
           </div>
