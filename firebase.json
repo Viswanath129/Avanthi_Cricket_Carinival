@@ -108,5 +108,8 @@
   "functions": {
     "source": "acc-auction-portal/functions",
     "runtime": "nodejs20"
+  },
+  "storage": {
+    "rules": "storage.rules"
   }
 }

@@ -15,3 +15,4 @@ export { registerPlayer } from './registration/registerPlayer';
 export { registerFranchise } from './registration/registerFranchise';
 export { aggregateLiveUsers } from './presence/aggregateLiveUsers';
 export { getTimeHttp, getServerTime } from './utils/time';
+export { projectPublicPlayer, projectPublicFranchise } from './triggers/projectPublicData';

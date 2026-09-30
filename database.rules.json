@@ -11,14 +11,10 @@
         }
       }
     },
-    "presence_test": {
-      ".read": true,
-      ".write": true
-    },
     "publicStats": {
       "liveUsers": {
         ".read": true,
-        ".write": true
+        ".write": "auth != null"
       }
     },
     "auctionState": {

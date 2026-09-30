@@ -219,16 +219,45 @@ function Router() {
           <FranchiseDashboardPage />
         </ProtectedRoute>
       </Route>
+      <Route path="/portal/franchise">
+        <ProtectedRoute allowedRoles={['FRANCHISE_COORDINATOR', 'FRANCHISE_TEAM_LEADER']}>
+          <FranchiseDashboardPage />
+        </ProtectedRoute>
+      </Route>
       <Route path="/franchise/bid">
+        <ProtectedRoute allowedRoles={['FRANCHISE_COORDINATOR', 'FRANCHISE_TEAM_LEADER']}>
+          <FranchiseBiddingPage />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/portal/franchise/bid">
         <ProtectedRoute allowedRoles={['FRANCHISE_COORDINATOR', 'FRANCHISE_TEAM_LEADER']}>
           <FranchiseBiddingPage />
         </ProtectedRoute>
       </Route>
 
       {/* Player Routes */}
-      <Route path="/player" component={PlayerDashboardPage} />
-      <Route path="/player/dashboard" component={PlayerDashboardPage} />
+      <Route path="/player">
+        <ProtectedRoute allowedRoles={['PLAYER', 'SUPER_ADMIN', 'ADMIN']}>
+          <PlayerDashboardPage />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/portal/player">
+        <ProtectedRoute allowedRoles={['PLAYER', 'SUPER_ADMIN', 'ADMIN']}>
+          <PlayerDashboardPage />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/player/dashboard">
+        <ProtectedRoute allowedRoles={['PLAYER', 'SUPER_ADMIN', 'ADMIN']}>
+          <PlayerDashboardPage />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/portal/player/dashboard">
+        <ProtectedRoute allowedRoles={['PLAYER', 'SUPER_ADMIN', 'ADMIN']}>
+          <PlayerDashboardPage />
+        </ProtectedRoute>
+      </Route>
       <Route path="/player/register" component={PlayerRegistrationPage} />
+      <Route path="/portal/register" component={PlayerRegistrationPage} />
 
       {/* 404 */}
       <Route>

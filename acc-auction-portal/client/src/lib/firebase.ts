@@ -5,14 +5,38 @@ import { getStorage, connectStorageEmulator } from 'firebase/storage';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 import { getDatabase, connectDatabaseEmulator } from 'firebase/database';
 
+// Build-time validation: all required Firebase env vars must be set
+const REQUIRED_ENV_KEYS = [
+  'VITE_FIREBASE_API_KEY',
+  'VITE_FIREBASE_AUTH_DOMAIN',
+  'VITE_FIREBASE_PROJECT_ID',
+  'VITE_FIREBASE_STORAGE_BUCKET',
+  'VITE_FIREBASE_MESSAGING_SENDER_ID',
+  'VITE_FIREBASE_APP_ID',
+  'VITE_FIREBASE_DATABASE_URL',
+] as const;
+
+const missing = REQUIRED_ENV_KEYS.filter(
+  (key) => !import.meta.env[key]
+);
+
+if (missing.length > 0) {
+  throw new Error(
+    `[ACC Firebase] Missing required environment variables:\n` +
+    missing.map((k) => `  - ${k}`).join('\n') +
+    `\n\nCreate a .env file in acc-auction-portal/ with all VITE_FIREBASE_* variables.` +
+    `\nSee .env.example for reference.`
+  );
+}
+
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyC3HX53aAbeWqYGTSUvl59xEBeQNefx0sA',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'studio-6471864054-30ce7.firebaseapp.com',
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'studio-6471864054-30ce7',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'studio-6471864054-30ce7.firebasestorage.app',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '830366253821',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:830366253821:web:74186cd15282b396053494',
-  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL || 'https://studio-6471864054-30ce7-default-rtdb.firebaseio.com',
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL,
 };
 
 export const app = initializeApp(firebaseConfig);
