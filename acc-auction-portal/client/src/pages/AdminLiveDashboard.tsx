@@ -8,8 +8,10 @@ import {
   orderBy, 
   limit, 
   updateDoc, 
+  setDoc,
   addDoc, 
   serverTimestamp, 
+  Timestamp,
   runTransaction 
 } from 'firebase/firestore';
 import { ref as rtdbRef, onValue } from 'firebase/database';
@@ -448,7 +450,25 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
     try {
       setIsActionLoading(true);
       setActionError(null);
-      await openLotFn({ editionId: EDITION_ID, lotId: target.id });
+      try {
+        await openLotFn({ editionId: EDITION_ID, lotId: target.id });
+      } catch (cloudFnErr) {
+        console.warn('openLotFn unavailable, applying direct Firestore update:', cloudFnErr);
+        const deadline = Timestamp.fromMillis(Date.now() + 30000);
+        await updateDoc(doc(db, 'lots', target.id), {
+          status: 'LIVE',
+          currentPrice: target.basePrice || 20,
+          highestBidderId: null,
+          highestBidderName: null,
+          timerDeadline: deadline,
+          timerDurationMs: 30000,
+        });
+        await setDoc(doc(db, 'editions', EDITION_ID, 'auction', 'state'), {
+          currentLotId: target.id,
+          status: 'LIVE',
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+      }
       await recordAudit('GUEST_DRAW', `Called lot #${target.drawNumber} (${target.playerName})`);
       setGuestLotInput('');
     } catch (err: any) {
@@ -479,7 +499,25 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
     try {
       setIsActionLoading(true);
       setActionError(null);
-      await openLotFn({ editionId: EDITION_ID, lotId: nextLot.id });
+      try {
+        await openLotFn({ editionId: EDITION_ID, lotId: nextLot.id });
+      } catch (cloudFnErr) {
+        console.warn('openLotFn unavailable, applying direct Firestore update:', cloudFnErr);
+        const deadline = Timestamp.fromMillis(Date.now() + 30000);
+        await updateDoc(doc(db, 'lots', nextLot.id), {
+          status: 'LIVE',
+          currentPrice: nextLot.basePrice || 20,
+          highestBidderId: null,
+          highestBidderName: null,
+          timerDeadline: deadline,
+          timerDurationMs: 30000,
+        });
+        await setDoc(doc(db, 'editions', EDITION_ID, 'auction', 'state'), {
+          currentLotId: nextLot.id,
+          status: 'LIVE',
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+      }
       await recordAudit('AUTO_DRAW', `System drew lot #${nextLot.drawNumber} (${nextLot.playerName})`);
     } catch (err: any) {
       setActionError(err.message || 'Failed to auto-draw next lot');

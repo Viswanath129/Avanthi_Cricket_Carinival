@@ -5564,16 +5564,49 @@
 
     function updateTimerDisplay() {
       try {
-        const timerEls = document.querySelectorAll(".auction-timer-widget, .lot-timer-display");
-        if (timerEls && timerEls.forEach) {
-          timerEls.forEach(el => {
-            const span = el.querySelector ? el.querySelector(".clock-seconds, span") : null;
-            if (span && span.textContent && span.textContent.includes("s")) {
+        // 1. Direct update for all countdown numbers (Live Auctioneer & Cards)
+        document.querySelectorAll(".timer-countdown-number").forEach(el => {
+          el.textContent = timerSeconds;
+        });
+
+        // 2. Direct update for all timer widgets
+        const widgetClass = timerSeconds <= 5 ? 'critical' : (timerSeconds <= 10 ? 'warning' : 'normal');
+        document.querySelectorAll(".auction-timer-widget").forEach(el => {
+          el.classList.remove('normal', 'warning', 'critical');
+          el.classList.add(widgetClass);
+
+          const span = el.querySelector(".clock-seconds, span, .font-mono");
+          if (span) {
+            const txt = (span.textContent || "").trim();
+            if (txt.includes("SEC")) {
+              span.textContent = `${timerSeconds} SEC`;
+            } else if (txt.includes("CLOCK")) {
               span.textContent = `${timerSeconds}s CLOCK`;
+            } else if (txt.includes("s")) {
+              span.textContent = `${timerSeconds}s`;
+            } else if (span.classList.contains("font-mono") && span.children.length === 0) {
+              span.textContent = `${timerSeconds}s`;
             }
-          });
+          }
+        });
+
+        // 3. Status badge update
+        const badge = document.getElementById("clockStatusBadge");
+        if (badge) {
+          if (timerSeconds === 0) {
+            badge.className = "status-badge status-blocked";
+            badge.textContent = "TIME UP (STOPPED)";
+          } else if (auctionPaused) {
+            badge.className = "status-badge status-warning";
+            badge.textContent = "PAUSED";
+          } else {
+            badge.className = "status-badge status-live";
+            badge.textContent = "CLOCK ACTIVE";
+          }
         }
-      } catch (e) {}
+      } catch (e) {
+        console.error("Timer display error:", e);
+      }
     }
 
     let timerRafId = null;
@@ -5631,6 +5664,12 @@
     }
 
     function startTimer() {
+      const sOffset = (window.RealtimeStore && window.RealtimeStore.state.connection.serverTimeOffset) || 0;
+      const serverNow = Date.now() + sOffset;
+      if (!timerDeadline || timerDeadline <= serverNow) {
+        timerDeadline = serverNow + (timerSeconds > 0 ? timerSeconds * 1000 : 30000);
+        timerSeconds = Math.max(0, Math.ceil((timerDeadline - serverNow) / 1000));
+      }
       if (timerRunning) return;
       timerRunning = true;
       runTimerRafLoop();
