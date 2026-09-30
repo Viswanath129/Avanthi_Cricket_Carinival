@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.aggregateLiveUsers = exports.registerFranchise = exports.registerPlayer = exports.overrideBucket = exports.approveFranchise = exports.markPayment = exports.approvePlayer = exports.createEdition = exports.generateDraw = exports.pauseResumeAuction = exports.passFranchise = exports.skipLot = exports.openLot = exports.undoSale = exports.hammerLot = exports.placeBid = void 0;
+exports.getServerTime = exports.getTimeHttp = exports.aggregateLiveUsers = exports.registerFranchise = exports.registerPlayer = exports.overrideBucket = exports.approveFranchise = exports.markPayment = exports.approvePlayer = exports.createEdition = exports.generateDraw = exports.pauseResumeAuction = exports.passFranchise = exports.skipLot = exports.openLot = exports.undoSale = exports.hammerLot = exports.placeBid = void 0;
 var placeBid_1 = require("./auction/placeBid");
 Object.defineProperty(exports, "placeBid", { enumerable: true, get: function () { return placeBid_1.placeBid; } });
 var hammerLot_1 = require("./auction/hammerLot");
@@ -33,4 +33,7 @@ var registerFranchise_1 = require("./registration/registerFranchise");
 Object.defineProperty(exports, "registerFranchise", { enumerable: true, get: function () { return registerFranchise_1.registerFranchise; } });
 var aggregateLiveUsers_1 = require("./presence/aggregateLiveUsers");
 Object.defineProperty(exports, "aggregateLiveUsers", { enumerable: true, get: function () { return aggregateLiveUsers_1.aggregateLiveUsers; } });
+var time_1 = require("./utils/time");
+Object.defineProperty(exports, "getTimeHttp", { enumerable: true, get: function () { return time_1.getTimeHttp; } });
+Object.defineProperty(exports, "getServerTime", { enumerable: true, get: function () { return time_1.getServerTime; } });
 //# sourceMappingURL=index.js.map

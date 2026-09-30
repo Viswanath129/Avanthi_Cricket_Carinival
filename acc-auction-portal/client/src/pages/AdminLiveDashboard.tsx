@@ -802,15 +802,15 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
   };
 
   return (
-    <div className="h-screen max-h-screen overflow-hidden flex flex-col bg-slate-950 text-slate-100 font-sans select-none">
+    <div className="h-screen max-h-screen overflow-hidden flex flex-col bg-slate-100 text-slate-900 font-sans select-none">
       
       {/* ========================================================= */}
       {/* 1. STATUS BAR (Fixed h-12, Zero Vertical Scroll)         */}
       {/* ========================================================= */}
-      <header className="h-12 border-b border-slate-800 bg-slate-950 px-4 flex items-center justify-between shrink-0 text-xs">
+      <header className="h-12 border-b border-slate-200 bg-white px-4 flex items-center justify-between shrink-0 text-xs">
         {/* Left: Branding & Role */}
         <div className="flex items-center gap-3">
-          <span className="font-mono font-black text-base tracking-wider text-white">ACC 2026</span>
+          <span className="font-mono font-black text-base tracking-wider text-slate-900">ACC 2026</span>
           <span className={`px-2 py-0.5 rounded font-mono font-bold uppercase tracking-wider text-[11px] border ${
             capabilities.isSuperAdmin 
               ? 'bg-amber-950/50 border-amber-700/60 text-amber-400' 
@@ -819,7 +819,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
             {capabilities.roleLabel}
           </span>
           <span className="text-slate-500 font-mono hidden md:inline">|</span>
-          <span className="text-slate-400 font-mono hidden md:inline">Session 1 — Day 1</span>
+          <span className="text-slate-600 font-mono hidden md:inline">Session 1 — Day 1</span>
         </div>
 
         {/* Center: Live Auction State, Draw Mode & Clock Sync */}
@@ -837,7 +837,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
                 PAUSED
               </span>
             ) : (
-              <span className="flex items-center gap-1.5 text-slate-400 border-slate-800 bg-slate-900">
+              <span className="flex items-center gap-1.5 text-slate-600 border-slate-200 bg-white">
                 <span className="w-2 h-2 rounded-full bg-slate-500 inline-block" />
                 IDLE
               </span>
@@ -845,11 +845,11 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
           </div>
 
           {/* Draw Mode Switcher */}
-          <div className="flex border border-slate-800 rounded-lg overflow-hidden bg-slate-900 p-0.5">
+          <div className="flex border border-slate-200 rounded-lg overflow-hidden bg-white p-0.5">
             <button
               onClick={() => handleToggleDrawMode()}
               className={`px-2.5 py-0.5 rounded font-mono text-[11px] font-bold transition-colors ${
-                auctionState?.drawMode === 'GUEST' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                auctionState?.drawMode === 'GUEST' ? 'bg-emerald-600 text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               GUEST
@@ -857,7 +857,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
             <button
               onClick={() => handleToggleDrawMode()}
               className={`px-2.5 py-0.5 rounded font-mono text-[11px] font-bold transition-colors ${
-                auctionState?.drawMode === 'AUTO' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                auctionState?.drawMode === 'AUTO' ? 'bg-emerald-600 text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               AUTO
@@ -865,7 +865,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
           </div>
 
           {/* Network Presence & Clock Sync Offset */}
-          <div className="hidden lg:flex items-center gap-3 font-mono text-slate-400 text-[11px]">
+          <div className="hidden lg:flex items-center gap-3 font-mono text-slate-600 text-[11px]">
             <span className="flex items-center gap-1">
               <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-red-500'}`} />
               {isOnline ? 'Online' : 'Offline'}
@@ -877,7 +877,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
 
         {/* Right: Operator Identity, Navigation & Sign Out */}
         <div className="flex items-center gap-3">
-          <span className="text-slate-400 font-mono truncate max-w-[140px] hidden xl:inline">
+          <span className="text-slate-600 font-mono truncate max-w-[140px] hidden xl:inline">
             {user?.email || 'operator@acc.org'}
           </span>
           {capabilities.canManageFranchises && (
@@ -908,12 +908,12 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
       {/* ========================================================= */}
       {/* 2. LOT STRIP (Current Lot Summary, Fixed h-20)            */}
       {/* ========================================================= */}
-      <section className="h-20 border-b border-slate-800 bg-slate-900/60 px-4 flex items-center justify-between gap-4 shrink-0">
+      <section className="h-20 border-b border-slate-200 bg-white/60 px-4 flex items-center justify-between gap-4 shrink-0">
         {currentLot ? (
           <>
             {/* Left: Photo, Draw Number, Name, Roll & Badges */}
             <div className="flex items-center gap-3 min-w-0">
-              <div className="w-14 h-14 rounded border border-slate-700 bg-slate-800 flex items-center justify-center overflow-hidden shrink-0 font-mono text-slate-500 text-[10px]">
+              <div className="w-14 h-14 rounded border border-slate-300 bg-slate-800 flex items-center justify-center overflow-hidden shrink-0 font-mono text-slate-500 text-[10px]">
                 {currentLot.photoUrl ? (
                   <img src={currentLot.photoUrl} alt="Player" className="w-full h-full object-cover" />
                 ) : (
@@ -925,7 +925,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
                   <span className="font-mono text-sm font-bold text-amber-400">
                     #{currentLot.lotNumber || `Lot-${currentLot.drawNumber || '01'}`}
                   </span>
-                  <h2 className="font-bold text-base text-white tracking-tight truncate">
+                  <h2 className="font-bold text-base text-slate-900 tracking-tight truncate">
                     {currentLot.playerName}
                   </h2>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-950/60 border border-indigo-800/60 text-indigo-300 font-semibold">
@@ -942,7 +942,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
                     </span>
                   )}
                 </div>
-                <div className="flex items-center gap-3 font-mono text-[11px] text-slate-400 mt-0.5">
+                <div className="flex items-center gap-3 font-mono text-[11px] text-slate-600 mt-0.5">
                   <span>Roll: {currentLot.rollNumber}</span>
                   <span>·</span>
                   <span>Branch: {currentLot.branch || currentLot.academic?.branch || 'General'}</span>
@@ -959,7 +959,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
             </div>
 
             {/* Center: Cricket Career Highlights */}
-            <div className="hidden xl:flex items-center gap-4 bg-slate-950/60 border border-slate-800/80 px-4 py-1.5 rounded-lg font-mono text-xs">
+            <div className="hidden xl:flex items-center gap-4 bg-white/60 border border-slate-200/80 px-4 py-1.5 rounded-lg font-mono text-xs">
               <div className="text-center">
                 <span className="block text-[10px] text-slate-500 uppercase">Matches</span>
                 <span className="font-bold text-slate-200 tabular-nums">{currentLot.stats?.matches || 0}</span>
@@ -990,7 +990,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
                   {currentLot.basePrice || 20} Cr
                 </span>
               </div>
-              <div className="px-3 py-1.5 rounded bg-slate-950 border border-slate-800 font-mono text-xs text-amber-400 font-bold uppercase tracking-wider">
+              <div className="px-3 py-1.5 rounded bg-white border border-slate-200 font-mono text-xs text-amber-400 font-bold uppercase tracking-wider">
                 {currentLot.status || 'AVAILABLE'}
               </div>
             </div>
@@ -1014,7 +1014,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
         <div className="col-span-4 flex flex-col gap-3 min-h-0 overflow-hidden">
           
           {/* HERO BID CARD */}
-          <div className="bg-slate-900 border border-slate-800 rounded-lg p-3.5 flex flex-col justify-between shrink-0 shadow-sm relative overflow-hidden">
+          <div className="bg-white border border-slate-200 rounded-lg p-3.5 flex flex-col justify-between shrink-0 shadow-sm relative overflow-hidden">
             <div className="flex justify-between items-start">
               <div>
                 <span className="text-[10px] font-mono text-slate-500 tracking-wider uppercase font-semibold">CURRENT BID</span>
@@ -1031,10 +1031,10 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
             </div>
 
             {/* Leading Franchise Display */}
-            <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center justify-between">
+            <div className="mt-3 pt-2.5 border-t border-slate-200/80 flex items-center justify-between">
               <div>
                 <span className="block text-[10px] font-mono text-slate-500 uppercase">LEADING FRANCHISE</span>
-                <span className="font-bold text-base text-slate-100 truncate block">
+                <span className="font-bold text-base text-slate-900 truncate block">
                   {highestBid?.franchiseName || currentLot?.highestBidderName || 'NO BIDS YET'}
                 </span>
               </div>
@@ -1048,9 +1048,9 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
           </div>
 
           {/* CHRONOLOGICAL BID FEED */}
-          <div className="bg-slate-900/70 border border-slate-800 rounded-lg p-2.5 flex-1 min-h-0 flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between pb-1.5 border-b border-slate-800/80 shrink-0">
-              <span className="font-mono text-xs font-bold text-slate-400 uppercase tracking-wider">BID ORDER HISTORY</span>
+          <div className="bg-white/70 border border-slate-200 rounded-lg p-2.5 flex-1 min-h-0 flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between pb-1.5 border-b border-slate-200/80 shrink-0">
+              <span className="font-mono text-xs font-bold text-slate-600 uppercase tracking-wider">BID ORDER HISTORY</span>
               <span className="font-mono text-[10px] text-slate-500">{bids.length} entries</span>
             </div>
             
@@ -1061,7 +1061,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
                   className={`flex justify-between items-center p-1.5 rounded border transition-colors ${
                     idx === 0 
                       ? 'bg-amber-950/20 border-amber-800/40 text-amber-300 font-semibold' 
-                      : 'bg-slate-950/40 border-slate-800/60 text-slate-300'
+                      : 'bg-white/40 border-slate-200/60 text-slate-300'
                   }`}
                 >
                   <div className="flex items-center gap-2 truncate">
@@ -1085,13 +1085,13 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
           </div>
 
           {/* 4. ACTION ROW (Fixed Bottom Section) */}
-          <div className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 shrink-0 flex flex-col gap-2">
-            {/* Row 1: Core Auction Buttons */}
+          <div className="bg-white border border-slate-200 rounded-lg p-2.5 shrink-0 flex flex-col gap-2">
+            {/* Row 1: Core Auction Buttons (44px Accessible Touch Targets) */}
             <div className="grid grid-cols-4 gap-1.5 text-xs font-mono font-bold">
               <button
                 onClick={handleHammer}
                 disabled={!capabilities.canHammer || !currentLot || isActionLoading}
-                className="py-2.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white rounded font-bold shadow-sm transition-all flex flex-col items-center justify-center"
+                className="min-h-[44px] py-1.5 bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] disabled:opacity-40 text-slate-900 rounded font-bold shadow-sm shadow-emerald-950/50 transition-all flex flex-col items-center justify-center cursor-pointer"
               >
                 <span>HAMMER</span>
                 <span className="text-[9px] opacity-80">[ H ]</span>
@@ -1100,25 +1100,25 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
               <button
                 onClick={handleSkip}
                 disabled={!capabilities.canSkip || !currentLot || isActionLoading}
-                className="py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 rounded transition-colors flex flex-col items-center justify-center border border-slate-700"
+                className="min-h-[44px] py-1.5 bg-slate-800 hover:bg-slate-700 active:scale-[0.98] disabled:opacity-40 text-slate-200 rounded transition-colors flex flex-col items-center justify-center border border-slate-300 cursor-pointer"
               >
                 <span>SKIP</span>
-                <span className="text-[9px] text-slate-400">[ S ]</span>
+                <span className="text-[9px] text-slate-600">[ S ]</span>
               </button>
 
               <button
                 onClick={handlePauseResume}
                 disabled={!capabilities.canPauseResume || isActionLoading}
-                className="py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 rounded transition-colors flex flex-col items-center justify-center border border-slate-700"
+                className="min-h-[44px] py-1.5 bg-slate-800 hover:bg-slate-700 active:scale-[0.98] disabled:opacity-40 text-slate-200 rounded transition-colors flex flex-col items-center justify-center border border-slate-300 cursor-pointer"
               >
                 <span>{auctionState?.status === 'LIVE' ? 'PAUSE' : 'RESUME'}</span>
-                <span className="text-[9px] text-slate-400">[ P ]</span>
+                <span className="text-[9px] text-slate-600">[ P ]</span>
               </button>
 
               <button
                 onClick={() => setUndoModalOpen(true)}
                 disabled={!capabilities.canUndoSale || isActionLoading}
-                className="py-2.5 bg-red-950/40 hover:bg-red-900/60 disabled:opacity-40 text-red-300 rounded border border-red-800/60 transition-colors flex flex-col items-center justify-center"
+                className="min-h-[44px] py-1.5 bg-red-950/40 hover:bg-red-900/60 active:scale-[0.98] disabled:opacity-40 text-red-300 rounded border border-red-800/60 transition-colors flex flex-col items-center justify-center cursor-pointer"
               >
                 <span>UNDO</span>
                 <span className="text-[9px] text-red-400/80">[ U ]</span>
@@ -1133,7 +1133,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
                   setBehalfModalOpen(true);
                 }}
                 disabled={!capabilities.canBidOnBehalf || !currentLot || isActionLoading}
-                className="py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 rounded border border-slate-700 transition-colors"
+                className="py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 rounded border border-slate-300 transition-colors"
               >
                 Behalf [ B ]
               </button>
@@ -1141,7 +1141,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
               <button
                 onClick={() => setDirectAssignModalOpen(true)}
                 disabled={!capabilities.canDirectAssign || isActionLoading}
-                className="py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 rounded border border-slate-700 transition-colors"
+                className="py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 rounded border border-slate-300 transition-colors"
               >
                 Direct Assign [ A ]
               </button>
@@ -1157,7 +1157,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
               ) : (
                 <button
                   onClick={handleExportCSV}
-                  className="py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700 transition-colors"
+                  className="py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-300 transition-colors"
                 >
                   Export CSV [ ^E ]
                 </button>
@@ -1165,7 +1165,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
             </div>
 
             {/* Row 3: Lot Advance Input / Auto Advance Button */}
-            <div className="pt-1 border-t border-slate-800/60 flex items-center gap-2">
+            <div className="pt-1 border-t border-slate-200/60 flex items-center gap-2">
               {auctionState?.drawMode === 'GUEST' ? (
                 <form onSubmit={handleAdvanceLotGuest} className="flex-1 flex gap-1.5">
                   <input
@@ -1173,12 +1173,12 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
                     value={guestLotInput}
                     onChange={(e) => setGuestLotInput(e.target.value)}
                     placeholder="Guest Lot # (e.g. 14)"
-                    className="flex-1 bg-slate-950 border border-slate-700 rounded px-2.5 py-1 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    className="flex-1 bg-white border border-slate-300 rounded px-2.5 py-1 text-xs font-mono text-slate-900 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                   />
                   <button
                     type="submit"
                     disabled={isActionLoading || !guestLotInput.trim()}
-                    className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white rounded text-xs font-mono font-bold"
+                    className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-slate-900 rounded text-xs font-mono font-bold"
                   >
                     Call Lot
                   </button>
@@ -1187,7 +1187,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
                 <button
                   onClick={handleAdvanceLotAuto}
                   disabled={isActionLoading}
-                  className="flex-1 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded text-xs font-mono font-bold flex items-center justify-center gap-2 shadow-sm"
+                  className="flex-1 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-slate-900 rounded text-xs font-mono font-bold flex items-center justify-center gap-2 shadow-sm"
                 >
                   <span>Draw Next Random Player</span>
                   <span className="text-[10px] bg-emerald-900 px-1.5 py-0.2 rounded opacity-90">[ Space ]</span>
@@ -1199,7 +1199,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
             {actionError && (
               <div className="p-1.5 rounded bg-red-950/80 border border-red-800 text-red-300 font-mono text-[10px] flex justify-between items-center">
                 <span className="truncate">{actionError}</span>
-                <button onClick={() => setActionError(null)} className="text-red-400 hover:text-white ml-2">✕</button>
+                <button onClick={() => setActionError(null)} className="text-red-400 hover:text-slate-900 ml-2">&times;</button>
               </div>
             )}
           </div>
@@ -1212,9 +1212,9 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
         <div className="col-span-4 flex flex-col gap-3 min-h-0 overflow-hidden">
           
           {/* 6. SCARCITY OVERVIEW */}
-          <div className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 shrink-0">
-            <div className="flex items-center justify-between pb-1.5 border-b border-slate-800">
-              <span className="font-mono text-xs font-bold text-slate-400 uppercase tracking-wider">BUCKET SCARCITY OVERVIEW</span>
+          <div className="bg-white border border-slate-200 rounded-lg p-2.5 shrink-0">
+            <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
+              <span className="font-mono text-xs font-bold text-slate-600 uppercase tracking-wider">BUCKET SCARCITY OVERVIEW</span>
               <span className="font-mono text-[10px] text-slate-500">Supply / Demand</span>
             </div>
 
@@ -1225,14 +1225,14 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
                   className={`p-1.5 rounded border font-mono text-[11px] flex flex-col justify-between ${
                     s.isScarcity 
                       ? 'bg-amber-950/30 border-amber-600/70 text-amber-300' 
-                      : 'bg-slate-950/50 border-slate-800/80 text-slate-300'
+                      : 'bg-white/50 border-slate-200/80 text-slate-300'
                   }`}
                 >
                   <div className="flex justify-between items-center">
                     <span className="font-bold">{s.bucket}</span>
                     {s.isScarcity && <span className="text-[9px] text-amber-400 font-black animate-pulse">DEFICIT</span>}
                   </div>
-                  <div className="text-[10px] text-slate-400 mt-1 flex justify-between">
+                  <div className="text-[10px] text-slate-600 mt-1 flex justify-between">
                     <span>Avail: <strong className="text-slate-200">{s.supply}</strong></span>
                     <span>Need: <strong className="text-slate-200">{s.demand}</strong></span>
                   </div>
@@ -1242,13 +1242,13 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
           </div>
 
           {/* IN-PLAY / PASSED / BLOCKED QUICK CARDS */}
-          <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-2.5 flex-1 min-h-0 flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between pb-1.5 border-b border-slate-800 shrink-0 font-mono text-xs">
-              <span className="font-bold text-slate-400 uppercase tracking-wider">BIDDING SQUAD PARTICIPATION</span>
+          <div className="bg-white/80 border border-slate-200 rounded-lg p-2.5 flex-1 min-h-0 flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between pb-1.5 border-b border-slate-200 shrink-0 font-mono text-xs">
+              <span className="font-bold text-slate-600 uppercase tracking-wider">BIDDING SQUAD PARTICIPATION</span>
               <div className="flex gap-2 text-[10px]">
                 <span className="text-emerald-400 font-bold">{inPlayFranchises.length} In-Play</span>
                 <span className="text-slate-500">·</span>
-                <span className="text-slate-400">{passedFranchises.length} Passed</span>
+                <span className="text-slate-600">{passedFranchises.length} Passed</span>
                 <span className="text-slate-500">·</span>
                 <span className="text-red-400 font-bold">{blockedFranchises.length} Blocked</span>
               </div>
@@ -1262,7 +1262,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
                 </span>
                 <div className="grid grid-cols-2 gap-1.5">
                   {inPlayFranchises.map(f => (
-                    <div key={f.id} className="p-1.5 rounded bg-slate-950 border border-emerald-900/40 flex justify-between items-center text-[11px]">
+                    <div key={f.id} className="p-1.5 rounded bg-white border border-emerald-900/40 flex justify-between items-center text-[11px]">
                       <span className="font-bold truncate text-slate-200">{f.name}</span>
                       <span className="text-emerald-400 font-semibold shrink-0">{f.purse} Cr</span>
                     </div>
@@ -1275,13 +1275,13 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
 
               {/* Blocked / Passed Section */}
               {(blockedFranchises.length > 0 || passedFranchises.length > 0) && (
-                <div className="pt-2 border-t border-slate-800/60">
+                <div className="pt-2 border-t border-slate-200/60">
                   <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider block mb-1">
                     Restricted / Inactive
                   </span>
                   <div className="grid grid-cols-2 gap-1.5">
                     {passedFranchises.map(f => (
-                      <div key={f.id} className="p-1 rounded bg-slate-950/60 border border-slate-800 flex justify-between items-center text-[10px] text-slate-400">
+                      <div key={f.id} className="p-1 rounded bg-white/60 border border-slate-200 flex justify-between items-center text-[10px] text-slate-600">
                         <span className="truncate">{f.name}</span>
                         <span className="text-slate-500 font-bold">PASSED</span>
                       </div>
@@ -1299,15 +1299,15 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
           </div>
 
           {/* 7. AUDIT STREAM */}
-          <div className="bg-slate-900/60 border border-slate-800 rounded-lg p-2.5 h-44 shrink-0 flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between pb-1 border-b border-slate-800 shrink-0 font-mono text-[11px]">
-              <span className="font-bold text-slate-400 uppercase tracking-wider">IMMUTABLE AUDIT STREAM</span>
+          <div className="bg-white/60 border border-slate-200 rounded-lg p-2.5 h-44 shrink-0 flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between pb-1 border-b border-slate-200 shrink-0 font-mono text-[11px]">
+              <span className="font-bold text-slate-600 uppercase tracking-wider">IMMUTABLE AUDIT STREAM</span>
               <span className="text-[10px] text-slate-500">Real-time ledger</span>
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-1.5 pt-1.5 pr-1 font-mono text-[11px]">
               {auditLogs.map((log, idx) => (
-                <div key={log.id || idx} className="p-1 rounded bg-slate-950/60 border border-slate-800/70 text-slate-300">
+                <div key={log.id || idx} className="p-1 rounded bg-white/60 border border-slate-200/70 text-slate-300">
                   <div className="flex justify-between items-center text-[9px] text-slate-500">
                     <span className="font-bold text-amber-500/90">{log.action}</span>
                     <span>
@@ -1332,8 +1332,8 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
         {/* ======================================================= */}
         {/* COL 3 (Cols 9..12): 5. 11 FRANCHISE LIVE TABLE          */}
         {/* ======================================================= */}
-        <div className="col-span-4 flex flex-col min-h-0 overflow-hidden bg-slate-900 border border-slate-800 rounded-lg p-2.5">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-800 shrink-0">
+        <div className="col-span-4 flex flex-col min-h-0 overflow-hidden bg-white border border-slate-200 rounded-lg p-2.5">
+          <div className="flex items-center justify-between pb-2 border-b border-slate-200 shrink-0">
             <div>
               <span className="font-mono text-xs font-bold text-slate-300 uppercase tracking-wider">FRANCHISE GRID (11 TEAMS)</span>
               <p className="text-[10px] font-mono text-slate-500">Live purse, max bid & bucket quotas</p>
@@ -1356,19 +1356,19 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
                   key={f.id} 
                   className={`p-2 rounded border transition-colors ${
                     isBlocked 
-                      ? 'bg-red-950/15 border-red-900/40 text-slate-400' 
+                      ? 'bg-red-950/15 border-red-900/40 text-slate-600' 
                       : isPassed 
-                        ? 'bg-slate-950/40 border-slate-800/80 text-slate-400' 
-                        : 'bg-slate-950 border-slate-800 text-slate-200 hover:border-slate-700'
+                        ? 'bg-white/40 border-slate-200/80 text-slate-600' 
+                        : 'bg-white border-slate-200 text-slate-200 hover:border-slate-300'
                   }`}
                 >
                   {/* Top line: Name & Pass Toggle */}
                   <div className="flex justify-between items-center mb-1">
-                    <span className="font-bold text-slate-100 truncate text-[11px]">{f.name}</span>
+                    <span className="font-bold text-slate-900 truncate text-[11px]">{f.name}</span>
                     <div className="flex items-center gap-1.5">
                       <span className={`text-[9px] px-1.5 py-0.2 rounded font-bold uppercase ${
                         isBlocked ? 'bg-red-950 text-red-400 border border-red-800' :
-                        isPassed ? 'bg-slate-800 text-slate-400' :
+                        isPassed ? 'bg-slate-800 text-slate-600' :
                         'bg-emerald-950 text-emerald-400 border border-emerald-800'
                       }`}>
                         {f.liveState}
@@ -1378,7 +1378,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
                         className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${
                           isPassed 
                             ? 'border-emerald-800 text-emerald-400 hover:bg-emerald-950/40' 
-                            : 'border-slate-700 text-slate-400 hover:bg-slate-800'
+                            : 'border-slate-300 text-slate-600 hover:bg-slate-800'
                         }`}
                       >
                         {isPassed ? 'UNPASS' : 'PASS'}
@@ -1387,7 +1387,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
                   </div>
 
                   {/* Numbers Grid: Purse, Max Bid, Squad count */}
-                  <div className="grid grid-cols-3 gap-2 text-[10px] py-1 border-t border-slate-900 text-slate-400">
+                  <div className="grid grid-cols-3 gap-2 text-[10px] py-1 border-t border-slate-900 text-slate-600">
                     <div>
                       <span className="text-slate-500 uppercase block">Purse</span>
                       <span className="font-bold text-emerald-400 tabular-nums">{f.purse} Cr</span>
@@ -1405,7 +1405,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
                   </div>
 
                   {/* Bucket breakdown pills */}
-                  <div className="flex items-center gap-1 pt-1 text-[9px] text-slate-400 overflow-x-auto">
+                  <div className="flex items-center gap-1 pt-1 text-[9px] text-slate-600 overflow-x-auto">
                     <span className="text-slate-500 shrink-0">Buckets:</span>
                     {(['B1', 'B2', 'B3', 'B4', 'D5', 'M6'] as BucketId[]).map(b => (
                       <span 
@@ -1435,21 +1435,21 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
       {/* 1. TWO-STEP HAMMER CONFIRMATION MODAL */}
       {hammerModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-amber-500/60 rounded-xl p-5 w-full max-w-md shadow-2xl font-mono space-y-4">
+          <div className="bg-white border border-amber-500/60 rounded-xl p-5 w-full max-w-md shadow-2xl font-mono space-y-4">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg bg-amber-500/20 text-amber-500 flex items-center justify-center text-xl font-bold">
-                🔨
+                HAMMER
               </div>
               <div>
-                <h3 className="font-bold text-white text-base">COMMIT LOT SALE (HAMMER)</h3>
-                <p className="text-[11px] text-slate-400">Two-Step Authority Verification</p>
+                <h3 className="font-bold text-slate-900 text-base">COMMIT LOT SALE (HAMMER)</h3>
+                <p className="text-[11px] text-slate-600">Two-Step Authority Verification</p>
               </div>
             </div>
 
-            <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 text-xs space-y-2">
+            <div className="p-3 rounded-lg bg-white border border-slate-200 text-xs space-y-2">
               <div className="flex justify-between">
                 <span className="text-slate-500">Player:</span>
-                <span className="font-bold text-white">{currentLot?.playerName}</span>
+                <span className="font-bold text-slate-900">{currentLot?.playerName}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Draw Number:</span>
@@ -1467,7 +1467,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
               </div>
             </div>
 
-            <p className="text-[11px] text-slate-400">
+            <p className="text-[11px] text-slate-600">
               {highestBid
                 ? 'Committing hammer will atomically deduct purse credits, add player to franchise squad roster, and log an immutable transaction.'
                 : 'No bids placed. Committing hammer will record this player as UNSOLD.'}
@@ -1476,14 +1476,14 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
             <div className="flex justify-end gap-2 pt-2">
               <button
                 onClick={() => setHammerModalOpen(false)}
-                className="px-4 py-2 border border-slate-700 hover:bg-slate-800 text-slate-300 rounded font-bold text-xs"
+                className="px-4 py-2 border border-slate-300 hover:bg-slate-800 text-slate-300 rounded font-bold text-xs"
               >
                 CANCEL
               </button>
               <button
                 onClick={confirmHammer}
                 disabled={isActionLoading}
-                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded font-bold text-xs shadow-md shadow-amber-600/30"
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-slate-900 rounded font-bold text-xs shadow-md shadow-amber-600/30"
               >
                 {isActionLoading ? 'COMMITTING...' : '[ CONFIRM HAMMER ]'}
               </button>
@@ -1495,13 +1495,13 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
       {/* 2. UNDO SALE MODAL */}
       {undoModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-xl p-5 w-full max-w-2xl max-h-[85vh] flex flex-col font-mono">
-            <h3 className="font-bold text-white text-base mb-1">UNDO PREVIOUS SALE</h3>
-            <p className="text-xs text-slate-400 mb-3">
+          <div className="bg-white border border-slate-300 rounded-xl p-5 w-full max-w-2xl max-h-[85vh] flex flex-col font-mono">
+            <h3 className="font-bold text-slate-900 text-base mb-1">UNDO PREVIOUS SALE</h3>
+            <p className="text-xs text-slate-600 mb-3">
               Select an acquisition to atomically refund purse credits and return player to recall queue.
             </p>
 
-            <div className="flex-1 overflow-y-auto border border-slate-800 rounded p-2 space-y-1.5 mb-3 text-xs">
+            <div className="flex-1 overflow-y-auto border border-slate-200 rounded p-2 space-y-1.5 mb-3 text-xs">
               {acquisitions.map(acq => {
                 const isSelected = selectedUndoAcq?.id === acq.id;
                 const isUndone = acq.status === 'UNDONE';
@@ -1511,15 +1511,15 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
                     key={acq.id}
                     onClick={() => !isUndone && setSelectedUndoAcq(acq)}
                     className={`p-2 rounded border cursor-pointer flex justify-between items-center ${
-                      isUndone ? 'bg-slate-950 border-slate-800 opacity-40 cursor-not-allowed' :
+                      isUndone ? 'bg-white border-slate-200 opacity-40 cursor-not-allowed' :
                       isSelected ? 'bg-slate-800 border-amber-500' :
-                      'bg-slate-950 border-slate-800 hover:border-slate-700'
+                      'bg-white border-slate-200 hover:border-slate-300'
                     }`}
                   >
                     <div>
                       <span className="text-slate-500 mr-2">#{acq.drawNumber}</span>
-                      <strong className="text-white">{acq.playerName}</strong>
-                      <span className="text-slate-400 ml-2">→ {acq.franchiseName}</span>
+                      <strong className="text-slate-900">{acq.playerName}</strong>
+                      <span className="text-slate-600 ml-2">→ {acq.franchiseName}</span>
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="text-amber-400 font-bold">{acq.price} Cr</span>
@@ -1535,25 +1535,25 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
 
             {selectedUndoAcq && (
               <div className="mb-3 space-y-1">
-                <label className="text-xs text-slate-400">Reason for rollback (Mandatory, min 3 chars):</label>
+                <label className="text-xs text-slate-600">Reason for rollback (Mandatory, min 3 chars):</label>
                 <input
                   type="text"
                   value={undoReason}
                   onChange={(e) => setUndoReason(e.target.value)}
                   placeholder="e.g. Accidental double hammer, system lag"
-                  className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-xs text-white focus:outline-none focus:border-amber-500"
+                  className="w-full bg-white border border-slate-300 rounded p-2 text-xs text-slate-900 focus:outline-none focus:border-amber-500"
                 />
               </div>
             )}
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">
               <button
                 onClick={() => {
                   setUndoModalOpen(false);
                   setSelectedUndoAcq(null);
                   setUndoReason('');
                 }}
-                className="px-4 py-2 border border-slate-700 hover:bg-slate-800 text-slate-300 rounded font-bold text-xs"
+                className="px-4 py-2 border border-slate-300 hover:bg-slate-800 text-slate-300 rounded font-bold text-xs"
               >
                 CANCEL
               </button>
@@ -1572,19 +1572,19 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
       {/* 3. BID ON BEHALF MODAL */}
       {behalfModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-xl p-5 w-full max-w-md font-mono space-y-4">
-            <h3 className="font-bold text-white text-base">BID ON BEHALF OF FRANCHISE</h3>
-            <p className="text-xs text-slate-400">
+          <div className="bg-white border border-slate-300 rounded-xl p-5 w-full max-w-md font-mono space-y-4">
+            <h3 className="font-bold text-slate-900 text-base">BID ON BEHALF OF FRANCHISE</h3>
+            <p className="text-xs text-slate-600">
               Emergency floor intervention for terminal network/hardware outage.
             </p>
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="block text-slate-400 mb-1">Select Franchise:</label>
+                <label className="block text-slate-600 mb-1">Select Franchise:</label>
                 <select
                   value={behalfFranchiseId}
                   onChange={(e) => setBehalfFranchiseId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white focus:outline-none focus:border-emerald-500"
+                  className="w-full bg-white border border-slate-300 rounded p-2 text-slate-900 focus:outline-none focus:border-emerald-500"
                 >
                   <option value="">-- Choose Franchise --</option>
                   {franchises.map(f => (
@@ -1594,30 +1594,30 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
               </div>
 
               <div>
-                <label className="block text-slate-400 mb-1">Bid Amount (Credits):</label>
+                <label className="block text-slate-600 mb-1">Bid Amount (Credits):</label>
                 <input
                   type="number"
                   value={behalfAmount}
                   onChange={(e) => setBehalfAmount(parseInt(e.target.value, 10) || 0)}
                   min={nextMinBid}
                   step={calculateBidIncrement(currentBidPrice)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white focus:outline-none focus:border-emerald-500 font-bold"
+                  className="w-full bg-white border border-slate-300 rounded p-2 text-slate-900 focus:outline-none focus:border-emerald-500 font-bold"
                 />
                 <span className="text-[10px] text-slate-500 mt-1 block">Minimum next valid bid: {nextMinBid} Cr</span>
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">
               <button
                 onClick={() => setBehalfModalOpen(false)}
-                className="px-4 py-2 border border-slate-700 hover:bg-slate-800 text-slate-300 rounded font-bold text-xs"
+                className="px-4 py-2 border border-slate-300 hover:bg-slate-800 text-slate-300 rounded font-bold text-xs"
               >
                 CANCEL
               </button>
               <button
                 onClick={handleConfirmBehalfBid}
                 disabled={!behalfFranchiseId || behalfAmount < nextMinBid || isActionLoading}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded font-bold text-xs disabled:opacity-40"
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-slate-900 rounded font-bold text-xs disabled:opacity-40"
               >
                 {isActionLoading ? 'SUBMITTING...' : 'SUBMIT BEHALF BID'}
               </button>
@@ -1629,15 +1629,15 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
       {/* 4. DIRECT ASSIGN MODAL */}
       {directAssignModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-xl p-5 w-full max-w-md font-mono space-y-4">
-            <h3 className="font-bold text-white text-base">DIRECT PLAYER ALLOCATION</h3>
-            <p className="text-xs text-slate-400">
+          <div className="bg-white border border-slate-300 rounded-xl p-5 w-full max-w-md font-mono space-y-4">
+            <h3 className="font-bold text-slate-900 text-base">DIRECT PLAYER ALLOCATION</h3>
+            <p className="text-xs text-slate-600">
               Direct administrative assignment bypassing live bidding ladder.
             </p>
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="block text-slate-400 mb-1">Select Player:</label>
+                <label className="block text-slate-600 mb-1">Select Player:</label>
                 <select
                   value={directAssignPlayerId}
                   onChange={(e) => {
@@ -1645,7 +1645,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
                     const p = allLots.find(l => l.id === e.target.value || l.playerId === e.target.value);
                     if (p) setDirectAssignPrice(p.basePrice || 20);
                   }}
-                  className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white focus:outline-none focus:border-cyan-500"
+                  className="w-full bg-white border border-slate-300 rounded p-2 text-slate-900 focus:outline-none focus:border-cyan-500"
                 >
                   <option value="">-- Choose Available Player --</option>
                   {allLots.filter(l => l.status === 'AVAILABLE' || l.status === 'UNSOLD').map(l => (
@@ -1657,11 +1657,11 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
               </div>
 
               <div>
-                <label className="block text-slate-400 mb-1">Select Franchise:</label>
+                <label className="block text-slate-600 mb-1">Select Franchise:</label>
                 <select
                   value={directAssignFranchiseId}
                   onChange={(e) => setDirectAssignFranchiseId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white focus:outline-none focus:border-cyan-500"
+                  className="w-full bg-white border border-slate-300 rounded p-2 text-slate-900 focus:outline-none focus:border-cyan-500"
                 >
                   <option value="">-- Choose Franchise --</option>
                   {franchises.map(f => (
@@ -1671,28 +1671,28 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
               </div>
 
               <div>
-                <label className="block text-slate-400 mb-1">Agreed Price (Credits):</label>
+                <label className="block text-slate-600 mb-1">Agreed Price (Credits):</label>
                 <input
                   type="number"
                   value={directAssignPrice}
                   onChange={(e) => setDirectAssignPrice(parseInt(e.target.value, 10) || 0)}
                   min={20}
-                  className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white focus:outline-none focus:border-cyan-500 font-bold"
+                  className="w-full bg-white border border-slate-300 rounded p-2 text-slate-900 focus:outline-none focus:border-cyan-500 font-bold"
                 />
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">
               <button
                 onClick={() => setDirectAssignModalOpen(false)}
-                className="px-4 py-2 border border-slate-700 hover:bg-slate-800 text-slate-300 rounded font-bold text-xs"
+                className="px-4 py-2 border border-slate-300 hover:bg-slate-800 text-slate-300 rounded font-bold text-xs"
               >
                 CANCEL
               </button>
               <button
                 onClick={handleConfirmDirectAssign}
                 disabled={!directAssignPlayerId || !directAssignFranchiseId || directAssignPrice <= 0 || isActionLoading}
-                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded font-bold text-xs disabled:opacity-40"
+                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-slate-900 rounded font-bold text-xs disabled:opacity-40"
               >
                 {isActionLoading ? 'ALLOCATING...' : 'CONFIRM ALLOCATION'}
               </button>
@@ -1704,15 +1704,15 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
       {/* 5. RELAX BUCKET MINIMUM MODAL (Super Admin Only) */}
       {relaxModalOpen && capabilities.canRelaxBucketMinimum && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-purple-500/60 rounded-xl p-5 w-full max-w-md font-mono space-y-4">
-            <h3 className="font-bold text-white text-base">RELAX BUCKET MINIMUM (UNIFORM)</h3>
-            <p className="text-xs text-slate-400">
+          <div className="bg-white border border-purple-500/60 rounded-xl p-5 w-full max-w-md font-mono space-y-4">
+            <h3 className="font-bold text-slate-900 text-base">RELAX BUCKET MINIMUM (UNIFORM)</h3>
+            <p className="text-xs text-slate-600">
               Super Admin authority to uniformly reduce a mandatory bucket quota across all 11 franchises.
             </p>
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="block text-slate-400 mb-1">Mandatory Bucket:</label>
+                <label className="block text-slate-600 mb-1">Mandatory Bucket:</label>
                 <select
                   value={relaxBucket}
                   onChange={(e) => {
@@ -1720,7 +1720,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
                     setRelaxBucket(b);
                     setRelaxNewMin(Math.max(0, (bucketMinimums[b] || 2) - 1));
                   }}
-                  className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white focus:outline-none focus:border-purple-500"
+                  className="w-full bg-white border border-slate-300 rounded p-2 text-slate-900 focus:outline-none focus:border-purple-500"
                 >
                   {MANDATORY_BUCKETS.map((b: BucketId) => (
                     <option key={b} value={b}>{b} — {BUCKET_LABELS[b]} (Current: {bucketMinimums[b] || 0})</option>
@@ -1729,33 +1729,33 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
               </div>
 
               <div>
-                <label className="block text-slate-400 mb-1">New Uniform Minimum Requirement:</label>
+                <label className="block text-slate-600 mb-1">New Uniform Minimum Requirement:</label>
                 <input
                   type="number"
                   value={relaxNewMin}
                   onChange={(e) => setRelaxNewMin(Math.max(0, parseInt(e.target.value, 10) || 0))}
                   min={0}
                   max={(bucketMinimums[relaxBucket] || 2)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white focus:outline-none focus:border-purple-500 font-bold"
+                  className="w-full bg-white border border-slate-300 rounded p-2 text-slate-900 focus:outline-none focus:border-purple-500 font-bold"
                 />
               </div>
 
               <div className="p-2.5 rounded bg-purple-950/30 border border-purple-800/40 text-[10px] text-purple-300">
-                ⚠️ Warning: Applying relaxation recalculates max bids and unlocks slot protections across all 11 franchises immediately.
+                Warning: Applying relaxation recalculates max bids and unlocks slot protections across all 11 franchises immediately.
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">
               <button
                 onClick={() => setRelaxModalOpen(false)}
-                className="px-4 py-2 border border-slate-700 hover:bg-slate-800 text-slate-300 rounded font-bold text-xs"
+                className="px-4 py-2 border border-slate-300 hover:bg-slate-800 text-slate-300 rounded font-bold text-xs"
               >
                 CANCEL
               </button>
               <button
                 onClick={handleConfirmRelax}
                 disabled={isActionLoading}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded font-bold text-xs shadow-md shadow-purple-600/30"
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-slate-900 rounded font-bold text-xs shadow-md shadow-purple-600/30"
               >
                 {isActionLoading ? 'APPLYING...' : 'APPLY RELAXATION'}
               </button>

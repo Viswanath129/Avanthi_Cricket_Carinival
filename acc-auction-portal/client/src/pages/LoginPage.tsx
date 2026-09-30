@@ -17,7 +17,7 @@ const FRANCHISE_TEAMS = [
 ];
 
 export default function LoginPage() {
-  const [activeTab, setActiveTab] = useState<'FRANCHISE' | 'PLAYER' | 'ADMIN' | 'OPERATOR'>('FRANCHISE');
+  const [activeTab, setActiveTab] = useState<'PLAYER' | 'FRANCHISE' | 'ADMIN' | 'OPERATOR'>('PLAYER');
 
   // Franchise State
   const [selectedFranchiseId, setSelectedFranchiseId] = useState<number>(1);
@@ -27,6 +27,7 @@ export default function LoginPage() {
   // Player & Admin / Operator State
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -123,7 +124,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col items-center justify-center p-4 md:p-6 transition-colors">
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col items-center justify-center p-4 md:p-6 transition-colors">
       <div className="w-full max-w-md space-y-6">
         {/* Tournament Brand Header */}
         <div className="text-center space-y-1">
@@ -131,64 +132,77 @@ export default function LoginPage() {
             <span className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-500 font-serif font-bold text-base flex items-center justify-center">
               ACC
             </span>
-            <span className="font-serif font-bold text-xl tracking-tight text-slate-900 dark:text-slate-100">
+            <span className="font-serif font-bold text-xl tracking-tight text-slate-900">
               Avanthi Cricket Carnival
             </span>
           </div>
-          <h1 className="font-serif font-bold text-2xl md:text-3xl text-slate-900 dark:text-slate-100">
+          <h1 className="font-serif font-bold text-2xl md:text-3xl text-slate-900">
             SIGN IN
           </h1>
-          <p className="text-xs uppercase tracking-widest font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
+          <p className="text-xs uppercase tracking-widest font-mono text-emerald-600 font-semibold">
             ACC 2026 \u00B7 Unified Auction Terminal
           </p>
         </div>
 
         {/* Card Surface */}
-        <div className="backdrop-blur-2xl bg-white/85 dark:bg-slate-900/85 border border-white/60 dark:border-white/10 rounded-3xl p-6 md:p-8 shadow-2xl shadow-slate-200/50 dark:shadow-black/50 space-y-6">
-          {/* Role Navigation Tabs */}
-          <div className="grid grid-cols-3 gap-1 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-2xl">
-            {(['FRANCHISE', 'PLAYER', 'ADMIN'] as const).map((tab) => (
+        <div className="backdrop-blur-2xl bg-white/90 border border-white/60 rounded-3xl p-6 md:p-8 shadow-2xl shadow-slate-200/50 space-y-6">
+          {/* Role Navigation Tabs: 4 First-Class Roles */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5 p-1.5 bg-slate-100 rounded-2xl">
+            {[
+              { id: 'PLAYER', label: 'PLAYER', sub: 'Candidate' },
+              { id: 'FRANCHISE', label: 'FRANCHISE', sub: 'Bidding' },
+              { id: 'ADMIN', label: 'SUPER ADMIN', sub: 'Director' },
+              { id: 'OPERATOR', label: 'OPERATOR', sub: 'Floor Desk' },
+            ].map((tab) => (
               <button
-                key={tab}
+                key={tab.id}
                 type="button"
                 onClick={() => {
-                  setActiveTab(tab);
+                  setActiveTab(tab.id as any);
                   setError('');
                 }}
-                className={`min-h-[44px] py-2 rounded-xl text-xs font-bold transition-all ${
-                  activeTab === tab
-                    ? 'bg-emerald-600 text-white shadow-md'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                className={`min-h-[46px] py-2 px-1 rounded-xl text-xs font-bold transition-all flex flex-col items-center justify-center ${
+                  activeTab === tab.id
+                    ? tab.id === 'OPERATOR'
+                      ? 'bg-amber-600 text-white shadow-md'
+                      : 'bg-emerald-600 text-white shadow-md'
+                    : 'text-slate-600  hover:text-slate-900 :text-slate-200'
                 }`}
               >
-                {tab}
+                <span>{tab.label}</span>
+                <span className="text-[10px] opacity-75 font-normal">{tab.sub}</span>
               </button>
             ))}
           </div>
 
           {error && (
-            <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 text-xs font-semibold flex items-center gap-2">
-              <span>\u26A0</span>
+            <div className="p-3 rounded-xl bg-red-50 border border-red-300 text-red-600 text-xs font-semibold flex items-center gap-2">
+              
               <span>{error}</span>
             </div>
           )}
 
-          {/* TAB 1: FRANCHISE LOGIN */}
+          {/* TAB: FRANCHISE LOGIN */}
           {activeTab === 'FRANCHISE' && (
-            <form onSubmit={handleFranchiseLogin} className="space-y-5 animate-in fade-in duration-200">
+            <form onSubmit={handleFranchiseLogin} autoComplete="off" className="space-y-4 animate-in fade-in duration-200">
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-slate-700 flex items-center gap-2">
+                
+                <span>Access official franchise bidding paddle, purse monitor, and squad quotas.</span>
+              </div>
+
               {/* TARGET FRANCHISE DROPDOWN */}
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-2">
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
                   Target Franchise (11 Teams)
                 </label>
                 <select
                   value={selectedFranchiseId}
                   onChange={(e) => setSelectedFranchiseId(Number(e.target.value))}
-                  className="w-full min-h-[48px] px-4 py-3 bg-white/60 dark:bg-slate-900/60 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm transition-all"
+                  className="w-full min-h-[48px] px-4 py-3 bg-white/60 border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm transition-all"
                 >
                   {FRANCHISE_TEAMS.map((team) => (
                     <option key={team.id} value={team.id}>
-                      Team {team.id}: {team.name}
+                      Team {team.id}: {team.name} ({team.code})
                     </option>
                   ))}
                 </select>
@@ -196,13 +210,13 @@ export default function LoginPage() {
 
               {/* AUTHENTICATION IDENTITY TOGGLE */}
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-2">
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
                   Authentication Identity
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   {[
-                    { id: 'COORDINATOR', label: 'COORDINATOR' },
-                    { id: 'TEAM_LEAD', label: 'TEAM LEAD' },
+                    { id: 'COORDINATOR', label: 'COORDINATOR (Faculty)' },
+                    { id: 'TEAM_LEAD', label: 'TEAM LEAD (Captain)' },
                   ].map((identity) => (
                     <button
                       key={identity.id}
@@ -210,34 +224,50 @@ export default function LoginPage() {
                       onClick={() => setIdentityType(identity.id as any)}
                       className={`min-h-[44px] py-2 px-3 rounded-xl text-xs font-bold border transition-all ${
                         identityType === identity.id
-                          ? 'bg-emerald-500/20 border-emerald-500 text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-500'
-                          : 'bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                          ? 'bg-emerald-500/20 border-emerald-500 text-emerald-700  ring-1 ring-emerald-500'
+                          : 'bg-slate-100  border-slate-300  text-slate-700  hover:bg-slate-200 :bg-slate-700'
                       }`}
                     >
                       {identity.label}
                     </button>
                   ))}
                 </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                  {identityType === 'COORDINATOR'
-                    ? 'Faculty Coordinator (Primary Authorized Account)'
-                    : 'Captain / Vice-Captain (Secondary Team Lead Identity)'}
-                </p>
               </div>
 
               {/* PIN INPUT */}
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-2">
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
                   Franchise Security PIN
                 </label>
-                <input
-                  type="password"
-                  value={franchisePin}
-                  onChange={(e) => setFranchisePin(e.target.value)}
-                  placeholder="\u2022\u2022\u2022\u2022\u2022\u2022"
-                  maxLength={12}
-                  className="w-full min-h-[48px] px-4 py-3 bg-white/60 dark:bg-slate-900/60 border border-slate-300 dark:border-slate-700 rounded-xl font-mono text-base tracking-widest text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm transition-all"
-                />
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={franchisePin}
+                    onChange={(e) => setFranchisePin(e.target.value)}
+                    placeholder="••••••••"
+                    maxLength={16}
+                    autoComplete="new-password"
+                    className="w-full min-h-[48px] px-4 pr-12 py-3 bg-white/60 border border-slate-300 rounded-xl font-mono text-base tracking-widest text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm transition-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 :text-slate-200 p-1"
+                    title={showPassword ? 'Hide PIN' : 'Show PIN'}
+                  >
+                    {showPassword ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-[11px] text-slate-400 font-medium">Demo:</span>
+                  <button
+                    type="button"
+                    onClick={() => setFranchisePin('Titans@2026')}
+                    className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-300 hover:border-emerald-500"
+                  >
+                    Titans PIN
+                  </button>
+                </div>
               </div>
 
               {/* ENTER FRANCHISE TERMINAL BUTTON */}
@@ -252,7 +282,7 @@ export default function LoginPage() {
                     AUTHENTICATING TERMINAL...
                   </span>
                 ) : (
-                  '[ ENTER FRANCHISE TERMINAL ] \u2192'
+                  '[ ENTER FRANCHISE TERMINAL ] →'
                 )}
               </button>
 
@@ -263,7 +293,7 @@ export default function LoginPage() {
                     e.preventDefault();
                     alert('Contact Super Admin for Franchise PIN recovery.');
                   }}
-                  className="text-xs text-slate-500 dark:text-slate-400 hover:underline"
+                  className="text-xs text-emerald-600 hover:underline font-semibold"
                 >
                   Forgot Franchise Credentials?
                 </a>
@@ -271,71 +301,193 @@ export default function LoginPage() {
             </form>
           )}
 
-          {/* TAB 2 & 3: PLAYER / ADMIN / OPERATOR LOGIN */}
+          {/* TAB: PLAYER / ADMIN / OPERATOR LOGIN */}
           {(activeTab === 'PLAYER' || activeTab === 'ADMIN' || activeTab === 'OPERATOR') && (
-            <form onSubmit={handleGenericLogin} className="space-y-4 animate-in fade-in duration-200">
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-2">
-                  {activeTab === 'PLAYER' ? 'Registered Mobile Number' : 'Admin Username / Email'}
-                </label>
-                <input
-                  type={activeTab === 'PLAYER' ? 'tel' : 'text'}
-                  value={identifier}
-                  onChange={(e) => setIdentifier(e.target.value)}
-                  placeholder={activeTab === 'PLAYER' ? '10-digit mobile number' : 'admin@avanthi.edu.in'}
-                  className="w-full min-h-[48px] px-4 py-3 bg-white/60 dark:bg-slate-900/60 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
-                />
+            <form onSubmit={handleGenericLogin} autoComplete="off" className="space-y-4 animate-in fade-in duration-200">
+              <div
+                className={`p-3 rounded-xl border text-xs flex items-center gap-2 ${
+                  activeTab === 'OPERATOR'
+                    ? 'bg-amber-50  border-amber-200  text-slate-700 '
+                    : 'bg-emerald-50  border-emerald-200  text-slate-700 '
+                }`}
+              >
+                
+                <span>
+                  {activeTab === 'PLAYER'
+                    ? 'View auction nomination, verification status, and sold results.'
+                    : activeTab === 'OPERATOR'
+                    ? 'Floor auction execution: Hammer, Skip, Pause/Resume, and Behalf Bids.'
+                    : 'Tournament Directorate: Full governance, quota rules, and database.'}
+                </span>
               </div>
 
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-2">
-                  Password / PIN
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
+                  {activeTab === 'PLAYER' ? 'Roll Number or Registered Mobile' : 'Admin Username or Email'}
                 </label>
                 <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="\u2022\u2022\u2022\u2022\u2022\u2022"
-                  className="w-full min-h-[48px] px-4 py-3 bg-white/60 dark:bg-slate-900/60 border border-slate-300 dark:border-slate-700 rounded-xl font-mono text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
+                  type={activeTab === 'PLAYER' ? 'text' : 'text'}
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
+                  placeholder={
+                    activeTab === 'PLAYER'
+                      ? 'e.g. 26811A0501 or mobile number'
+                      : activeTab === 'OPERATOR'
+                      ? 'e.g. handler or operator'
+                      : 'e.g. admin or superadmin@acc.edu'
+                  }
+                  autoComplete="off"
+                  className="w-full min-h-[48px] px-4 py-3 bg-white/60 border border-slate-300 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
                 />
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-[11px] text-slate-400 font-medium">Demo:</span>
+                  {activeTab === 'PLAYER' ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIdentifier('26811A0501');
+                          setPassword('Player@2026');
+                        }}
+                        className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-300 hover:border-emerald-500"
+                      >
+                        26811A0501 (B1)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIdentifier('25815A0403');
+                          setPassword('Player@2026');
+                        }}
+                        className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-300 hover:border-emerald-500"
+                      >
+                        25815A0403 (B3)
+                      </button>
+                    </>
+                  ) : activeTab === 'OPERATOR' ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIdentifier('handler');
+                        setPassword('Handler@2026');
+                      }}
+                      className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-300 hover:border-amber-500"
+                    >
+                      handler / Handler@2026
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIdentifier('admin');
+                        setPassword('ACC@Admin#2026!');
+                      }}
+                      className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-300 hover:border-emerald-500"
+                    >
+                      admin / ACC@Admin#2026!
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
+                  Password / PIN
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    autoComplete="new-password"
+                    className="w-full min-h-[48px] px-4 pr-12 py-3 bg-white/60 border border-slate-300 rounded-xl font-mono text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 :text-slate-200 p-1"
+                    title={showPassword ? 'Hide Password' : 'Show Password'}
+                  >
+                    {showPassword ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <a
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    alert(`Contact Directorate for ${activeTab} credential reset.`);
+                  }}
+                  className="text-xs text-emerald-600 hover:underline font-semibold"
+                >
+                  Forgot Password or PIN?
+                </a>
               </div>
 
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="w-full min-h-[48px] py-3.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-lg shadow-emerald-600/25 ring-2 ring-emerald-400/40 transition-all active:scale-95 flex items-center justify-center"
+                className={`w-full min-h-[48px] py-3.5 px-4 rounded-xl text-white font-bold text-sm shadow-lg ring-2 transition-all active:scale-95 flex items-center justify-center ${
+                  activeTab === 'OPERATOR'
+                    ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-600/25 ring-amber-400/40'
+                    : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/25 ring-emerald-400/40'
+                }`}
               >
                 {isSubmitting ? 'SIGNING IN...' : `SIGN IN AS ${activeTab}`}
               </button>
             </form>
           )}
 
-          {/* MISSING ELEMENTS ADDED (Per Section 2.2) */}
-          <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-2 text-center text-xs">
+          {/* Dedicated Public Spectator Banner (No Login Required) */}
+          <div className="p-3.5 rounded-2xl bg-gradient-to-r from-blue-500/10 to-emerald-500/10 border border-blue-500/20 flex flex-col sm:flex-row items-center justify-between gap-3">
             <div>
-              <span className="text-slate-500 dark:text-slate-400">New franchise? </span>
-              <Link href="/franchise/register" className="font-bold text-emerald-600 dark:text-emerald-400 hover:underline">
-                Register your team \u2192
-              </Link>
+              <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                Public Spectator Live Arena
+              </div>
+              <div className="text-[11px] text-slate-500">
+                Watch live auction lots, bidding paddles, and squad rosters with zero login
+              </div>
             </div>
-            <div>
-              <span className="text-slate-500 dark:text-slate-400">Hall Official? </span>
-              <button
-                type="button"
-                onClick={() => setActiveTab('OPERATOR')}
-                className="font-bold text-slate-700 dark:text-slate-300 hover:underline"
+            <Link
+              href="/live"
+              className="w-full sm:w-auto px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold text-center whitespace-nowrap shadow-sm transition-all"
+            >
+              ENTER PUBLIC VIEW →
+            </Link>
+          </div>
+
+          {/* Tournament Registration Services */}
+          <div className="pt-4 border-t border-slate-200 space-y-2">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">
+              Tournament Services & Enrollment
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Link
+                href="/register"
+                className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 hover:border-emerald-500 transition-all flex items-center gap-2 group"
               >
-                Operator login
-              </button>
-              <span className="mx-2 text-slate-400">\u00B7</span>
-              <Link href="/live" className="font-bold text-slate-700 dark:text-slate-300 hover:underline">
-                Spectator view
+                
+                <div>
+                  <div className="text-xs font-bold text-slate-800 group-hover:text-emerald-600 :text-emerald-400">
+                    Player Registration
+                  </div>
+                  <div className="text-[10px] text-slate-500">Nominate for ACC 2026 Pool</div>
+                </div>
               </Link>
-            </div>
-            <div>
-              <span className="text-slate-500 dark:text-slate-400">New tournament player? </span>
-              <Link href="/register" className="font-bold text-emerald-600 dark:text-emerald-400 hover:underline">
-                [ PLAYER REGISTRATION ]
+              <Link
+                href="/franchise/register"
+                className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 hover:border-emerald-500 transition-all flex items-center gap-2 group"
+              >
+                
+                <div>
+                  <div className="text-xs font-bold text-slate-800 group-hover:text-emerald-600 :text-emerald-400">
+                    Register Franchise
+                  </div>
+                  <div className="text-[10px] text-slate-500">Enroll Department Team</div>
+                </div>
               </Link>
             </div>
           </div>

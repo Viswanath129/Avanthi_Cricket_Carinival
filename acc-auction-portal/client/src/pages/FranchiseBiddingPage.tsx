@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { calculateMaxBid, calculateBidIncrement, calculateNextBid } from '@shared/engine/bidEngine';
 import { checkBucketEligibility } from '@shared/engine/bucketEligibility';
 import { BucketId, DEFAULT_SQUAD_RULES, MANDATORY_BUCKETS, BUCKET_LABELS } from '@shared/types';
+import { useServerTime } from '@/hooks/useServerTime';
 import { nanoid } from 'nanoid';
 
 const EDITION_ID = 'acc-2026';
@@ -68,8 +69,8 @@ export default function FranchiseBiddingPage() {
     { id: '11', name: 'Staff Super Kings', status: 'IN_PLAY' },
   ]);
 
+  const { isOnline, computeRemainingSeconds } = useServerTime();
   const [timeLeft, setTimeLeft] = useState<number>(20);
-  const [isOnline, setIsOnline] = useState<boolean>(true);
   const [showReconnectBanner, setShowReconnectBanner] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -92,36 +93,23 @@ export default function FranchiseBiddingPage() {
     }
   }, [userDoc]);
 
-  // Network connection monitor
+  // Network connection monitor & reconnect banner
+  const prevOnlineRef = useRef<boolean>(isOnline);
   useEffect(() => {
-    const handleOnline = () => {
-      setIsOnline(true);
+    if (!prevOnlineRef.current && isOnline) {
       setShowReconnectBanner(true);
-      setTimeout(() => setShowReconnectBanner(false), 5000);
-    };
-    const handleOffline = () => {
-      setIsOnline(false);
-    };
+      const timer = setTimeout(() => setShowReconnectBanner(false), 5000);
+      return () => clearTimeout(timer);
+    }
+    prevOnlineRef.current = isOnline;
+  }, [isOnline]);
 
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
-
-  // Timer loop
+  // Authoritative server timer loop
   useEffect(() => {
-    const timer = setInterval(() => {
-      if (lot?.status === 'PAUSED') return;
-      if (lot?.timerDeadline) {
-        const remaining = Math.max(0, Math.ceil((lot.timerDeadline - Date.now()) / 1000));
-        setTimeLeft(remaining);
-      }
-    }, 200);
-    return () => clearInterval(timer);
-  }, [lot]);
+    if (lot?.status === 'PAUSED') return;
+    const remaining = computeRemainingSeconds(lot?.timerDeadline, lot?.status === 'PAUSED');
+    setTimeLeft(remaining);
+  }, [lot, computeRemainingSeconds]);
 
   // Calculate Next Legal Bid
   const currentBid = lot?.currentBid || lot?.basePrice || 20;

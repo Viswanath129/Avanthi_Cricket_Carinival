@@ -506,7 +506,7 @@ export default function Home() {
     };
     setSalesHistory((prev) => [sale, ...prev]);
 
-    notify(`🔨 SOLD! Lot ${currentPlayer.lot} (${currentPlayer.name}) hammered to ${winner.name} for ₹${currentBid}`);
+    notify(` SOLD! Lot ${currentPlayer.lot} (${currentPlayer.name}) hammered to ${winner.name} for ₹${currentBid}`);
 
     // Advance to next lot
     if (currentLotIndex < playersList.length - 1) {
@@ -549,7 +549,7 @@ export default function Home() {
       prev.map((s, idx) => (idx === saleIndex ? { ...s, undone: true } : s))
     );
 
-    notify(`✅ UNDO EXECUTED: Sale for Lot #${sale.lot} (${sale.player.name}) undone. ₹${sale.amount} refunded to ${sale.franchiseName}, slot restored.`);
+    notify(` UNDO EXECUTED: Sale for Lot #${sale.lot} (${sale.player.name}) undone. ₹${sale.amount} refunded to ${sale.franchiseName}, slot restored.`);
     setShowUndoModal(false);
   };
 
@@ -572,7 +572,7 @@ export default function Home() {
             <div className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#10b981] to-[#047857] shadow-[0_0_25px_rgba(16,185,129,0.3)]">
               <span className="font-display font-black text-lg tracking-wider text-black">ACC</span>
               <span className="absolute -bottom-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[#ff9f43] text-[8px] font-bold text-black ring-2 ring-[#080c0a]">
-                ⚡
+                
               </span>
             </div>
             <div>
@@ -1211,7 +1211,7 @@ function AdminControlRoom({
                   </div>
                   {isScarce && (
                     <p className="font-mono text-[9px] text-[#ef4444]">
-                      ⚠ Scarcity Warning: Low inventory remaining!
+                      Scarcity Warning: Low inventory remaining!
                     </p>
                   )}
                 </div>
@@ -1568,7 +1568,7 @@ function FranchiseBiddingInterface({
       <div className="mt-6 space-y-3">
         {isLeader ? (
           <div className="h-16 rounded-2xl bg-[#ffd166]/15 border-2 border-[#ffd166] flex items-center justify-center text-center text-[#ffd166] font-display font-black text-lg shadow-[0_0_30px_rgba(255,209,102,0.2)]">
-            🏆 YOUR TEAM HOLDS THE HIGHEST BID!
+             YOUR TEAM HOLDS THE HIGHEST BID!
           </div>
         ) : (
           <button
@@ -2006,7 +2006,7 @@ function RegistrationRollParserView({ notify }: { notify: (msg: string) => void 
             }`}
           >
             <p className="font-mono text-[10px] uppercase">Batting Ability</p>
-            <p className="font-display font-bold text-base mt-1">{canBat ? "Active Batter ✓" : "No"}</p>
+            <p className="font-display font-bold text-base mt-1">{canBat ? "Active Batter " : "No"}</p>
           </button>
 
           <button
@@ -2018,7 +2018,7 @@ function RegistrationRollParserView({ notify }: { notify: (msg: string) => void 
             }`}
           >
             <p className="font-mono text-[10px] uppercase">Bowling Ability</p>
-            <p className="font-display font-bold text-base mt-1">{canBowl ? "Active Bowler ✓" : "No"}</p>
+            <p className="font-display font-bold text-base mt-1">{canBowl ? "Active Bowler " : "No"}</p>
           </button>
 
           <button
@@ -2031,7 +2031,7 @@ function RegistrationRollParserView({ notify }: { notify: (msg: string) => void 
           >
             <p className="font-mono text-[10px] uppercase">Wicket Keeping</p>
             <p className="font-display font-bold text-base mt-1">
-              {isWicketKeeper ? "Wicket Keeper ✓" : "No"}
+              {isWicketKeeper ? "Wicket Keeper " : "No"}
             </p>
           </button>
         </div>
@@ -2233,7 +2233,7 @@ function AcceptanceTestsModal({ onClose }: { onClose: () => void }) {
                       passed ? "bg-[#10b981]/20 text-[#10b981]" : "bg-[#ef4444]/20 text-[#ef4444]"
                     }`}
                   >
-                    {passed ? "✓ PASSED" : "FAILED"}
+                    {passed ? " PASSED" : "FAILED"}
                   </span>
                 </div>
               </div>
