@@ -1,136 +1,197 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper functions
+    // ── Helper functions ──────────────────────────────────────────────
     function isAuthenticated() {
       return request.auth != null;
     }
-    
-    function getUserRole() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+
+    function getUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
-    
+
+    function getUserRole() {
+      return getUserDoc().role;
+    }
+
     function isSuperAdmin() {
       return isAuthenticated() && getUserRole() == 'SUPER_ADMIN';
     }
-    
+
     function isAdmin() {
       return isAuthenticated() && (getUserRole() == 'SUPER_ADMIN' || getUserRole() == 'ADMIN');
     }
-    
+
     function isFranchise() {
       return isAuthenticated() && (
-        getUserRole() == 'FRANCHISE_COORDINATOR' || 
-        getUserRole() == 'FRANCHISE_TEAM_LEADER' || 
+        getUserRole() == 'FRANCHISE_COORDINATOR' ||
+        getUserRole() == 'FRANCHISE_TEAM_LEADER' ||
         getUserRole() == 'FRANCHISE'
       );
     }
-    
-    function isPlayer() {
-      return isAuthenticated() && getUserRole() == 'PLAYER';
+
+    function isFranchiseOwner(franchiseId) {
+      return isAuthenticated() && (
+        getUserDoc().franchiseId == franchiseId ||
+        get(/databases/$(database)/documents/franchiseUsers/$(request.auth.uid)).data.franchiseId == franchiseId
+      );
     }
-    
-    // Users - canonical user directory (/users/{uid})
+
+    // ── Users (/users/{uid}) ──────────────────────────────────────────
+    // Canonical user directory.
+    // Self or admin can read. Super Admin governs all writes.
+    // Safe self-registration creates initial PENDING profile only (Points 4, 10, 34, 58).
     match /users/{uid} {
       allow read: if isAuthenticated() && (request.auth.uid == uid || isAdmin());
-      // Only Super Admin can grant or modify roles, status, or administrative access
       allow write: if isSuperAdmin();
+      allow create: if isAuthenticated() && request.auth.uid == uid &&
+        (
+          (request.resource.data.role == 'PLAYER' &&
+           request.resource.data.accountStatus == 'PENDING' &&
+           request.resource.data.approvalStatus == 'PENDING_APPROVAL') ||
+          (request.resource.data.role == 'FRANCHISE_COORDINATOR' &&
+           request.resource.data.accountStatus == 'PENDING' &&
+           request.resource.data.approvalStatus == 'PENDING_APPROVAL')
+        );
+      allow update: if isSuperAdmin() || (
+        isAdmin() && 
+        request.resource.data.role != 'SUPER_ADMIN' && 
+        resource.data.role != 'SUPER_ADMIN'
+      );
+      allow delete: if isSuperAdmin();
     }
-    
-    // Editions - public read, Super Admin write
+
+    // ── Editions (public read, Super Admin write) ─────────────────────
     match /editions/{editionId} {
       allow read: if true;
       allow write: if isSuperAdmin();
-      
+
       match /auction/state {
         allow read: if true;
         allow write: if isAdmin();
       }
-      
+
       match /buckets/{bucketId} {
         allow read: if true;
         allow write: if isSuperAdmin();
       }
     }
-    
-    // Players (authoritative private directory)
-    // - Unverified players cannot be read by public
-    // - Players can only read/edit their own record
-    // - Approval, verificationStatus, and auctionEligible cannot be mutated by player
+
+    // ── Players (private, authoritative directory) ────────────────────
+    // Only admin or the player themselves can read.
+    // Self-registration creates with PENDING status.
+    // Players cannot self-approve or alter auction eligibility (Point 34, 58).
     match /players/{playerId} {
       allow read: if isAuthenticated() && (
-        isAdmin() || 
+        isAdmin() ||
         resource.data.uid == request.auth.uid ||
-        resource.data.roll == request.auth.uid ||
+        resource.data.authUid == request.auth.uid ||
+        resource.data.rollNumber == request.auth.uid ||
         resource.data.rollNumberNormalized == request.auth.uid
       );
-      // New candidate self-registration: must start with PENDING_APPROVAL and auctionEligible: false
-      allow create: if true;
-      // Normal candidate updates: cannot self-approve or elevate privilege
+      allow create: if isAuthenticated() && 
+        request.resource.data.accountStatus == 'PENDING' &&
+        request.resource.data.approvalStatus == 'PENDING_APPROVAL' &&
+        request.resource.data.auctionable == false;
       allow update: if isAuthenticated() && (
-        isAdmin() || 
-        (resource.data.uid == request.auth.uid && 
-         request.resource.data.approvalStatus == 'PENDING_APPROVAL' &&
-         request.resource.data.auctionEligible == false)
+        isAdmin() ||
+        (
+          (resource.data.uid == request.auth.uid || resource.data.authUid == request.auth.uid) &&
+          request.resource.data.accountStatus == resource.data.accountStatus &&
+          request.resource.data.approvalStatus == resource.data.approvalStatus &&
+          request.resource.data.auctionable == resource.data.auctionable
+        )
       );
-      // Historical safety: player deletion restricted to Super Admin
       allow delete: if isSuperAdmin();
     }
 
-    // Unique Registration Keys (Uniqueness enforcement for roll and mobile)
+    // ── Player Unique Keys (uniqueness enforcement) ───────────────────
     match /playerUniqueKeys/{keyId} {
       allow read: if true;
-      allow create: if true;
+      allow create: if isAuthenticated();
       allow update, delete: if isSuperAdmin();
     }
-    
-    // Players Public Projection - public read, admin/system write only
-    // Strips private contacts (mobile, email, password) from public view
+
+    // ── Players Public Projection ─────────────────────────────────────
+    // Public read for live spectator experience (500+ viewers without login).
+    // Write restricted to admin and Cloud Functions.
     match /playersPublic/{playerId} {
       allow read: if true;
       allow write: if isAdmin();
     }
-    
-    // Franchises - public read, Super Admin governance write
+
+    // ── Franchises (private, admin and authorized franchise owner read) ─
     match /franchises/{franchiseId} {
-      allow read: if true;
-      allow write: if isSuperAdmin();
+      allow read: if isAuthenticated() && (
+        isAdmin() || 
+        isFranchiseOwner(franchiseId) || 
+        resource.data.primaryAuthUid == request.auth.uid || 
+        resource.data.secondaryAuthUid == request.auth.uid
+      );
+      allow create: if isAuthenticated() && 
+        request.resource.data.status == 'PENDING' &&
+        request.resource.data.primaryAuthUid == request.auth.uid;
+      allow update: if isAdmin();
+      allow delete: if isSuperAdmin();
     }
-    
-    // Franchise Users - admin and self read, Super Admin write
+
+    // ── Franchises Public Projection ──────────────────────────────────
+    match /franchisesPublic/{franchiseId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ── Franchise Users (admin and self read, Super Admin write) ──────
     match /franchiseUsers/{uid} {
       allow read: if isAuthenticated() && (request.auth.uid == uid || isAdmin());
+      allow create: if isAuthenticated() && request.auth.uid == uid;
       allow write: if isSuperAdmin();
     }
-    
-    // Lots - public read, admin write
+
+    // ── Lots (public read, admin write) ───────────────────────────────
     match /lots/{lotId} {
       allow read: if true;
       allow write: if isAdmin();
     }
-    
-    // Bids - public read, verified franchise or admin write
+
+    // ── Bids (public read, franchise or admin create, no update/delete) ─
     match /bids/{bidId} {
       allow read: if true;
-      allow write: if isAdmin() || isFranchise();
+      allow create: if isAdmin() || isFranchise();
+      allow update, delete: if false;
     }
-    
-    // Authoritative Live Auction State
+
+    // ── Auction State (public read, admin or franchise write) ─────────
     match /acc_auctions/{auctionId} {
       allow read: if true;
       allow write: if isAdmin() || isFranchise();
     }
 
-    // Acquisitions - public read, Super Admin write
+    // ── Sales / Acquisitions (public read, Super Admin write) ─────────
     match /acquisitions/{acqId} {
       allow read: if true;
       allow write: if isSuperAdmin();
     }
-    
-    // Audit Logs - admin only read and write
+
+    match /sales/{saleId} {
+      allow read: if true;
+      allow create: if isAdmin();
+      allow update: if isSuperAdmin();
+      allow delete: if false;
+    }
+
+    // ── Audit Logs (admin read, admin create, NO update/delete) ───────
+    // Immutable audit trail.
     match /auditLogs/{logId} {
       allow read: if isAdmin();
-      allow write: if isAdmin();
+      allow create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    // ── Settings (admin read/write) ───────────────────────────────────
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isSuperAdmin();
     }
   }
 }

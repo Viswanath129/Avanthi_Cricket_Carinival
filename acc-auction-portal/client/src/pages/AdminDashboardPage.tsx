@@ -108,6 +108,57 @@ export default function AdminDashboardPage() {
 
   const isSuperAdmin = userDoc?.role === 'SUPER_ADMIN';
 
+  // Realtime Users Directory State
+  const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [createAdminModal, setCreateAdminModal] = useState(false);
+  const [adminFormData, setAdminFormData] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    designation: 'Floor Handler',
+    department: 'Auction Directorate',
+    role: 'ADMIN' as 'ADMIN',
+    status: 'ACTIVE' as 'ACTIVE',
+  });
+
+  const [teamLeadModal, setTeamLeadModal] = useState(false);
+  const [teamLeadFormData, setTeamLeadFormData] = useState({
+    franchiseId: '',
+    name: '',
+    rollNumber: '',
+    mobile: '',
+    email: '',
+  });
+
+  const [adminProfile, setAdminProfile] = useState({
+    name: typeof window !== 'undefined' ? localStorage.getItem('acc_admin_name') || 'Mr. Deepak' : 'Mr. Deepak',
+    designation: typeof window !== 'undefined' ? localStorage.getItem('acc_admin_role') || 'Tournament Director & Super Administrator' : 'Tournament Director & Super Administrator',
+    email: user?.email || 'admin@acc.edu',
+    phone: typeof window !== 'undefined' ? localStorage.getItem('acc_admin_phone') || '+91 98765 43210' : '+91 98765 43210',
+  });
+
+  const handleSaveAdminProfile = async () => {
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('acc_admin_name', adminProfile.name);
+        localStorage.setItem('acc_admin_role', adminProfile.designation);
+        localStorage.setItem('acc_admin_phone', adminProfile.phone);
+      }
+      if (user?.uid) {
+        await setDoc(doc(db, 'users', user.uid), {
+          displayName: adminProfile.name,
+          designation: adminProfile.designation,
+          phone: adminProfile.phone,
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+      }
+      await logAudit('ADMIN_PROFILE_UPDATED', user?.uid || 'SUPER_ADMIN', `Updated profile: ${adminProfile.name} (${adminProfile.designation})`);
+      showToast("Admin profile saved successfully.");
+    } catch (err: any) {
+      showToast(err.message || "Failed to save profile", "error");
+    }
+  };
+
   const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'success') => {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 4000);
@@ -136,6 +187,11 @@ export default function AdminDashboardPage() {
         console.warn("Firestore franchises listen error", err);
       });
 
+      const uq = query(collection(db, 'users'));
+      const unsubUsers = onSnapshot(uq, (snap) => {
+        setAllUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      }, () => {});
+
       const aq = query(collection(db, 'auditLog'), orderBy('timestamp', 'desc'));
       const unsubAudit = onSnapshot(aq, (snap) => {
         setAuditLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -144,6 +200,7 @@ export default function AdminDashboardPage() {
       return () => {
         unsubPlayers();
         unsubFranchises();
+        unsubUsers();
         unsubAudit();
       };
     } catch {
@@ -405,6 +462,148 @@ export default function AdminDashboardPage() {
     showToast("JSON Database snapshot exported.");
   };
 
+  // --- ADMIN ACCOUNTS MANAGEMENT (Points 17 & 42) ---
+  const handleCreateAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isSuperAdmin) {
+      showToast("ACCESS DENIED: Only Super Admin can provision administrator accounts.", "error");
+      return;
+    }
+    if (!adminFormData.email.trim() || !adminFormData.name.trim()) {
+      showToast("Name and email are required for administrator provisioning.", "warning");
+      return;
+    }
+    const cleanEmail = adminFormData.email.trim().toLowerCase();
+    const newUid = `adm_${Date.now()}`;
+    const newAdminDoc = {
+      uid: newUid,
+      role: 'ADMIN',
+      name: adminFormData.name.trim(),
+      email: cleanEmail,
+      mobile: adminFormData.phone.trim() || null,
+      designation: adminFormData.designation.trim() || 'Auction Operator',
+      department: adminFormData.department.trim() || 'Tournament Directorate',
+      accountStatus: 'ACTIVE',
+      approvalStatus: 'APPROVED',
+      status: 'ACTIVE',
+      authProvider: 'password',
+      identityType: 'OPERATOR',
+      franchiseId: null,
+      playerId: null,
+      lastActive: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    try {
+      await setDoc(doc(db, 'users', newUid), newAdminDoc);
+      await logAudit('ADMIN_CREATED', newUid, `Administrator ${adminFormData.name} (${cleanEmail}) created with role ADMIN`);
+      showToast(`Administrator account created for ${adminFormData.name}.`);
+      setCreateAdminModal(false);
+      setAdminFormData({ name: '', email: '', phone: '', designation: 'Floor Handler', department: 'Auction Directorate', role: 'ADMIN', status: 'ACTIVE' });
+    } catch (err: any) {
+      showToast(`Failed to create admin: ${err.message}`, "error");
+    }
+  };
+
+  const handleToggleUserStatus = async (targetUser: any) => {
+    if (!isSuperAdmin) {
+      showToast("ACCESS DENIED: Only Super Admin can change account status.", "error");
+      return;
+    }
+    const newStatus = (targetUser.accountStatus === 'ACTIVE' || targetUser.status === 'ACTIVE') ? 'DISABLED' : 'ACTIVE';
+    try {
+      await updateDoc(doc(db, 'users', targetUser.id || targetUser.uid), {
+        accountStatus: newStatus,
+        status: newStatus,
+        updatedAt: new Date().toISOString()
+      });
+      await logAudit('USER_STATUS_TOGGLED', targetUser.email || targetUser.id, `Status set to ${newStatus}`);
+      showToast(`Account status updated to ${newStatus}.`);
+    } catch (err: any) {
+      showToast(`Failed to update status: ${err.message}`, "error");
+    }
+  };
+
+  // --- FRANCHISE APPROVAL & TEAM LEAD ONBOARDING (Points 11, 12, 13, 14, 41) ---
+  const handleApproveFranchise = async (f: any) => {
+    try {
+      await updateDoc(doc(db, 'franchises', f.id), {
+        status: 'ACTIVE',
+        accountStatus: 'ACTIVE',
+        approvalStatus: 'APPROVED',
+        updatedAt: new Date().toISOString(),
+      });
+      if (f.primaryAuthUid) {
+        try {
+          await updateDoc(doc(db, 'users', f.primaryAuthUid), {
+            status: 'ACTIVE',
+            accountStatus: 'ACTIVE',
+            approvalStatus: 'APPROVED',
+            updatedAt: new Date().toISOString(),
+          });
+        } catch {}
+      }
+      await logAudit('FRANCHISE_APPROVED', f.franchiseId || f.id, `Franchise ${f.name} approved. 1000 credits unlocked.`);
+      showToast(`Franchise ${f.name} approved & terminal activated.`);
+    } catch (err: any) {
+      showToast(`Failed to approve franchise: ${err.message}`, "error");
+    }
+  };
+
+  const handleAddTeamLead = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!teamLeadFormData.franchiseId || !teamLeadFormData.name || !teamLeadFormData.email) {
+      showToast("Franchise, name, and email are required.", "warning");
+      return;
+    }
+    const fId = teamLeadFormData.franchiseId;
+    const targetFranchise = franchises.find(f => f.franchiseId === fId || f.id === fId);
+    const cleanEmail = teamLeadFormData.email.trim().toLowerCase();
+    const leadUid = `tl_${Date.now()}`;
+
+    const teamLeadDoc = {
+      uid: leadUid,
+      role: 'FRANCHISE_TEAM_LEADER',
+      franchiseId: fId,
+      identityType: 'TEAM_LEADER',
+      name: teamLeadFormData.name.trim(),
+      playerId: teamLeadFormData.rollNumber.trim().toUpperCase() || null,
+      email: cleanEmail,
+      mobile: teamLeadFormData.mobile.trim() || null,
+      accountStatus: 'ACTIVE',
+      approvalStatus: 'APPROVED',
+      status: 'ACTIVE',
+      authProvider: 'google.com',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    try {
+      await setDoc(doc(db, 'users', leadUid), teamLeadDoc);
+      await setDoc(doc(db, 'franchiseUsers', leadUid), {
+        uid: leadUid,
+        franchiseId: fId,
+        identityType: 'TEAM_LEADER',
+        email: cleanEmail,
+        mobile: teamLeadFormData.mobile.trim(),
+        status: 'ACTIVE',
+      });
+      if (targetFranchise) {
+        await updateDoc(doc(db, 'franchises', targetFranchise.id || fId), {
+          secondaryAuthUid: leadUid,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      await logAudit('TEAM_LEAD_ASSIGNED', fId, `Team Lead ${teamLeadFormData.name} (${cleanEmail}) assigned to ${targetFranchise?.name || fId}`);
+      showToast(`Team Leader authorized for ${targetFranchise?.name || fId}.`);
+      setTeamLeadModal(false);
+      setTeamLeadFormData({ franchiseId: '', name: '', rollNumber: '', mobile: '', email: '' });
+    } catch (err: any) {
+      showToast(`Failed to assign team lead: ${err.message}`, "error");
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#080c0a] text-[#f5f7f6] flex flex-col font-sans antialiased">
       {/* Toast Notification Banner */}
@@ -444,6 +643,10 @@ export default function AdminDashboardPage() {
         </div>
 
         <div className="flex items-center gap-3">
+          <div className="hidden md:flex flex-col text-right">
+            <span className="text-xs font-bold text-white leading-tight">{adminProfile.name}</span>
+            <span className="text-[10px] font-mono text-emerald-400">{adminProfile.designation}</span>
+          </div>
           <button
             onClick={() => setLocation('/admin/auction')}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold font-mono transition-all shadow-sm"
@@ -1144,28 +1347,588 @@ export default function AdminDashboardPage() {
             </div>
           )}
 
-          {/* Fallback for other sections (Auction, Round2, Franchises, etc.) */}
-          {['auction', 'round2', 'projector', 'franchises', 'members', 'admins', 'registrations', 'backups'].includes(activeSection) && (
+          {/* ADMIN ACCOUNTS DIRECTORY (Points 17 & 42) */}
+          {activeSection === 'admins' && (
             <div className="space-y-6 max-w-7xl mx-auto">
-              <div className="border-b border-white/[0.08] pb-4 flex justify-between items-center">
+              <div className="border-b border-white/[0.08] pb-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
-                  <h1 className="font-display font-black text-2xl text-white uppercase">{activeSection} WORKSPACE</h1>
-                  <p className="text-xs text-slate-400 mt-1">Operational interface for {activeSection}. Synchronized with authoritative state.</p>
+                  <h1 className="font-display font-black text-2xl text-white uppercase">ADMINISTRATIVE ACCOUNTS</h1>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Super Admin governance of operational handles and floor operators. Google login cannot grant admin privileges.
+                  </p>
                 </div>
-                {activeSection === 'auction' && (
+                {isSuperAdmin && (
                   <button
-                    onClick={() => setLocation('/admin/auction')}
-                    className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold text-xs"
+                    onClick={() => setCreateAdminModal(true)}
+                    className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs uppercase tracking-wider transition-colors shadow-lg flex items-center gap-2"
                   >
-                    LAUNCH FULL COCKPIT
+                    <Plus size={16} />
+                    <span>CREATE ADMIN</span>
                   </button>
                 )}
               </div>
-              <div className="p-8 rounded-2xl bg-white/[0.02] border border-white/[0.08] text-center space-y-4">
-                <p className="text-slate-400 text-sm">Active section loaded: <strong>{activeSection}</strong></p>
-                <div className="flex justify-center gap-3">
-                  <button onClick={() => setActiveSection('overview')} className="px-4 py-2 rounded-xl bg-white/5 text-xs text-white">Back to Overview</button>
-                  <button onClick={() => setActiveSection('players')} className="px-4 py-2 rounded-xl bg-emerald-600 text-xs text-white">Go to Players</button>
+
+              {/* Super Admin Profile Card (Default: Mr. Deepak) */}
+              <div className="p-6 rounded-2xl bg-white/[0.03] border border-white/[0.08] space-y-4 shadow-xl">
+                <div className="flex justify-between items-center border-b border-white/[0.06] pb-3">
+                  <div>
+                    <h3 className="font-display font-bold text-lg text-white">Super Admin Profile</h3>
+                    <p className="text-xs text-slate-400">Default Super Administrator identity: Mr. Deepak. Editable by Super Admin.</p>
+                  </div>
+                  <span className="font-mono text-xs px-2.5 py-1 rounded-full bg-purple-500/20 text-purple-300 font-bold border border-purple-500/30">
+                    SUPER_ADMIN ROLE
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                  <div>
+                    <label className="block text-[11px] font-mono text-slate-400 uppercase mb-1">Director Name</label>
+                    <input
+                      type="text"
+                      value={adminProfile.name}
+                      onChange={e => setAdminProfile({ ...adminProfile, name: e.target.value })}
+                      placeholder="Mr. Deepak"
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white font-medium focus:border-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono text-slate-400 uppercase mb-1">Role / Designation Display</label>
+                    <input
+                      type="text"
+                      value={adminProfile.designation}
+                      onChange={e => setAdminProfile({ ...adminProfile, designation: e.target.value })}
+                      placeholder="Tournament Director & Super Administrator"
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white font-medium focus:border-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono text-slate-400 uppercase mb-1">Email</label>
+                    <input
+                      type="email"
+                      value={adminProfile.email}
+                      onChange={e => setAdminProfile({ ...adminProfile, email: e.target.value })}
+                      placeholder="admin@acc.edu"
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white font-medium focus:border-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono text-slate-400 uppercase mb-1">Phone / Mobile</label>
+                    <input
+                      type="text"
+                      value={adminProfile.phone}
+                      onChange={e => setAdminProfile({ ...adminProfile, phone: e.target.value })}
+                      placeholder="+91 98765 43210"
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white font-medium focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end pt-2">
+                  <button
+                    onClick={handleSaveAdminProfile}
+                    className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider transition-colors shadow-md flex items-center gap-1.5"
+                  >
+                    <Save size={14} />
+                    <span>SAVE ADMIN PROFILE</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Table of Admins */}
+              <div className="rounded-2xl border border-white/[0.08] bg-[#0c120f] overflow-hidden shadow-2xl">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-white/[0.08] bg-white/[0.02] text-slate-400 font-mono uppercase tracking-wider">
+                        <th className="p-4">Name & Title</th>
+                        <th className="p-4">Contact (Email / Phone)</th>
+                        <th className="p-4">Department / Designation</th>
+                        <th className="p-4">Role</th>
+                        <th className="p-4">Status</th>
+                        <th className="p-4">Auth Provider</th>
+                        <th className="p-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/[0.05]">
+                      {allUsers
+                        .filter(u => u.role === 'ADMIN' || u.role === 'SUPER_ADMIN')
+                        .map(admin => {
+                          const isActive = admin.accountStatus === 'ACTIVE' || admin.status === 'ACTIVE';
+                          const isSelf = admin.uid === user?.uid || admin.id === user?.uid;
+                          return (
+                            <tr key={admin.id || admin.uid} className="hover:bg-white/[0.02] transition-colors">
+                              <td className="p-4">
+                                <div className="font-bold text-white text-sm">{admin.name || admin.displayName || 'Administrator'}</div>
+                                <div className="text-[11px] font-mono text-slate-400">{admin.uid || admin.id}</div>
+                              </td>
+                              <td className="p-4">
+                                <div className="font-mono text-slate-200">{admin.email}</div>
+                                {admin.mobile && <div className="font-mono text-slate-400 text-[11px]">{admin.mobile}</div>}
+                              </td>
+                              <td className="p-4">
+                                <div className="text-white font-medium">{admin.designation || 'Auction Handler'}</div>
+                                <div className="text-slate-400 text-[11px]">{admin.department || 'Directorate'}</div>
+                              </td>
+                              <td className="p-4">
+                                <span className={`px-2.5 py-1 rounded-full text-[10px] font-mono font-bold border ${
+                                  admin.role === 'SUPER_ADMIN'
+                                    ? 'bg-purple-950/60 text-purple-300 border-purple-700/60'
+                                    : 'bg-amber-950/60 text-amber-300 border-amber-700/60'
+                                }`}>
+                                  {admin.role}
+                                </span>
+                              </td>
+                              <td className="p-4">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                                  isActive
+                                    ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                                    : 'bg-red-950 text-red-400 border border-red-800'
+                                }`}>
+                                  {isActive ? 'ACTIVE' : 'DISABLED'}
+                                </span>
+                              </td>
+                              <td className="p-4 font-mono text-[11px] text-slate-300">
+                                {admin.authProvider || 'password'}
+                              </td>
+                              <td className="p-4 text-right">
+                                {isSuperAdmin && !isSelf && admin.role !== 'SUPER_ADMIN' && (
+                                  <button
+                                    onClick={() => handleToggleUserStatus(admin)}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                                      isActive
+                                        ? 'bg-red-950/60 hover:bg-red-900/80 text-red-300 border border-red-800/60'
+                                        : 'bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-800/60'
+                                    }`}
+                                  >
+                                    {isActive ? 'Disable' : 'Enable'}
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* FRANCHISES & TWO-IDENTITY MEMBERS MANAGEMENT (Points 10, 11, 12, 13, 14, 41) */}
+          {(activeSection === 'franchises' || activeSection === 'members') && (
+            <div className="space-y-6 max-w-7xl mx-auto">
+              <div className="border-b border-white/[0.08] pb-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h1 className="font-display font-black text-2xl text-white uppercase">FRANCHISE & MEMBER DIRECTORY</h1>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Two-identity franchise architecture: Faculty Coordinator (Primary Login) and Team Leader (Secondary Login). Both access the same franchise purse and squad.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { setTeamLeadFormData({ franchiseId: '', name: '', rollNumber: '', mobile: '', email: '' }); setTeamLeadModal(true); }}
+                    className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs uppercase tracking-wider transition-colors shadow-lg flex items-center gap-2"
+                  >
+                    <Plus size={16} />
+                    <span>ADD TEAM LEAD</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Franchises Cards / Table */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {franchises.map((f: any) => {
+                  const isPending = f.status === 'PENDING' || f.approvalStatus === 'PENDING_APPROVAL';
+                  const coordUser = allUsers.find(u => u.uid === f.primaryAuthUid || (u.franchiseId === (f.franchiseId || f.id) && u.identityType === 'COORDINATOR'));
+                  const leadUser = allUsers.find(u => u.uid === f.secondaryAuthUid || (u.franchiseId === (f.franchiseId || f.id) && u.identityType === 'TEAM_LEADER'));
+
+                  return (
+                    <div key={f.id || f.franchiseId} className="rounded-2xl border border-white/[0.08] bg-[#0c120f] p-6 space-y-5 shadow-xl">
+                      <div className="flex justify-between items-start border-b border-white/[0.06] pb-4">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-display font-bold text-lg text-white">{f.name}</h3>
+                            <span className="font-mono text-xs px-2 py-0.5 rounded bg-white/10 text-slate-300">
+                              {f.shortName || f.franchiseId || f.id}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-400 mt-0.5">ID: {f.franchiseId || f.id}</p>
+                        </div>
+                        <span className={`px-2.5 py-1 rounded-full text-xs font-mono font-bold border ${
+                          isPending
+                            ? 'bg-amber-950/60 text-amber-300 border-amber-700/60'
+                            : 'bg-emerald-950/60 text-emerald-300 border-emerald-700/60'
+                        }`}>
+                          {f.status || 'ACTIVE'}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 text-xs bg-black/40 p-3 rounded-xl border border-white/[0.05]">
+                        <div>
+                          <span className="text-slate-500 uppercase tracking-wider text-[10px] block">Purse Allocation</span>
+                          <span className="font-mono font-bold text-emerald-400 text-sm">₹{f.purseRemaining ?? 1000}L / ₹{f.purseInitial ?? 1000}L</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 uppercase tracking-wider text-[10px] block">Squad Count</span>
+                          <span className="font-mono font-bold text-white text-sm">{f.squad?.count ?? 0} Players</span>
+                        </div>
+                      </div>
+
+                      {/* Dual Identities List */}
+                      <div className="space-y-3">
+                        <div className="text-[11px] font-mono uppercase tracking-wider text-slate-400 font-semibold">
+                          Authorized Sign-In Accounts
+                        </div>
+
+                        {/* Coordinator */}
+                        <div className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.06] text-xs space-y-1">
+                          <div className="flex justify-between items-center">
+                            <span className="font-bold text-white flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-blue-400 inline-block" />
+                              Coordinator: {f.coordinator?.name || coordUser?.name || 'Faculty'}
+                            </span>
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800">
+                              Primary UID
+                            </span>
+                          </div>
+                          <p className="font-mono text-slate-400 text-[11px]">
+                            Google Identity: {coordUser?.email || f.coordinator?.emailPrivate || 'Linked via Google'}
+                          </p>
+                        </div>
+
+                        {/* Team Leader */}
+                        <div className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.06] text-xs space-y-1">
+                          <div className="flex justify-between items-center">
+                            <span className="font-bold text-white flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-purple-400 inline-block" />
+                              Team Leader: {leadUser?.name || 'Not yet assigned'}
+                            </span>
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-800">
+                              Secondary UID
+                            </span>
+                          </div>
+                          {leadUser ? (
+                            <p className="font-mono text-slate-400 text-[11px]">
+                              Google Identity: {leadUser.email}
+                            </p>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setTeamLeadFormData({ franchiseId: f.franchiseId || f.id, name: '', rollNumber: '', mobile: '', email: '' });
+                                setTeamLeadModal(true);
+                              }}
+                              className="text-xs text-blue-400 hover:text-blue-300 font-semibold mt-1"
+                            >
+                              + Assign Team Leader / Captain Login
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Approval Actions */}
+                      <div className="pt-2 flex justify-end gap-2">
+                        {isPending && isSuperAdmin && (
+                          <button
+                            onClick={() => handleApproveFranchise(f)}
+                            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider transition-colors shadow-md flex items-center gap-1.5"
+                          >
+                            <CheckCircle size={14} />
+                            <span>APPROVE & UNLOCK PURSE</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* SECTION: AUCTION COCKPIT LAUNCHER */}
+          {activeSection === 'auction' && (
+            <div className="space-y-6 max-w-7xl mx-auto">
+              <div className="border-b border-white/[0.08] pb-4 flex justify-between items-center">
+                <div>
+                  <h1 className="font-display font-black text-2xl text-white uppercase">LIVE AUCTION FLOOR COCKPIT</h1>
+                  <p className="text-xs text-slate-400 mt-1">Full operational floor cockpit with Hammer, Skip, Pause/Resume, and Behalf Bidding.</p>
+                </div>
+                <button
+                  onClick={() => setLocation('/admin/auction')}
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider transition-colors shadow-lg flex items-center gap-2"
+                >
+                  <Gavel size={16} />
+                  <span>LAUNCH FULL COCKPIT →</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* SECTION: ROUND 2 UNSOLD RECALL POOL */}
+          {activeSection === 'round2' && (
+            <div className="space-y-6 max-w-7xl mx-auto">
+              <div className="border-b border-white/[0.08] pb-4 flex justify-between items-center">
+                <div>
+                  <h1 className="font-display font-black text-2xl text-white uppercase">ROUND 2: UNSOLD RECALL POOL</h1>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Players passed or unsold in Round 1 enter Round 2. Base prices reset to 20 Credits. Bidding increments follow standard ladder.
+                  </p>
+                </div>
+                <span className="font-mono text-xs px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">
+                  {players.filter(p => p.status === 'UNSOLD' || p.status === 'ROUND_2').length} UNPROCESSED IN RECALL
+                </span>
+              </div>
+
+              <div className="rounded-2xl border border-white/[0.08] bg-[#0c120f] overflow-hidden shadow-2xl">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-white/[0.08] bg-white/[0.02] text-slate-400 font-mono uppercase tracking-wider">
+                        <th className="p-4">Player</th>
+                        <th className="p-4">Roll Number</th>
+                        <th className="p-4">Academic Bucket</th>
+                        <th className="p-4">Original Base</th>
+                        <th className="p-4">Round 2 Price</th>
+                        <th className="p-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/[0.05]">
+                      {players.filter(p => p.status === 'UNSOLD' || p.status === 'ROUND_2').length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="p-8 text-center text-slate-500 font-mono">
+                            No unsold players in Round 2 recall queue.
+                          </td>
+                        </tr>
+                      ) : (
+                        players
+                          .filter(p => p.status === 'UNSOLD' || p.status === 'ROUND_2')
+                          .map(p => (
+                            <tr key={p.id} className="hover:bg-white/[0.02] transition-colors">
+                              <td className="p-4 font-bold text-white flex items-center gap-3">
+                                {p.photo && (
+                                  <img src={p.photo} alt={p.name} className="w-8 h-8 rounded-full object-cover border border-white/10" />
+                                )}
+                                <span>{p.name}</span>
+                              </td>
+                              <td className="p-4 font-mono text-slate-300">{p.rollNumber || p.roll}</td>
+                              <td className="p-4">
+                                <span className="px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-white/10 text-emerald-300">
+                                  {p.bucket || 'B1'}
+                                </span>
+                              </td>
+                              <td className="p-4 font-mono text-slate-400">₹{p.basePrice || 20}</td>
+                              <td className="p-4 font-mono font-bold text-emerald-400">₹20 (Reset)</td>
+                              <td className="p-4 text-right">
+                                <button
+                                  onClick={async () => {
+                                    try {
+                                      await updateDoc(doc(db, 'players', p.id), {
+                                        status: 'AVAILABLE',
+                                        round: 2,
+                                        basePrice: 20,
+                                        updatedAt: serverTimestamp(),
+                                      });
+                                      await logAudit('ROUND_2_RECALL', p.rollNumber || p.id, `Player ${p.name} recalled to live pool at 20 credits.`);
+                                      showToast(`Recalled ${p.name} to live auction pool.`);
+                                    } catch {
+                                      setPlayers(prev => prev.map(x => x.id === p.id ? { ...x, status: 'AVAILABLE', round: 2, basePrice: 20 } : x));
+                                      showToast(`Recalled ${p.name} (local).`);
+                                    }
+                                  }}
+                                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider transition-colors shadow-sm"
+                                >
+                                  RECALL TO LOT
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* SECTION: PROJECTOR DISPLAY WORKSPACE */}
+          {activeSection === 'projector' && (
+            <div className="space-y-6 max-w-7xl mx-auto">
+              <div className="border-b border-white/[0.08] pb-4 flex justify-between items-center">
+                <div>
+                  <h1 className="font-display font-black text-2xl text-white uppercase">PROJECTOR BROADCAST ARENA</h1>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Zero-latency auditorium display driver. Optimized for 1080p and 4K projectors with giant typography and franchise paddle telemetry.
+                  </p>
+                </div>
+                <a
+                  href="/projector"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs uppercase tracking-wider transition-colors shadow-lg flex items-center gap-2"
+                >
+                  <Tv size={16} />
+                  <span>LAUNCH FULL PROJECTOR ARENA ↗</span>
+                </a>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="p-6 rounded-2xl bg-white/[0.03] border border-white/[0.08] space-y-3">
+                  <h3 className="font-display font-bold text-white text-base">Stage Display Parameters</h3>
+                  <div className="space-y-2 text-xs font-mono text-slate-300">
+                    <div className="flex justify-between py-1 border-b border-white/5">
+                      <span className="text-slate-500">Aspect Ratio:</span>
+                      <span>16:9 / High-Contrast Dark</span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-white/5">
+                      <span className="text-slate-500">Timer Diameter:</span>
+                      <span>240px SVG Ring</span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-white/5">
+                      <span className="text-slate-500">Price Typography:</span>
+                      <span>96px JetBrains Mono</span>
+                    </div>
+                    <div className="flex justify-between py-1">
+                      <span className="text-slate-500">Franchise Paddles:</span>
+                      <span>11 Simultaneous Slots</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="md:col-span-2 p-6 rounded-2xl bg-white/[0.03] border border-white/[0.08] flex flex-col justify-between space-y-4">
+                  <div>
+                    <h3 className="font-display font-bold text-white text-base">Broadcast Live Status</h3>
+                    <p className="text-xs text-slate-400 mt-1">
+                      The projector display operates as a completely decoupled consumer. It subscribes to RTDB/Firestore state and reflects hammer strikes, bids, and pauses instantaneously.
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-xl bg-black/40 border border-white/5 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <span className="w-3 h-3 rounded-full bg-emerald-400 animate-pulse" />
+                      <span className="text-xs font-mono font-bold text-white">Broadcast Stream Ready</span>
+                    </div>
+                    <a
+                      href="/projector"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-purple-400 hover:text-purple-300 font-mono font-semibold"
+                    >
+                      Open Live Window →
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* SECTION: REGISTRATIONS & REFERENCE PROGRAM */}
+          {activeSection === 'registrations' && (
+            <div className="space-y-6 max-w-7xl mx-auto">
+              <div className="border-b border-white/[0.08] pb-4 flex justify-between items-center">
+                <div>
+                  <h1 className="font-display font-black text-2xl text-white uppercase">PLAYER REGISTRATIONS & REFERRALS</h1>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Audit candidate reference claims against franchise coordinator declarations. Fresh admissions only.
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/[0.08] bg-[#0c120f] overflow-hidden shadow-2xl">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-white/[0.08] bg-white/[0.02] text-slate-400 font-mono uppercase tracking-wider">
+                        <th className="p-4">Player</th>
+                        <th className="p-4">Roll Number</th>
+                        <th className="p-4">Reference Claimed</th>
+                        <th className="p-4">Claimed Referring Team</th>
+                        <th className="p-4">Admission Year</th>
+                        <th className="p-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/[0.05]">
+                      {players.filter(p => p.referenceClaimed || p.referringFranchiseId).length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="p-8 text-center text-slate-500 font-mono">
+                            No reference claims pending review.
+                          </td>
+                        </tr>
+                      ) : (
+                        players
+                          .filter(p => p.referenceClaimed || p.referringFranchiseId)
+                          .map(p => (
+                            <tr key={p.id} className="hover:bg-white/[0.02] transition-colors">
+                              <td className="p-4 font-bold text-white">{p.name}</td>
+                              <td className="p-4 font-mono text-slate-300">{p.rollNumber || p.roll}</td>
+                              <td className="p-4">
+                                <span className="px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-emerald-500/20 text-emerald-400">
+                                  YES (CLAIMED)
+                                </span>
+                              </td>
+                              <td className="p-4 font-bold text-white">
+                                {franchises.find(f => f.id === p.referringFranchiseId || f.franchiseId === p.referringFranchiseId)?.name || `Team #${p.referringFranchiseId || '1'}`}
+                              </td>
+                              <td className="p-4 font-mono text-slate-400">{p.academic?.admissionYear || 2026}</td>
+                              <td className="p-4 text-right">
+                                <button
+                                  onClick={async () => {
+                                    try {
+                                      await updateDoc(doc(db, 'players', p.id), {
+                                        referenceVerified: true,
+                                        updatedAt: serverTimestamp(),
+                                      });
+                                      await logAudit('REFERENCE_CONFIRMED', p.rollNumber || p.id, `Confirmed referral claim for ${p.name}.`);
+                                      showToast(`Confirmed referral for ${p.name}.`);
+                                    } catch {
+                                      showToast(`Referral confirmed for ${p.name} (local).`);
+                                    }
+                                  }}
+                                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase transition-colors"
+                                >
+                                  CONFIRM
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* SECTION: BACKUPS & DISASTER RECOVERY */}
+          {activeSection === 'backups' && (
+            <div className="space-y-6 max-w-7xl mx-auto">
+              <div className="border-b border-white/[0.08] pb-4 flex justify-between items-center">
+                <div>
+                  <h1 className="font-display font-black text-2xl text-white uppercase">AUTOMATIC BACKUPS & DISASTER RECOVERY</h1>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Authoritative state snapshot saves every 10 lots. Download offline JSON or trigger on-demand forensic freeze.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="p-6 rounded-2xl bg-white/[0.03] border border-white/[0.08] space-y-4">
+                  <h3 className="font-display font-bold text-white text-base">On-Demand State Snapshot</h3>
+                  <p className="text-xs text-slate-400">
+                    Captures all {players.length} players, {franchises.length} franchises, and {auditLogs.length} audit trail records into a single tamper-evident JSON bundle.
+                  </p>
+                  <button
+                    onClick={handleExportJSON}
+                    className="w-full py-3 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs uppercase tracking-wider transition-colors shadow-lg flex items-center justify-center gap-2"
+                  >
+                    <Save size={16} />
+                    <span>CREATE STATE SNAPSHOT</span>
+                  </button>
+                </div>
+
+                <div className="p-6 rounded-2xl bg-white/[0.03] border border-white/[0.08] space-y-4">
+                  <h3 className="font-display font-bold text-white text-base">Event-Day Disaster Protocol</h3>
+                  <p className="text-xs text-slate-400">
+                    In the event of total network or laptop loss, the system state can be completely restored on any replacement machine within 60 seconds using the saved JSON snapshot.
+                  </p>
+                  <div className="p-3 rounded-xl bg-black/40 border border-white/5 text-[11px] font-mono text-emerald-400">
+                    STATUS: REALTIME FAILOVER ACTIVE · SPARK TRANSACTION FALLBACK READY
+                  </div>
                 </div>
               </div>
             </div>
@@ -1224,6 +1987,182 @@ export default function AdminDashboardPage() {
                 EXECUTE BULK DELETE
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Admin Modal (Point 17 & 42) */}
+      {createAdminModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-md p-6 rounded-2xl bg-[#0c120f] border border-amber-500/40 space-y-4 shadow-2xl">
+            <div className="flex justify-between items-center border-b border-white/[0.08] pb-3">
+              <h3 className="font-display font-bold text-lg text-white">Create Administrator Account</h3>
+              <button onClick={() => setCreateAdminModal(false)} className="text-slate-400 hover:text-white">✕</button>
+            </div>
+            <form onSubmit={handleCreateAdmin} className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Full Name *</label>
+                <input
+                  type="text"
+                  value={adminFormData.name}
+                  onChange={e => setAdminFormData(p => ({ ...p, name: e.target.value }))}
+                  placeholder="e.g. S. Suresh Kumar"
+                  required
+                  className="w-full px-3 py-2 bg-black/60 border border-white/10 rounded-xl text-xs text-white focus:border-amber-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Email Address *</label>
+                <input
+                  type="email"
+                  value={adminFormData.email}
+                  onChange={e => setAdminFormData(p => ({ ...p, email: e.target.value }))}
+                  placeholder="e.g. suresh@acc.edu"
+                  required
+                  className="w-full px-3 py-2 bg-black/60 border border-white/10 rounded-xl text-xs text-white focus:border-amber-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Phone Number</label>
+                <input
+                  type="tel"
+                  value={adminFormData.phone}
+                  onChange={e => setAdminFormData(p => ({ ...p, phone: e.target.value }))}
+                  placeholder="e.g. 9848011223"
+                  className="w-full px-3 py-2 bg-black/60 border border-white/10 rounded-xl text-xs text-white font-mono focus:border-amber-500"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Designation</label>
+                  <input
+                    type="text"
+                    value={adminFormData.designation}
+                    onChange={e => setAdminFormData(p => ({ ...p, designation: e.target.value }))}
+                    placeholder="Floor Handler"
+                    className="w-full px-3 py-2 bg-black/60 border border-white/10 rounded-xl text-xs text-white focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Department</label>
+                  <input
+                    type="text"
+                    value={adminFormData.department}
+                    onChange={e => setAdminFormData(p => ({ ...p, department: e.target.value }))}
+                    placeholder="Directorate"
+                    className="w-full px-3 py-2 bg-black/60 border border-white/10 rounded-xl text-xs text-white focus:border-amber-500"
+                  />
+                </div>
+              </div>
+              <div className="p-3 bg-amber-950/30 border border-amber-800/40 rounded-xl text-[11px] text-amber-200">
+                Created account is granted <strong>ADMIN</strong> role with email/password authentication. It cannot escalate to Super Admin.
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setCreateAdminModal(false)}
+                  className="px-4 py-2 rounded-xl bg-white/5 text-xs text-slate-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs uppercase tracking-wider transition-colors shadow-lg"
+                >
+                  Provision Admin
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add / Assign Team Leader Modal (Point 13 & 41) */}
+      {teamLeadModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-md p-6 rounded-2xl bg-[#0c120f] border border-blue-500/40 space-y-4 shadow-2xl">
+            <div className="flex justify-between items-center border-b border-white/[0.08] pb-3">
+              <h3 className="font-display font-bold text-lg text-white">Assign Team Leader (Captain) Login</h3>
+              <button onClick={() => setTeamLeadModal(false)} className="text-slate-400 hover:text-white">✕</button>
+            </div>
+            <form onSubmit={handleAddTeamLead} className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Target Franchise *</label>
+                <select
+                  value={teamLeadFormData.franchiseId}
+                  onChange={e => setTeamLeadFormData(p => ({ ...p, franchiseId: e.target.value }))}
+                  required
+                  className="w-full px-3 py-2 bg-black/60 border border-white/10 rounded-xl text-xs text-white focus:border-blue-500"
+                >
+                  <option value="">Select franchise...</option>
+                  {franchises.map((f: any) => (
+                    <option key={f.id || f.franchiseId} value={f.franchiseId || f.id}>
+                      {f.name} ({f.franchiseId || f.id})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Leader / Captain Name *</label>
+                <input
+                  type="text"
+                  value={teamLeadFormData.name}
+                  onChange={e => setTeamLeadFormData(p => ({ ...p, name: e.target.value }))}
+                  placeholder="e.g. Akash Sharma"
+                  required
+                  className="w-full px-3 py-2 bg-black/60 border border-white/10 rounded-xl text-xs text-white focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">College Roll Number (Optional)</label>
+                <input
+                  type="text"
+                  value={teamLeadFormData.rollNumber}
+                  onChange={e => setTeamLeadFormData(p => ({ ...p, rollNumber: e.target.value }))}
+                  placeholder="e.g. 24811A0501"
+                  className="w-full px-3 py-2 bg-black/60 border border-white/10 rounded-xl text-xs text-white font-mono focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Google Identity (Email) *</label>
+                <input
+                  type="email"
+                  value={teamLeadFormData.email}
+                  onChange={e => setTeamLeadFormData(p => ({ ...p, email: e.target.value }))}
+                  placeholder="e.g. leader.captain@gmail.com"
+                  required
+                  className="w-full px-3 py-2 bg-black/60 border border-white/10 rounded-xl text-xs text-white focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Contact Mobile</label>
+                <input
+                  type="tel"
+                  value={teamLeadFormData.mobile}
+                  onChange={e => setTeamLeadFormData(p => ({ ...p, mobile: e.target.value }))}
+                  placeholder="e.g. 9848099887"
+                  className="w-full px-3 py-2 bg-black/60 border border-white/10 rounded-xl text-xs text-white font-mono focus:border-blue-500"
+                />
+              </div>
+              <div className="p-3 bg-blue-950/30 border border-blue-800/40 rounded-xl text-[11px] text-blue-200">
+                Team Leader logs in with this Google account to access the same franchise paddle, purse, and squad.
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setTeamLeadModal(false)}
+                  className="px-4 py-2 rounded-xl bg-white/5 text-xs text-slate-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs uppercase tracking-wider transition-colors shadow-lg"
+                >
+                  Authorize Leader
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

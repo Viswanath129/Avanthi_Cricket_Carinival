@@ -67,6 +67,36 @@ export default function PlayerDashboardPage() {
   const [discrepancyReason, setDiscrepancyReason] = useState('');
   const [discrepancySuccess, setDiscrepancySuccess] = useState(false);
 
+  // Realtime Firestore subscription for player record (Point 8 & 45)
+  useEffect(() => {
+    if (!userDoc?.playerId) return;
+    const unsub = onSnapshot(doc(db, 'players', userDoc.playerId), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setPlayer((prev: any) => ({
+          ...prev,
+          ...data,
+          id: docSnap.id,
+          rollNumber: data.rollNumber || data.rollNumberNormalized || userDoc.playerId,
+          name: data.name || user?.displayName || prev.name,
+          branch: data.academic?.branch || prev.branch,
+          studyYear: data.academic?.studyYear || prev.studyYear,
+          bucket: data.academic?.bucket || prev.bucket,
+          auctionStatus: data.auctionStatus || (data.status === 'AVAILABLE' ? 'AVAILABLE' : (data.approvalStatus || 'SUBMITTED')),
+          photoUrl: data.photoUrl || user?.photoURL || prev.photoUrl,
+          basePrice: data.basePrice || prev.basePrice,
+          paymentStatus: data.registration?.paid ? 'PAID' : (data.paymentStatus || 'UNPAID'),
+          cricHeroesStatus: data.cricheroes?.status || prev.cricHeroesStatus,
+          cricHeroesUrl: data.cricheroes?.profileUrl || data.cricheroes?.url || prev.cricHeroesUrl,
+          cricHeroesMobile: data.cricheroes?.registeredMobilePrivate || prev.cricHeroesMobile,
+        }));
+      }
+    }, (err) => {
+      console.warn("Player profile subscription fallback:", err);
+    });
+    return () => unsub();
+  }, [userDoc?.playerId, user]);
+
   // Sync edits when player updates
   useEffect(() => {
     setEditFormData({ ...player });

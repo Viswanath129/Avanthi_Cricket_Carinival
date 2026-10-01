@@ -75,21 +75,28 @@ export default function FranchiseBiddingPage() {
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  // Initialize franchise session from Auth or LocalStorage
+  // Initialize franchise session exclusively from userDoc (Point 1 & 51 & 52)
   useEffect(() => {
     if (userDoc?.franchiseId) {
-      setFranchiseId(String(userDoc.franchiseId));
-    } else {
-      try {
-        const stored = localStorage.getItem('acc_active_franchise_session');
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (parsed.franchiseId) setFranchiseId(String(parsed.franchiseId));
-          if (parsed.franchiseName) setFranchiseName(parsed.franchiseName);
+      const fId = String(userDoc.franchiseId);
+      setFranchiseId(fId);
+      
+      const fRef = doc(db, 'franchises', fId);
+      const unsub = onSnapshot(fRef, (snap) => {
+        if (snap.exists()) {
+          const fData = snap.data();
+          setFranchiseName(fData.name || `Franchise ${fId}`);
+          setOwnFranchise((prev: any) => ({
+            ...prev,
+            purseRemaining: fData.purseRemaining ?? prev.purseRemaining,
+            auctionPurchases: fData.squad?.auctionPurchases ?? prev.auctionPurchases,
+            bucketCounts: fData.squad?.bucketCounts ?? prev.bucketCounts,
+          }));
         }
-      } catch {
-        // ignore
-      }
+      }, (err) => {
+        console.warn("Franchise doc listen fallback:", err);
+      });
+      return () => unsub();
     }
   }, [userDoc]);
 

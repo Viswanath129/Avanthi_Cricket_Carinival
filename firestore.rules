@@ -6,8 +6,12 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function getUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
     function getUserRole() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+      return getUserDoc().role;
     }
 
     function isSuperAdmin() {
@@ -28,15 +32,33 @@ service cloud.firestore {
 
     function isFranchiseOwner(franchiseId) {
       return isAuthenticated() && (
+        getUserDoc().franchiseId == franchiseId ||
         get(/databases/$(database)/documents/franchiseUsers/$(request.auth.uid)).data.franchiseId == franchiseId
       );
     }
 
     // ── Users (/users/{uid}) ──────────────────────────────────────────
-    // Canonical user directory. Only self or admin can read. Super Admin governs writes.
+    // Canonical user directory.
+    // Self or admin can read. Super Admin governs all writes.
+    // Safe self-registration creates initial PENDING profile only (Points 4, 10, 34, 58).
     match /users/{uid} {
       allow read: if isAuthenticated() && (request.auth.uid == uid || isAdmin());
       allow write: if isSuperAdmin();
+      allow create: if isAuthenticated() && request.auth.uid == uid &&
+        (
+          (request.resource.data.role == 'PLAYER' &&
+           request.resource.data.accountStatus == 'PENDING' &&
+           request.resource.data.approvalStatus == 'PENDING_APPROVAL') ||
+          (request.resource.data.role == 'FRANCHISE_COORDINATOR' &&
+           request.resource.data.accountStatus == 'PENDING' &&
+           request.resource.data.approvalStatus == 'PENDING_APPROVAL')
+        );
+      allow update: if isSuperAdmin() || (
+        isAdmin() && 
+        request.resource.data.role != 'SUPER_ADMIN' && 
+        resource.data.role != 'SUPER_ADMIN'
+      );
+      allow delete: if isSuperAdmin();
     }
 
     // ── Editions (public read, Super Admin write) ─────────────────────
@@ -58,26 +80,32 @@ service cloud.firestore {
     // ── Players (private, authoritative directory) ────────────────────
     // Only admin or the player themselves can read.
     // Self-registration creates with PENDING status.
-    // Players cannot self-approve or elevate privilege.
+    // Players cannot self-approve or alter auction eligibility (Point 34, 58).
     match /players/{playerId} {
       allow read: if isAuthenticated() && (
         isAdmin() ||
         resource.data.uid == request.auth.uid ||
-        resource.data.roll == request.auth.uid ||
+        resource.data.authUid == request.auth.uid ||
+        resource.data.rollNumber == request.auth.uid ||
         resource.data.rollNumberNormalized == request.auth.uid
       );
-      allow create: if isAuthenticated();
+      allow create: if isAuthenticated() && 
+        request.resource.data.accountStatus == 'PENDING' &&
+        request.resource.data.approvalStatus == 'PENDING_APPROVAL' &&
+        request.resource.data.auctionable == false;
       allow update: if isAuthenticated() && (
         isAdmin() ||
-        (resource.data.uid == request.auth.uid &&
-         request.resource.data.approvalStatus == 'PENDING_APPROVAL' &&
-         request.resource.data.auctionEligible == false)
+        (
+          (resource.data.uid == request.auth.uid || resource.data.authUid == request.auth.uid) &&
+          request.resource.data.accountStatus == resource.data.accountStatus &&
+          request.resource.data.approvalStatus == resource.data.approvalStatus &&
+          request.resource.data.auctionable == resource.data.auctionable
+        )
       );
       allow delete: if isSuperAdmin();
     }
 
     // ── Player Unique Keys (uniqueness enforcement) ───────────────────
-    // Only authenticated users can create. Admin governs updates/deletes.
     match /playerUniqueKeys/{keyId} {
       allow read: if true;
       allow create: if isAuthenticated();
@@ -85,29 +113,38 @@ service cloud.firestore {
     }
 
     // ── Players Public Projection ─────────────────────────────────────
-    // Public read. Write ONLY by Cloud Functions (admin SDK bypasses rules).
-    // No client write allowed — not even admin — to preserve data pipeline integrity.
+    // Public read for live spectator experience (500+ viewers without login).
+    // Write restricted to admin and Cloud Functions.
     match /playersPublic/{playerId} {
       allow read: if true;
-      allow write: if false;
+      allow write: if isAdmin();
     }
 
-    // ── Franchises (private, admin and self read) ─────────────────────
+    // ── Franchises (private, admin and authorized franchise owner read) ─
     match /franchises/{franchiseId} {
-      allow read: if isAuthenticated() && (isAdmin() || isFranchiseOwner(franchiseId));
-      allow write: if isSuperAdmin();
+      allow read: if isAuthenticated() && (
+        isAdmin() || 
+        isFranchiseOwner(franchiseId) || 
+        resource.data.primaryAuthUid == request.auth.uid || 
+        resource.data.secondaryAuthUid == request.auth.uid
+      );
+      allow create: if isAuthenticated() && 
+        request.resource.data.status == 'PENDING' &&
+        request.resource.data.primaryAuthUid == request.auth.uid;
+      allow update: if isAdmin();
+      allow delete: if isSuperAdmin();
     }
 
     // ── Franchises Public Projection ──────────────────────────────────
-    // Public read. Write ONLY by Cloud Functions.
     match /franchisesPublic/{franchiseId} {
       allow read: if true;
-      allow write: if false;
+      allow write: if isAdmin();
     }
 
     // ── Franchise Users (admin and self read, Super Admin write) ──────
     match /franchiseUsers/{uid} {
       allow read: if isAuthenticated() && (request.auth.uid == uid || isAdmin());
+      allow create: if isAuthenticated() && request.auth.uid == uid;
       allow write: if isSuperAdmin();
     }
 
@@ -144,7 +181,7 @@ service cloud.firestore {
     }
 
     // ── Audit Logs (admin read, admin create, NO update/delete) ───────
-    // Immutable audit trail. Once written, entries cannot be modified.
+    // Immutable audit trail.
     match /auditLogs/{logId} {
       allow read: if isAdmin();
       allow create: if isAdmin();

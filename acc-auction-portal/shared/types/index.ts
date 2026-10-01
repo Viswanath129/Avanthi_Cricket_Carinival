@@ -1,6 +1,11 @@
 // Roles
 export type UserRole = 'SUPER_ADMIN' | 'ADMIN' | 'FRANCHISE_COORDINATOR' | 'FRANCHISE_TEAM_LEADER' | 'PLAYER';
 
+// Account & Approval Lifecycle Statuses
+export type AccountStatus = 'PENDING' | 'APPROVED' | 'ACTIVE' | 'DISABLED' | 'BLOCKED' | 'ARCHIVED';
+export type ApprovalStatus = 'PENDING' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED';
+export type AuthProviderType = 'google.com' | 'password';
+
 // Buckets
 export type BucketId = 'B1' | 'B2' | 'B3' | 'B4' | 'D5' | 'M6';
 
@@ -23,12 +28,21 @@ export const BASE_PRICE_LADDER = [20, 30, 40, 50, 60, 70, 80, 90, 100, 120, 140,
 export interface UserDoc {
   uid: string;
   role: UserRole;
-  status: 'ACTIVE' | 'DISABLED';
+  status: 'ACTIVE' | 'DISABLED'; // for backwards compatibility
+  accountStatus: AccountStatus;
+  approvalStatus: ApprovalStatus;
+  authProvider: AuthProviderType;
   email: string | null;
+  displayName?: string | null;
+  photoURL?: string | null;
   mobile: string | null;
   franchiseId: string | null;
   playerId: string | null;
-  identityType: 'COORDINATOR' | 'TEAM_LEADER' | null;
+  identityType: 'COORDINATOR' | 'TEAM_LEADER' | 'SUPER_ADMIN' | 'OPERATOR' | null;
+  name?: string | null;
+  designation?: string | null;
+  department?: string | null;
+  lastActive?: any;
   createdAt: any; // Firestore Timestamp
   updatedAt: any;
 }
