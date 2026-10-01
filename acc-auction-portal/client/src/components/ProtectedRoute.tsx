@@ -19,9 +19,15 @@ export function ProtectedRoute({
 
   if (loading) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900 p-6">
-        <div className="flex flex-col items-center space-y-4">
-          <img src="/cricket-loader.svg" alt="ACC 2026 Cricket Loader" className="w-48 h-48 drop-shadow-xl" />
+      <div className="min-h-screen flex items-center justify-center bg-slate-900 p-6">
+        <div className="w-full max-w-md space-y-4 animate-pulse">
+          <div className="h-8 bg-white/10 rounded-md w-1/3 mx-auto"></div>
+          <div className="h-4 bg-white/5 rounded-md w-2/3 mx-auto"></div>
+          <div className="h-48 bg-white/5 rounded-2xl border border-white/10 p-6 space-y-3">
+            <div className="h-4 bg-white/10 rounded w-3/4"></div>
+            <div className="h-4 bg-white/10 rounded w-1/2"></div>
+            <div className="h-10 bg-white/10 rounded w-full mt-6"></div>
+          </div>
           <p className="text-center font-mono text-xs text-slate-400">
             Resolving server-authoritative role & permissions...
           </p>

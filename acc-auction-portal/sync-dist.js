@@ -41,8 +41,7 @@ const assetsToCopy = [
   'Blue-sky-2048x1166.svg',
   'Blue sky-2048x1166.svg',
   'Blue-sky.mp4',
-  'Blue sky.mp4',
-  'cricket-loader.svg'
+  'Blue sky.mp4'
 ];
 
 for (const asset of assetsToCopy) {
@@ -63,11 +62,6 @@ if (fs.existsSync(distIndex)) {
 }
 if (fs.existsSync(distPortal)) {
   fs.copyFileSync(distPortal, path.join(publicDir, 'portal.html'));
-}
-
-const rootCricket = path.join(rootDir, 'cricket-loader.svg');
-if (fs.existsSync(rootCricket)) {
-  fs.copyFileSync(rootCricket, path.join(publicDir, 'cricket-loader.svg'));
 }
 
 console.log('[sync-dist] Completed static asset & distribution sync!');
