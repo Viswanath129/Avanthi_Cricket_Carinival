@@ -147,7 +147,7 @@
 | **AN01-AN07** | Concurrency & Serialization (11 simultaneous bids) | `[✓]` | Firestore transaction queue & timestamp offset | None. Verified in Timer Sync Suite (21/21). |
 | **AO01-AO08** | Failure Tolerance (Laptop lid sleep, disconnect recovery) | `[✓]` | `visibilitychange` listener, reconnect banner | None. Verified in Part D Acceptance (Dash 13, 14). |
 | **AP01-AP12** | Realtime Synchronization (BroadcastChannel + Firestore) | `[✓]` | Dual-delivery mesh (`acc_auction_mesh_2026`) | None. Sub-500ms sync verified. |
-| **AQ01-AQ10** | Public Scale (500 users concurrent capacity) | `[✓]` | `test_auth_scale_500.js` (499 players in 36ms) | Physical 500 websocket stress requires Blaze. |
+| **AQ01-AQ10** | Public Scale (500 users concurrent capacity) | `[✓]` | `test_auth_scale_500.js` (499 simulated users in 29ms) | 500-user physical concurrent browser/WebSocket load was not physically executed in the current Firebase environment and therefore remains an architectural/unverified production-load condition. |
 | **AR01-AR09** | Presence & Live Users (Aggregated spectator counts) | `[✓]` | RTDB `/presence/pub_*` rules & live count badge | Update test partition to use `pub_*`. |
 | **AS01-AS16** | Authentication (Super Admin, Operator, Franchise, Player) | `[✓]` | `AuthContext.tsx`, `test_login_and_reg.js` | None. All 4 roles authenticate cleanly. |
 | **AT01-AT12** | Auth Dashboard Routing (Role-based view redirection) | `[✓]` | Protected route guards, unauthorized redirects | None. Verified in Red Team `ROUTING-001`. |

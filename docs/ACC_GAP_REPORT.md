@@ -87,7 +87,7 @@ Out of 312 granular checklist items audited across Sections A through BJ:
 | **C09** | Player Reg | Photo auto-crop / aspect ratio | `[~] PARTIAL` | 4:3 canvas compressor works in Web OS; React portal form needs inline crop helper preview. |
 | **I08** | CricHeroes | Automated scraper for live stats | `[N/V] NOT VERIFIED` | Manual profile URL entry verified; automated stats scraping from CricHeroes API requires API keys. |
 | **P04** | Interfaces | Franchise mobile responsive dock | `[~] PARTIAL` | Mobile cards render well; virtual numpad for rapid price entry needs mobile haptic feedback. |
-| **AQ08** | Scale | 500-client concurrent websocket stress | `[N/V] NOT VERIFIED` | 500 simulated auth logins verified in 36ms; live physical load of 500 active browser websockets requires Blaze plan. |
+| **AQ08** | Scale | 500-client concurrent websocket stress | `[N/V] NOT VERIFIED` | 500-user physical concurrent browser/WebSocket load was not physically executed in the current Firebase environment and therefore remains an architectural/unverified production-load condition. Auth throughput benchmark authenticated 499 simulated users in 29ms with 0 failures. |
 | **AX09** | Admin UI | Trash bin breakdown by category | `[~] PARTIAL` | Implemented in Web OS Data Management; needs component port into React `AdminDashboardPage`. |
 | **BG01** | Stretch | AI Squad Recommendations | `[ ] MISSING` | Stretch goal: AI-driven player value recommendations based on CricHeroes stats. |
 | **BG02** | Stretch | Live Audio Auctioneer Voice Synth | `[ ] MISSING` | Stretch goal: Web Speech synthesis announcing bids and lots. |
