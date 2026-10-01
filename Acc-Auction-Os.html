@@ -809,11 +809,19 @@
     }
     .speeder-wrapper {
       position: relative;
-      width: 320px;
-      height: 180px;
+      width: 240px;
+      height: 240px;
       display: flex;
       align-items: center;
       justify-content: center;
+    }
+    .cricket-bouncing-loader {
+      width: 220px;
+      height: 220px;
+      display: block;
+      filter: drop-shadow(0 12px 28px rgba(15, 23, 42, 0.15));
+      object-fit: contain;
+      animation: none !important;
     }
     .speeder-loader {
       animation: speeder-anim 0.4s linear infinite;
@@ -2010,27 +2018,11 @@
 </head>
 <body>
 
-  <!-- UIVERSE SPEEDER LOADING OVERLAY (FIRST ORIGINAL LOADER) -->
+  <!-- CRICKET BAT & BALL BOUNCING OPENING LOADER -->
   <div id="speederOverlay" class="speeder-overlay" style="display: flex;">
-    <div class="speeder-wrapper">
-      <div class="speeder-loader">
-        <span>
-          <span></span>
-          <span></span>
-          <span></span>
-          <span></span>
-        </span>
-        <div class="speeder-base">
-          <span></span>
-          <div class="speeder-face"></div>
-        </div>
-      </div>
-      <div class="longfazers">
-        <span></span>
-        <span></span>
-        <span></span>
-        <span></span>
-      </div>
+    <div class="speeder-wrapper cricket-loader-container">
+      <img src="cricket-loader.svg" alt="ACC 2026 Cricket Loader" class="cricket-bouncing-loader speeder-loader" width="220" height="220" />
+      <div class="longfazers" style="display: none;"></div>
     </div>
     <div id="speederMsg" class="speeder-msg">LOADING ACC 2026 OS...</div>
     <div id="speederSub" class="speeder-sub">Synchronizing Authoritative Cloud State</div>
