@@ -22,7 +22,7 @@
 | **PRODUCTION BUILD STATUS** | **EXIT CODE 0** | **VITE & TSC SYNCHRONIZED** |
 
 > **Scale Testing Qualification:**  
-> The 500-user authentication throughput test executed in **29ms** with 0 failures (`tests/test_auth_scale_500.js`). Live concurrent physical websocket flooding with 500 active browser tabs cannot be conducted simultaneously against the Firebase Spark free plan; this specific metric is classified as **ARCHITECTURALLY VERIFIED / NOT PHYSICALLY FLOODED**.
+> The capacity & authentication throughput test authenticated **499 simulated users in 29ms** with 0 failures (`tests/test_auth_scale_500.js`). Live physical concurrent WebSocket flooding with 500 active browser tabs cannot be conducted simultaneously against the Firebase Spark free plan; this specific metric is classified as **ARCHITECTURALLY VERIFIED / NOT PHYSICALLY FLOODED**.
 
 ---
 
@@ -535,7 +535,7 @@ STRETCH CAPABILITIES:
   [~] PARTIAL / BROKEN : 0
   [ ] MISSING          : 0
 
-OVERALL PORTAL READINESS: 100% PRODUCTION READY
+OVERALL PORTAL READINESS: CONDITIONAL PASS
 ======================================================================
 ```
 
@@ -565,9 +565,9 @@ TEST EXECUTION SUMMARY
    Command: node tests/test_appendix_a_official.js
    Tests: 31 passed / 31 total (100%)
 
-5. Zero-Latency Timer Sync & Bid Start Suite:
+5. Timer Synchronization & Bid Start Suite:
    Command: node tests/test_timer_and_bid_sync.js
-   Tests: 21 passed / 21 total (100%)
+   Result: 21/21 timer synchronization correctness tests passed (100%)
 
 6. Section 52 Final Acceptance Suite:
    Command: node tests/test_section52_acceptance.js
@@ -583,13 +583,21 @@ TEST EXECUTION SUMMARY
 
 9. 500-User Capacity & Authentication Engine:
    Command: node tests/test_auth_scale_500.js
-   Throughput: 499 authentications in 29ms (0 failures)
+   Throughput: 499 simulated users in 29ms (0 failures)
    Exit Code: 0
 ======================================================================
 ```
 
 ---
 
-## 5. FINAL CERTIFICATION SIGN-OFF
+## 5. FINAL ACCEPTANCE SIGN-OFF
 
-The ACC 2026 Auction Portal is hereby certified **100% PRODUCTION READY** for live event-day execution. All workflows, route guards, verification gates, auction cockpit controls, timer deadlines, franchise rules, and credential conventions are fully implemented, verified, and hardened.
+The ACC 2026 Auction Portal is hereby awarded **CONDITIONAL PASS** for event-day readiness. All application logic, security gates, verification workflows, auction cockpit controls, timer synchronization, franchise rules, and credentials are fully implemented, verified, and hardened.
+
+**Acceptance Status Rationale:**
+- **Core Functionality:** 304 / 304 VERIFIED LIVE
+- **Project-Specific Governance & UI:** 52 / 52 VERIFIED LIVE
+- **Stretch Capabilities:** 7 / 8 VERIFIED LIVE, 1 / 8 ARCHITECTURAL (physical 500-browser live flood constrained by Firebase Spark plan)
+- **Functional Defects:** 0
+- **Open Constraint:** Physical 500-browser concurrent WebSocket flooding remains an infrastructure constraint until upgrade to Blaze plan. Functionally accepted based on available evidence; production-scale concurrent browser/WebSocket verification remains open.
+

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation, Link } from 'wouter';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { 
@@ -94,10 +94,10 @@ export default function PlayerRegistrationPage() {
   const rollParser = useRollParser(formData.rollNumber, 2026);
   const imageProcessor = useImageProcessor();
 
-  const handleFieldChange = (field: string, value: any) => {
+  const handleFieldChange = useCallback((field: string, value: any) => {
     setFormError(null);
-    setFormData((prev) => ({ ...prev, [field]: value }));
-  };
+    setFormData((prev) => (prev[field as keyof typeof prev] === value ? prev : { ...prev, [field]: value }));
+  }, []);
 
   const handlePhotoSelected = (file: File) => {
     setFormData((prev) => ({
@@ -204,6 +204,7 @@ export default function PlayerRegistrationPage() {
 
   // Submission & Google Account Linking (Points 4, 5, 6, 7, 39)
   const handleSubmit = async () => {
+    if (isSubmitting) return;
     if (!validateStep(5)) return;
 
     try {
@@ -487,6 +488,7 @@ export default function PlayerRegistrationPage() {
         <div className="backdrop-blur-2xl bg-slate-800/85 border border-slate-700/80 rounded-3xl p-6 md:p-8 shadow-2xl">
           {currentStep === 1 && (
             <IdentityStep
+              key="step-identity"
               rollNumber={formData.rollNumber}
               name={formData.name}
               mobileNumber={formData.mobileNumber}

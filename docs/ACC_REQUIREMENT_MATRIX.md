@@ -20,7 +20,7 @@
 | **A03** | Financial validity is continuously enforced | `[✓]` | `bidEngine.ts:calculateMaxBid`, `Acc-Auction-Os.html:2800` | Appendix A Cases 1–6 | None. Strict purse reserve calculation. |
 | **A04** | Squad composition & bucket quotas enforced | `[✓]` | `bucketEligibility.ts`, `Acc-Auction-Os.html:2900` | Appendix A Cases 7–10 | None. Rule 12.2 slot protection active. |
 | **A05** | Sale mistakes are fully recoverable | `[✓]` | `Acc-Auction-Os.html:4300-4450` | Appendix A Cases 16–18 | None. Multi-lot atomic rollback verified. |
-| **A06** | Public transparency without login | `[~]` | `Home.tsx` exists; `App.tsx:38-74` has inline stub | `test_player_visibility_and_realtime.js` | Mount `Home.tsx` in `App.tsx` router. |
+| **A06** | Public transparency without login | `[✓]` | `Home.tsx` mounted at `/` in `App.tsx:153`, `PublicHeader:20-60` | `test_player_visibility_and_realtime.js` | None. Full Home view and PublicHeader active. |
 | **A07** | Operates during real event under pressure | `[✓]` | Dual-delivery mesh (`acc_auction_mesh_2026`) + Firestore fallback | `test_timer_and_bid_sync.js` (21/21) | None. Drift-free timer and offline failover. |
 
 ---

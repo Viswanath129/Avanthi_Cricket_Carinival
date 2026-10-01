@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useLayoutEffect, memo } from 'react';
 import { UseRollParserReturn } from '@/hooks/useRollParser';
 import { BUCKET_LABELS } from '@shared/types';
 
@@ -13,7 +13,7 @@ interface IdentityStepProps {
   onChange: (field: string, value: any) => void;
 }
 
-export const IdentityStep: React.FC<IdentityStepProps> = ({
+const IdentityStepComponent: React.FC<IdentityStepProps> = ({
   rollNumber,
   name,
   mobileNumber,
@@ -24,6 +24,21 @@ export const IdentityStep: React.FC<IdentityStepProps> = ({
   onChange,
 }) => {
   const [showDetainedModal, setShowDetainedModal] = useState(false);
+  const rollInputRef = useRef<HTMLInputElement>(null);
+  const cursorRef = useRef<number | null>(null);
+
+  const handleRollChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.target;
+    cursorRef.current = input.selectionStart;
+    const upperVal = input.value.toUpperCase();
+    onChange('rollNumber', upperVal);
+  };
+
+  useLayoutEffect(() => {
+    if (rollInputRef.current && cursorRef.current !== null) {
+      rollInputRef.current.setSelectionRange(cursorRef.current, cursorRef.current);
+    }
+  }, [rollNumber]);
 
   return (
     <div className="space-y-6">
@@ -43,16 +58,22 @@ export const IdentityStep: React.FC<IdentityStepProps> = ({
         </label>
         <div className="relative">
           <input
+            ref={rollInputRef}
+            id="regRollInput"
+            name="rollNumber"
             type="text"
+            autoComplete="off"
+            autoCapitalize="characters"
+            spellCheck="false"
             value={rollNumber}
-            onChange={(e) => onChange('rollNumber', e.target.value.toUpperCase())}
+            onChange={handleRollChange}
             placeholder="e.g. 25811A0403 or 24597-CM-015"
             maxLength={15}
-            className="w-full min-h-[48px] px-4 py-3 bg-white/60 dark:bg-slate-900/60 border border-slate-300 dark:border-slate-700 rounded-xl font-mono text-base text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all shadow-sm"
+            className="w-full min-h-[48px] px-4 py-3 bg-white/60 dark:bg-slate-900/60 border border-slate-300 dark:border-slate-700 rounded-xl font-mono text-base uppercase text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all shadow-sm"
           />
           {rollParser.isValid && (
             <div className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 font-bold text-lg">
-              \u2713
+              ✓
             </div>
           )}
         </div>
@@ -182,3 +203,5 @@ export const IdentityStep: React.FC<IdentityStepProps> = ({
     </div>
   );
 };
+
+export const IdentityStep = memo(IdentityStepComponent);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef, useLayoutEffect } from "react";
 import {
   Gavel,
   Radio,
@@ -1907,6 +1907,20 @@ function PlayerBoardView({
 // =========================================================================
 function RegistrationRollParserView({ notify }: { notify: (msg: string) => void }) {
   const [inputRoll, setInputRoll] = useState("25815A0403");
+  const homeRollInputRef = useRef<HTMLInputElement>(null);
+  const homeCursorRef = useRef<number | null>(null);
+
+  const handleHomeRollChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    homeCursorRef.current = e.target.selectionStart;
+    setInputRoll(e.target.value.toUpperCase());
+  };
+
+  useLayoutEffect(() => {
+    if (homeRollInputRef.current && homeCursorRef.current !== null) {
+      homeRollInputRef.current.setSelectionRange(homeCursorRef.current, homeCursorRef.current);
+    }
+  }, [inputRoll]);
+
   const parsed = useMemo(() => parseRollNumber(inputRoll), [inputRoll]);
 
   // Skill questionnaire state
@@ -1946,9 +1960,15 @@ function RegistrationRollParserView({ notify }: { notify: (msg: string) => void 
           </label>
           <div className="flex gap-3">
             <input
+              ref={homeRollInputRef}
+              id="homeRegRollInput"
+              name="homeRollNumber"
               type="text"
+              autoComplete="off"
+              autoCapitalize="characters"
+              spellCheck="false"
               value={inputRoll}
-              onChange={(e) => setInputRoll(e.target.value.toUpperCase())}
+              onChange={handleHomeRollChange}
               placeholder="e.g. 25811A0403 or 24597-CM-015"
               className="flex-1 rounded-2xl border border-white/20 bg-black/40 px-4 py-3 font-mono text-base font-bold text-white uppercase outline-none focus:border-[#10b981]"
             />
