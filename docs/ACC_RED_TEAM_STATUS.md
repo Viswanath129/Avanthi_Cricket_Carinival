@@ -21,6 +21,34 @@ A comprehensive red-team adversarial evaluation was executed against the ACC 202
 | **Systemic & Administrative Governance** | 2 | 2 | 0 | 100% |
 | **TOTAL** | **20** | **20** | **0** | **100%** |
 
+> **Coverage & Test Suite Architecture:**  
+> The 14 automated security regression tests in `tests/test_redteam_remediation.js` directly gate identity, RBAC authorization, password policy, and route integrity. The remaining scenarios in this 20-scenario adversarial threat model are verified across companion acceptance suites (`test_appendix_a_official.js`, `test_timer_and_bid_sync.js`, `test_section52_acceptance.js`, `test_part_d_and_dashboard_acceptance.js`, `test_auth_scale_500.js`, and `test_player_visibility_and_realtime.js`). Across all suites, **20 / 20** attack scenarios have traceable automated test coverage.
+
+### Explicit 20-Scenario Traceability Matrix
+
+| Scenario ID | Attack Vector / Focus | Primary Test Suite & Case | Result | Defense Mechanism & Evidence |
+| :--- | :--- | :--- | :---: | :--- |
+| **BI01** | Operator privilege escalation | `test_redteam_remediation.js` (`ADMIN-001`), `test_admin_governance.js` | `[✓] PASS` | Role gate in `index.html:3600`, `firestore.rules` |
+| **BI02** | Bid stream identity spoofing | `test_redteam_remediation.js` (`AUTH-001`, `FRANCHISE-002`) | `[✓] PASS` | Auth token UID verification; cross-bid blocked |
+| **BI03** | Client max bid purse overflow | `test_redteam_remediation.js` (`FRANCHISE-003`), `test_appendix_a_official.js` (1–6) | `[✓] PASS` | Server calculation in `bidEngine.ts:calculateMaxBid` |
+| **BI04** | Rule 12.2 slot protection bypass | `test_appendix_a_official.js` (Cases 7–10) | `[✓] PASS` | `isBucketEligible` halts invalid quota bids |
+| **BI05** | Double-tap / jump bidding race | `test_timer_and_bid_sync.js` (11 simultaneous bids), `test_appendix_a` (28) | `[✓] PASS` | Client idempotency keys + ladder increment validation |
+| **BI06** | Local clock / time tampering | `test_timer_and_bid_sync.js` (`test_offset_calculation_median`) | `[✓] PASS` | Deadline minus server time offset (median RTT) |
+| **BI07** | Auto-hammer exploit at 0s | `test_timer_and_bid_sync.js` (`test_expiry_does_not_sell`), `test_appendix_a` (31) | `[✓] PASS` | Timer expiry prompts confirmation modal; no auto-sale |
+| **BI08** | PII scraping via public feeds | `test_player_visibility_and_realtime.js` (Test 1), `test_full_spec_matrix.js` (`K11`) | `[✓] PASS` | Public serializer strips phone numbers; `/players` private |
+| **BI09** | Double undo refund attack | `test_appendix_a_official.js` (Case 18), `test_full_spec_matrix.js` (`I3`) | `[✓] PASS` | Sale state flagged `status: 'UNDONE'`, second call rejected |
+| **BI10** | DoS via oversized payload | `test_aspect_ratio_and_live_badge.js` (Test 1), `test_part_d` (`D4`) | `[✓] PASS` | 4:3 canvas compressor resizes image to max 800x600 (<100KB) |
+| **BI11** | BroadcastChannel replay attack | `test_player_visibility_and_realtime.js` (Test 3) | `[✓] PASS` | Monotonically increasing version sequence check |
+| **BI12** | Sub-ms multi-device collision | `test_part_d_and_dashboard_acceptance.js` (`Dash 3`), `test_timer_and_bid_sync.js` | `[✓] PASS` | Firestore transactions serialize in arrival order |
+| **BI13** | Laptop sleep / tab resumption desync | `test_timer_and_bid_sync.js` (`test_offset_survives_tab_sleep`), `test_part_d` (`Dash 14`) | `[✓] PASS` | `visibilitychange` triggers immediate reconciliation |
+| **BI14** | Injection in roll number fields | Vitest `rollClassifier.test.ts` (8/8) | `[✓] PASS` | Strict alphanumeric regex sanitization `/[^A-Z0-9-]/g` |
+| **BI15** | Direct-assign floor collision | `test_part_d_and_dashboard_acceptance.js` (`Dash 11`), `test_full_spec_matrix` (`J5`) | `[✓] PASS` | Direct assign pauses lot and logs operator identity |
+| **BI16** | Player deletion without trace | `test_section52_acceptance.js` (Test 6) | `[✓] PASS` | Hard delete of sold player blocked; archive enforced |
+| **BI17** | RTDB presence spoofing | `test_auth_scale_500.js` (Test 4), `database.rules.json:7` | `[✓] PASS` | Unauthenticated writes strictly restricted to `pub_*` keys |
+| **BI18** | Immutable audit log tampering | `test_part_d_and_dashboard_acceptance.js` (`D26`), `firestore.rules:33` | `[✓] PASS` | Audit logs survive bulk purge; rules deny update/delete |
+| **BI19** | Unapproved player leakage | `test_player_visibility_and_realtime.js` (Test 1), `test_section52` (Test 2) | `[✓] PASS` | `isPlayerPubliclyVisible` hides unapproved/pending players |
+| **BI20** | Critical field modification bypass | `test_section52_acceptance.js` (Test 3) | `[✓] PASS` | Academic field changes automatically revoke approval |
+
 ---
 
 ## 2. Adversarial Test Vector Analysis & Evidence
