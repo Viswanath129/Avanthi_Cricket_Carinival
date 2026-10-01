@@ -78,15 +78,16 @@ export function classifyRollNumber(rollNumber: string, currentAcademicStartYear:
   }
 
   // Fallback / PG
+  const admissionYear = 2000 + parseInt(rollNumber.substring(0, 2), 10) || currentAcademicStartYear;
   return {
     rollNumber,
     program: 'MBA',
     entryType: 'REGULAR',
     branch: 'Unknown',
     branchCode: 'Unknown',
-    admissionYear: 2000 + parseInt(rollNumber.substring(0, 2), 10) || currentAcademicStartYear,
+    admissionYear,
     studyYear: 1,
     bucket: 'M6',
-    referenceEligible: false
+    referenceEligible: admissionYear === currentAcademicStartYear
   };
 }

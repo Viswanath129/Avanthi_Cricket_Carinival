@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { Switch, Route, Link, useLocation } from "wouter";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 
+import Home from "./pages/Home";
 import LoginPage from "./pages/LoginPage";
 import PlayerBoardPage from "./pages/PlayerBoardPage";
 import TeamsBoardPage from "./pages/TeamsBoardPage";
@@ -15,63 +17,49 @@ import PlayerRegistrationPage from "./pages/PlayerRegistrationPage";
 import PlayerDashboardPage from "./pages/PlayerDashboardPage";
 import ProjectorPage from "./pages/ProjectorPage";
 
-const PublicHeader = () => (
-  <header className="border-b border-[var(--border)] bg-[var(--background)] p-4 sticky top-0 z-10">
-    <div className="max-w-7xl mx-auto flex items-center justify-between">
-      <a href="/" className="font-display font-bold text-xl tracking-tight text-white">
-        ACC 2026
-      </a>
-      <nav className="flex gap-6 font-medium text-sm text-[var(--muted-foreground)]">
-        <a href="/players" className="hover:text-white transition-colors">Players</a>
-        <a href="/teams" className="hover:text-white transition-colors">Teams</a>
-        <a href="/live" className="hover:text-white transition-colors">Live Auction</a>
-      </nav>
-      <a href="/login">
-        <button className="bg-[var(--primary)] text-[var(--primary-foreground)] px-4 py-2 rounded-sm font-semibold text-sm">
-          LOGIN
-        </button>
-      </a>
-    </div>
-  </header>
-);
+export const PublicHeader = () => {
+  const [edition, setEdition] = useState("2026");
+  return (
+    <header className="border-b border-[var(--border)] bg-[var(--background)] p-4 sticky top-0 z-10 shadow-sm">
+      <div className="max-w-7xl mx-auto flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-3">
+          <a href="/" className="font-display font-bold text-xl tracking-tight text-white hover:opacity-90 transition-opacity">
+            ACC {edition}
+          </a>
+          <div className="flex items-center gap-1.5 bg-white/5 border border-white/10 px-2 py-0.5 rounded text-xs">
+            <span className="text-[10px] font-mono text-[var(--muted-foreground)]">EDITION:</span>
+            <select
+              value={edition}
+              onChange={(e) => setEdition(e.target.value)}
+              className="bg-transparent text-white font-mono text-xs focus:outline-none cursor-pointer"
+            >
+              <option value="2026" className="bg-slate-900 text-white">ACC 2026</option>
+              <option value="2027" className="bg-slate-900 text-white">ACC 2027</option>
+            </select>
+          </div>
+        </div>
 
-const HomePage = () => (
-  <div className="min-h-screen flex flex-col bg-[var(--background)]">
-    <PublicHeader />
-    <main className="flex-1 flex items-center justify-center">
-      <div className="text-center space-y-6 px-4">
-        <h1 className="font-display text-5xl md:text-6xl font-bold tracking-tight text-white">
-          ACC 2026
-        </h1>
-        <p className="text-sm text-[var(--muted-foreground)] uppercase tracking-widest font-mono">
-          Avanthi Cricket Carnival \u2014 Auction Portal
-        </p>
-        <div className="pt-8 flex flex-col sm:flex-row gap-4 justify-center">
-          <a href="/players">
-            <button className="w-full sm:w-auto px-8 py-3 border border-[var(--border)] text-white text-sm font-semibold rounded-sm hover:bg-white/5 transition-colors">
-              View Players
-            </button>
-          </a>
-          <a href="/teams">
-            <button className="w-full sm:w-auto px-8 py-3 border border-[var(--border)] text-white text-sm font-semibold rounded-sm hover:bg-white/5 transition-colors">
-              View Teams
-            </button>
-          </a>
-          <a href="/live">
-            <button className="w-full sm:w-auto px-8 py-3 bg-[var(--accent)] text-[var(--accent-foreground)] text-sm font-bold rounded-sm hover:opacity-90 transition-opacity">
-              Live Auction
+        <nav className="flex items-center gap-4 sm:gap-6 font-medium text-xs sm:text-sm text-[var(--muted-foreground)] flex-wrap">
+          <a href="/players" className="hover:text-white transition-colors">PLAYERS</a>
+          <a href="/teams" className="hover:text-white transition-colors">TEAMS</a>
+          <a href="/live" className="hover:text-white transition-colors">LIVE AUCTION</a>
+          <a href="/register" className="hover:text-white transition-colors text-emerald-400 font-semibold">REGISTER</a>
+          <a href="/franchise/register" className="hover:text-white transition-colors text-amber-400 font-semibold">FRANCHISE REG</a>
+          <a href="/projector" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">PROJECTOR ↗</a>
+        </nav>
+
+        <div className="flex items-center gap-3">
+          <a href="/login">
+            <button className="bg-[var(--primary)] text-[var(--primary-foreground)] px-4 py-1.5 rounded-sm font-semibold text-xs sm:text-sm hover:opacity-90 transition-opacity">
+              LOGIN
             </button>
           </a>
         </div>
       </div>
-    </main>
-    <footer className="border-t border-[var(--border)] py-4 text-center">
-      <p className="text-[10px] font-mono text-[var(--muted-foreground)] uppercase tracking-widest">
-        ACC 2026{'\u201327'} {'\u00B7'} Server-Authoritative Auction System
-      </p>
-    </footer>
-  </div>
-);
+    </header>
+  );
+};
+
 
 const PlayerProfilePage = () => {
   const { user, userDoc, signOut } = useAuth();
@@ -162,7 +150,7 @@ function Router() {
   return (
     <Switch>
       {/* Public Routes */}
-      <Route path="/" component={HomePage} />
+      <Route path="/" component={Home} />
       <Route path="/players" component={PlayerBoardPage} />
       <Route path="/teams" component={TeamsBoardPage} />
       <Route path="/live" component={LiveAuctionPage} />

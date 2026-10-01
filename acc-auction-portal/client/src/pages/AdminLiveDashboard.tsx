@@ -931,14 +931,14 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
           <span className="text-slate-600 font-mono truncate max-w-[140px] hidden xl:inline">
             {user?.email || 'operator@acc.org'}
           </span>
-          {capabilities.canManageFranchises && (
-            <button
-              onClick={() => setLocation('/admin/management')}
-              className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[11px] font-mono transition-colors"
-            >
-              Management
-            </button>
-          )}
+          <button
+            onClick={() => setLocation('/admin/management')}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-semibold font-mono tracking-wider transition-all shadow-sm"
+            title="Open Full Tournament Management Console"
+          >
+            <span>⚙</span>
+            <span>MANAGEMENT CONSOLE</span>
+          </button>
           <a
             href="/live"
             target="_blank"
