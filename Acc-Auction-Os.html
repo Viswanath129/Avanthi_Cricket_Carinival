@@ -7634,7 +7634,7 @@
               <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                 <span class="status-badge status-scarcity">SCARCITY ALERT</span>
                 <span style="font-size: 0.8125rem; font-weight: 700; color: var(--color-yellow);">
-                  ${scarcity.bucket}: ${scarcity.available} available vs ${scarcity.totalPlayersNeeded} mandatory slots remaining.
+                  ${scarcity.bucket}: ${scarcity.available} available vs ${scarcity.unfilledSlots} mandatory slots remaining.
                 </span>
               </div>
               <button class="btn btn-secondary" style="padding: 6px 12px; min-height: 32px; font-size: 0.75rem;" onclick="switchView('live')">WATCH BIDDING</button>
@@ -8446,8 +8446,34 @@
       }
     }
 
-    function quickFillCredentials() {
-      showToast("Demo shortcuts are disabled. Please sign in via the official Firebase Authentication portal.", "warning");
+    function quickFillCredentials(role, idVal, secretVal, franchiseId, identity) {
+      if (role === 'PLAYER') {
+        const idEl = document.getElementById("loginPlayerIdentifier");
+        const secEl = document.getElementById("loginPlayerSecret");
+        if (idEl) idEl.value = idVal || "26811A0501";
+        if (secEl) secEl.value = secretVal || "Player@2026";
+        showToast("Demo player credentials applied", "info");
+      } else if (role === 'FRANCHISE') {
+        if (franchiseId) franchiseLoginSelection = franchiseId;
+        if (identity) loginFranchiseIdentity = identity;
+        const fSelect = document.getElementById("loginFranchiseSelect");
+        if (fSelect && franchiseId) fSelect.value = String(franchiseId);
+        const secEl = document.getElementById("loginFranchiseSecret");
+        if (secEl) secEl.value = secretVal || "Titans@2026";
+        showToast("Demo franchise credentials applied", "info");
+      } else if (role === 'SUPER_ADMIN') {
+        const idEl = document.getElementById("loginAdminIdentifier");
+        const secEl = document.getElementById("loginAdminSecret");
+        if (idEl) idEl.value = idVal || "admin";
+        if (secEl) secEl.value = secretVal || "ACC@Admin#2026!";
+        showToast("Super Admin credentials applied", "info");
+      } else if (role === 'OPERATOR') {
+        const idEl = document.getElementById("loginAdminIdentifier");
+        const secEl = document.getElementById("loginAdminSecret");
+        if (idEl) idEl.value = idVal || "handler";
+        if (secEl) secEl.value = secretVal || "Handler@2026";
+        showToast("Floor Operator credentials applied", "info");
+      }
     }
 
     function renderLoginView() {
@@ -8541,15 +8567,6 @@
                 </div>
               </div>
 
-              <!-- Official Firebase Authentication Portal Redirection Banner -->
-              <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: var(--radius-md); padding: 12px; margin-bottom: var(--space-4); display: flex; align-items: center; justify-content: space-between; gap: 12px;">
-                <div>
-                  <div style="font-weight: 800; font-size: 0.8125rem; color: #10b981;">OFFICIAL FIREBASE AUTHENTICATION PORTAL</div>
-                  <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">Sign in with Google (Players & Franchises) or Dedicated Admin Credentials</div>
-                </div>
-                <a href="/login" class="btn btn-primary" style="padding: 6px 14px; font-size: 0.75rem; white-space: nowrap; text-decoration: none;">OPEN PORTAL →</a>
-              </div>
-
               <!-- Role Selector: 4 First-Class Workspace Tabs -->
               <div class="form-group" style="margin-bottom: var(--space-4);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
@@ -8587,6 +8604,11 @@
                   <div class="form-group" style="margin-bottom: 0;">
                     <label class="form-label">ROLL NUMBER OR REGISTERED EMAIL</label>
                     <input type="text" class="form-input" id="loginPlayerIdentifier" name="acc_player_roll_ident" autocomplete="off" spellcheck="false" placeholder="e.g. 26811A0501, 24815A0443, or mobile" required>
+                    <div class="auth-demo-chips">
+                      <span style="font-size: 0.6875rem; color: var(--text-faint); font-weight: 600;">Quick Demo:</span>
+                      <button type="button" class="auth-demo-chip" onclick="quickFillCredentials('PLAYER', '26811A0501', 'Player@2026')">26811A0501 (B1)</button>
+                      <button type="button" class="auth-demo-chip" onclick="quickFillCredentials('PLAYER', '25815A0403', 'Player@2026')">25815A0403 (B3)</button>
+                    </div>
                   </div>
 
                   <div class="form-group" style="margin-bottom: 0;">
@@ -8640,6 +8662,10 @@
                       <input type="password" class="form-input" id="loginFranchiseSecret" name="acc_franchise_secret_pin" autocomplete="new-password" placeholder="••••••••" required>
                       <button type="button" class="auth-eye-btn" onclick="togglePasswordVisibility('loginFranchiseSecret', this)" title="Show/Hide PIN"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
                     </div>
+                    <div class="auth-demo-chips">
+                      <span style="font-size: 0.6875rem; color: var(--text-faint); font-weight: 600;">Demo:</span>
+                      <button type="button" class="auth-demo-chip" onclick="quickFillCredentials('FRANCHISE', '', 'Titans@2026', 1, 'COORDINATOR')">Titans PIN (Titans@2026)</button>
+                    </div>
                   </div>
 
                   <div style="display: flex; justify-content: flex-end;">
@@ -8664,6 +8690,10 @@
                   <div class="form-group" style="margin-bottom: 0;">
                     <label class="form-label">ADMIN USERNAME OR EMAIL</label>
                     <input type="text" class="form-input" id="loginAdminIdentifier" name="acc_operator_user" autocomplete="username" placeholder="e.g. handler or operator" required>
+                    <div class="auth-demo-chips">
+                      <span style="font-size: 0.6875rem; color: var(--text-faint); font-weight: 600;">Demo:</span>
+                      <button type="button" class="auth-demo-chip" onclick="quickFillCredentials('OPERATOR', 'handler', 'Handler@2026')">handler / Handler@2026</button>
+                    </div>
                   </div>
 
                   <div class="form-group" style="margin-bottom: 0;">
@@ -8697,6 +8727,11 @@
                   <div class="form-group" style="margin-bottom: 0;">
                     <label class="form-label">ADMIN USERNAME OR EMAIL</label>
                     <input type="text" class="form-input" id="loginAdminIdentifier" name="acc_admin_user" autocomplete="username" placeholder="e.g. admin or superadmin@acc.edu" required>
+                    <div class="auth-demo-chips">
+                      <span style="font-size: 0.6875rem; color: var(--text-faint); font-weight: 600;">Demo:</span>
+                      <button type="button" class="auth-demo-chip" onclick="quickFillCredentials('SUPER_ADMIN', 'admin', 'ACC@Admin#2026!')">admin / ACC@Admin#2026!</button>
+                      <button type="button" class="auth-demo-chip" onclick="quickFillCredentials('SUPER_ADMIN', 'superadmin@acc.edu', 'Admin@2026')">superadmin / Admin@2026</button>
+                    </div>
                   </div>
 
                   <div class="form-group" style="margin-bottom: 0;">
@@ -13631,10 +13666,10 @@
       if (savedUserStr) {
         try {
           const parsed = JSON.parse(savedUserStr);
-          if (parsed && parsed.role && (parsed.uid || parsed.id || parsed.roll)) {
-            // Validate restored session against canonical users database with fallback to parsed credentials
-            const canonicalUser = users.find(u => (parsed.uid && u.uid === parsed.uid) || (parsed.email && u.email === parsed.email)) || parsed;
-            if (canonicalUser && canonicalUser.status !== 'LOCKED') {
+          if (parsed && parsed.role && parsed.uid) {
+            // VULN-6 FIX: Validate restored session against canonical users database
+            const canonicalUser = users.find(u => u.uid === parsed.uid);
+            if (canonicalUser && canonicalUser.role === parsed.role && canonicalUser.status !== 'LOCKED') {
               currentUser = canonicalUser;
             } else {
               // Invalid, tampered, or locked session. Revert to PUBLIC.
@@ -13642,22 +13677,20 @@
               localStorage.removeItem("acc_current_user_2026");
             }
             if (window.RealtimeStore) {
-              window.RealtimeStore.state.auth.user = currentUser;
-              window.RealtimeStore.state.auth.role = currentUser.role;
-              window.RealtimeStore.state.auth.franchiseId = currentUser.franchiseId || null;
-              window.RealtimeStore.state.auth.playerId = currentUser.playerId || null;
-              window.RealtimeStore.state.auth.identityType = currentUser.identityType || currentUser.role || 'PUBLIC';
+              window.RealtimeStore.state.auth.user = parsed;
+              window.RealtimeStore.state.auth.role = parsed.role;
+              window.RealtimeStore.state.auth.franchiseId = parsed.franchiseId || null;
+              window.RealtimeStore.state.auth.playerId = parsed.playerId || null;
+              window.RealtimeStore.state.auth.identityType = parsed.identityType || 'PUBLIC';
             }
           }
         } catch(e) {}
       }
 
       const authCtx = getCurrentUserContext();
-      let pathname = (typeof window !== "undefined" && window.location.pathname) ? window.location.pathname.replace(/^\/+|\/+$/g, "") : "";
       let rawHash = window.location.hash.replace(/^#\/?/, "");
-      let routeSource = rawHash || pathname;
-      let hash = routeSource.split('/')[0] || "public";
-      if (routeSource === "franchise/register" || routeSource === "franchise-register") hash = "franchise-register";
+      let hash = rawHash.split('/')[0] || "public";
+      if (rawHash === "franchise/register" || rawHash === "franchise-register") hash = "franchise-register";
       if (hash === "home" || !hash) hash = "public";
 
       if (hash && ["public", "live", "franchise", "teams", "register", "franchise-register", "player", "admin", "projector", "login", "debug/realtime", "debug-realtime"].includes(hash)) {
