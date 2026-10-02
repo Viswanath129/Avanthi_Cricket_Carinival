@@ -113,10 +113,21 @@ export default function FranchiseBiddingPage() {
 
   // Authoritative server timer loop
   useEffect(() => {
-    if (lot?.status === 'PAUSED') return;
-    const remaining = computeRemainingSeconds(lot?.timerDeadline, lot?.status === 'PAUSED');
-    setTimeLeft(remaining);
-  }, [lot, computeRemainingSeconds]);
+    if (lot?.status === 'PAUSED') {
+      const pausedSec = typeof lot?.pausedRemainingMs === 'number'
+        ? Math.max(0, Math.ceil(lot.pausedRemainingMs / 1000))
+        : timeLeft;
+      setTimeLeft(pausedSec);
+      return;
+    }
+    const tick = () => {
+      const remaining = computeRemainingSeconds(lot?.timerDeadline, false);
+      setTimeLeft(remaining);
+    };
+    tick();
+    const interval = setInterval(tick, 100);
+    return () => clearInterval(interval);
+  }, [lot?.timerDeadline, lot?.status, lot?.pausedRemainingMs, computeRemainingSeconds]);
 
   // Calculate Next Legal Bid
   const currentBid = lot?.currentBid || lot?.basePrice || 20;

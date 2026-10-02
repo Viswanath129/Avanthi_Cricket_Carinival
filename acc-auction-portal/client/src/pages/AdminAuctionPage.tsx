@@ -7,11 +7,13 @@ import { db, functions } from '@/lib/firebase';
 // import { checkBucketEligibility } from '@shared/engine/bucketEligibility';
 
 import { calculateNextBid } from '@shared/engine/bidEngine';
+import { useServerTime } from '@/hooks/useServerTime';
 
 // Hardcoded for now as requested
 const EDITION_ID = 'acc-2026';
 
 export default function AdminAuctionPage() {
+  const { offset: serverOffset, computeRemainingSeconds } = useServerTime();
   const [auctionState, setAuctionState] = useState<any>(null);
   const [currentLot, setCurrentLot] = useState<any>(null);
   const [bids, setBids] = useState<any[]>([]);
@@ -89,18 +91,23 @@ export default function AdminAuctionPage() {
 
   // Timer effect
   useEffect(() => {
-    if (!currentLot?.timerDeadline) {
-      setTimeLeft(0);
+    if (!currentLot?.timerDeadline || auctionState?.status === 'PAUSED') {
+      if (auctionState?.status === 'PAUSED') {
+        const pausedSec = typeof auctionState?.pausedRemainingMs === 'number'
+          ? Math.max(0, Math.ceil(auctionState.pausedRemainingMs / 1000))
+          : timeLeft;
+        setTimeLeft(pausedSec);
+      } else {
+        setTimeLeft(0);
+      }
       return;
     }
     const interval = setInterval(() => {
-      // Handle Firestore Timestamp or standard JS Date/number
-      const deadline = currentLot.timerDeadline.toMillis ? currentLot.timerDeadline.toMillis() : currentLot.timerDeadline;
-      const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      const remaining = computeRemainingSeconds(currentLot.timerDeadline, false);
       setTimeLeft(remaining);
     }, 100);
     return () => clearInterval(interval);
-  }, [currentLot?.timerDeadline]);
+  }, [currentLot?.timerDeadline, auctionState?.status, auctionState?.pausedRemainingMs, computeRemainingSeconds]);
 
   const handleOpenLot = async () => {
     try { await openLotFn({ editionId: EDITION_ID }); } catch (e) { console.error(e); }

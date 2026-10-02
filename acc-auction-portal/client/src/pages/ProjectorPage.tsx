@@ -129,8 +129,14 @@ export default function ProjectorPage() {
   // Synchronized countdown timer
   useEffect(() => {
     if (!currentLot?.timerDeadline || auctionState?.status === 'PAUSED') {
-      if (auctionState?.status === 'PAUSED') setTimeLeft(prev => prev);
-      else setTimeLeft(0);
+      if (auctionState?.status === 'PAUSED') {
+        const pausedSec = typeof auctionState?.pausedRemainingMs === 'number'
+          ? Math.max(0, Math.ceil(auctionState.pausedRemainingMs / 1000))
+          : timeLeft;
+        setTimeLeft(pausedSec);
+      } else {
+        setTimeLeft(0);
+      }
       return;
     }
 
@@ -145,7 +151,7 @@ export default function ProjectorPage() {
     }, 100);
 
     return () => clearInterval(interval);
-  }, [currentLot?.timerDeadline, auctionState?.status, serverOffset]);
+  }, [currentLot?.timerDeadline, auctionState?.status, auctionState?.pausedRemainingMs, serverOffset]);
 
   const highestBid = bids[0];
   const currentBidPrice = highestBid?.amount || currentLot?.currentPrice || currentLot?.basePrice || 50;

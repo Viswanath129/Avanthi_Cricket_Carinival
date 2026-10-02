@@ -2605,8 +2605,13 @@
     let currentBid = players[0] ? players[0].basePrice : 60;
     let leadingBidderId = null;
     let timerSeconds = 30;
+    let timerDuration = 30000;
     let timerMode = 'FIRST_BID'; // 'FIRST_BID' (30s) or 'BID' (20s)
     let timerDeadline = Date.now() + 30000;
+    let timerStartedAt = Date.now();
+    let lastBidAt = null;
+    let timerVersion = 1;
+    let pausedRemainingMs = null;
     let timerRunning = false;
     let auctionPaused = false;
     let auctionState = 'IDLE';
@@ -2619,6 +2624,70 @@
     window.superAdminName = localStorage.getItem("acc_superadmin_name") || "Mr. Deepak";
     window.sessionMarker = "Session 2 — Day 1";
     window.editionMarker = "ACC 2026";
+
+    // ========================================================
+    // CLOCK SYNCHRONIZATION ENGINE (NTP-STYLE MEDIAN FILTER)
+    // ========================================================
+    const ClockSync = {
+      samples: [],
+      currentOffset: 0,
+      currentRtt: 20,
+      isSynced: false,
+
+      addSample(offset, rtt) {
+        if (typeof offset !== 'number' || isNaN(offset)) return;
+        if (typeof rtt === 'number' && rtt > 500) {
+          // Discard high-latency / jitter spikes (>500ms RTT)
+          return;
+        }
+        const effectiveRtt = (typeof rtt === 'number' && rtt > 0) ? Math.round(rtt) : 20;
+        this.samples.push({ offset: Math.round(offset), rtt: effectiveRtt, t: Date.now() });
+        if (this.samples.length > 8) this.samples.shift();
+
+        const valid = this.samples.filter(s => s.rtt <= 500);
+        if (valid.length === 0) return;
+
+        const sorted = valid.map(s => s.offset).sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        const median = sorted.length % 2 !== 0 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+
+        this.currentRtt = Math.min(...valid.map(s => s.rtt));
+
+        if (!this.isSynced) {
+          this.currentOffset = median;
+          this.isSynced = true;
+        } else {
+          const delta = Math.abs(median - this.currentOffset);
+          if (delta > 500) {
+            this.currentOffset = median; // Abrupt jump correction
+          } else {
+            this.currentOffset = Math.round(0.7 * this.currentOffset + 0.3 * median);
+          }
+        }
+
+        if (window.RealtimeStore && window.RealtimeStore.state && window.RealtimeStore.state.connection) {
+          window.RealtimeStore.state.connection.serverTimeOffset = this.currentOffset;
+        }
+      },
+
+      applyExternalOffset(offset) {
+        if (typeof offset !== 'number' || isNaN(offset)) return;
+        this.addSample(offset, 20);
+      },
+
+      getOffset() {
+        if (this.isSynced) return this.currentOffset;
+        if (window.RealtimeStore && window.RealtimeStore.state && window.RealtimeStore.state.connection && typeof window.RealtimeStore.state.connection.serverTimeOffset === 'number') {
+          return window.RealtimeStore.state.connection.serverTimeOffset;
+        }
+        return 0;
+      },
+
+      getServerNow() {
+        return Date.now() + this.getOffset();
+      }
+    };
+    window.ClockSync = ClockSync;
 
     
     let adminNavTab = 'AUCTION'; // OVERVIEW, TEAMS, PLAYERS, REGISTRATIONS, AUCTION, ROUND 2, UNDO, AUDIT, EXPORT, SETTINGS, ADMIN ACCOUNTS
@@ -5514,11 +5583,7 @@
 
       currentBid = nextBid;
       leadingBidderId = franchiseId;
-      timerMode = 'BID';
-      timerSeconds = 20;
-      const sOffset = (window.RealtimeStore && window.RealtimeStore.state.connection.serverTimeOffset) || 0;
-      timerDeadline = Date.now() + sOffset + 20000; // Reset to full 20 seconds
-      timerRunning = true;
+      AuctionTimerEngine.onBid(franchiseId);
       playBidSound();
       showSpeeder("BID SUBMITTED", `${f.name} placed bid of ${currentBid} Credits for #${cur.id} ${cur.name}`, 600);
 
@@ -5543,7 +5608,6 @@
       });
       saveDatabase();
       broadcastAuthoritativeState();
-      startTimer();
       renderCurrentView();
     }
 
@@ -5563,176 +5627,320 @@
       renderCurrentView();
     }
 
-    function updateTimerDisplay() {
-      try {
-        // 1. Direct update for all countdown numbers (Live Auctioneer & Cards)
-        document.querySelectorAll(".timer-countdown-number").forEach(el => {
-          el.textContent = timerSeconds;
-        });
+    // ========================================================
+    // AUTHORITATIVE AUCTION TIMER ENGINE (SINGLE SOURCE OF TRUTH)
+    // ========================================================
+    const AuctionTimerEngine = {
+      rafId: null,
+      intervalId: null,
+      lastTickSec: null,
 
-        // 2. Direct update for all timer widgets
-        const widgetClass = timerSeconds <= 5 ? 'critical' : (timerSeconds <= 10 ? 'warning' : 'normal');
-        document.querySelectorAll(".auction-timer-widget").forEach(el => {
-          el.classList.remove('normal', 'warning', 'critical');
-          el.classList.add(widgetClass);
+      getSynchronizedNow() {
+        return (window.ClockSync && typeof window.ClockSync.getServerNow === 'function')
+          ? window.ClockSync.getServerNow()
+          : (Date.now() + ((window.RealtimeStore && window.RealtimeStore.state && window.RealtimeStore.state.connection && window.RealtimeStore.state.connection.serverTimeOffset) || 0));
+      },
 
-          const span = el.querySelector(".clock-seconds, span, .font-mono");
-          if (span) {
-            const txt = (span.textContent || "").trim();
-            if (txt.includes("SEC")) {
-              span.textContent = `${timerSeconds} SEC`;
-            } else if (txt.includes("CLOCK")) {
-              span.textContent = `${timerSeconds}s CLOCK`;
-            } else if (txt.includes("s")) {
-              span.textContent = `${timerSeconds}s`;
-            } else if (span.classList.contains("font-mono") && span.children.length === 0) {
-              span.textContent = `${timerSeconds}s`;
-            }
+      getRemainingMs() {
+        if (auctionPaused) {
+          return typeof pausedRemainingMs === 'number' ? pausedRemainingMs : (timerSeconds * 1000);
+        }
+        if (!timerRunning || !timerDeadline) {
+          return timerSeconds > 0 ? (timerSeconds * 1000) : 0;
+        }
+        const sNow = this.getSynchronizedNow();
+        return Math.max(0, timerDeadline - sNow);
+      },
+
+      getRemainingSeconds() {
+        const ms = this.getRemainingMs();
+        return Math.max(0, Math.ceil(ms / 1000));
+      },
+
+      getUrgencyClass(sec) {
+        if (auctionPaused) return 'warning paused';
+        if (sec <= 0) return 'critical time-up stopped';
+        if (sec <= 5) return 'critical';
+        if (sec <= 10) return 'warning';
+        return 'normal';
+      },
+
+      start(deadlineMs, durationMs, version) {
+        const sNow = this.getSynchronizedNow();
+        timerDuration = durationMs || (timerMode === 'BID' ? 20000 : 30000);
+        if (deadlineMs) {
+          timerDeadline = deadlineMs;
+        } else if (!timerDeadline || timerDeadline <= sNow) {
+          timerDeadline = sNow + timerDuration;
+        }
+        if (version !== undefined && version !== null) {
+          timerVersion = version;
+        } else {
+          timerVersion = (timerVersion || 1) + 1;
+        }
+        auctionPaused = false;
+        pausedRemainingMs = null;
+        frozenRemainingSeconds = null;
+        timerRunning = true;
+        this.renderTick();
+        this.startLoop();
+      },
+
+      pause() {
+        const sNow = this.getSynchronizedNow();
+        auctionPaused = true;
+        timerRunning = false;
+        pausedRemainingMs = timerDeadline ? Math.max(0, timerDeadline - sNow) : (timerSeconds * 1000);
+        frozenRemainingSeconds = Math.max(0, Math.ceil(pausedRemainingMs / 1000));
+        timerSeconds = frozenRemainingSeconds;
+        timerVersion = (timerVersion || 1) + 1;
+        this.stopLoop();
+        this.renderTick();
+      },
+
+      resume() {
+        const sNow = this.getSynchronizedNow();
+        auctionPaused = false;
+        const dur = (typeof pausedRemainingMs === 'number') ? pausedRemainingMs : ((frozenRemainingSeconds || 20) * 1000);
+        timerDeadline = sNow + dur;
+        timerDuration = timerDuration || 20000;
+        pausedRemainingMs = null;
+        frozenRemainingSeconds = null;
+        timerRunning = true;
+        timerVersion = (timerVersion || 1) + 1;
+        this.renderTick();
+        this.startLoop();
+      },
+
+      reset(durationMs = 30000) {
+        const sNow = this.getSynchronizedNow();
+        timerMode = durationMs === 20000 ? 'BID' : 'FIRST_BID';
+        timerDuration = durationMs;
+        timerDeadline = sNow + durationMs;
+        timerStartedAt = sNow;
+        timerSeconds = Math.ceil(durationMs / 1000);
+        auctionPaused = false;
+        pausedRemainingMs = null;
+        frozenRemainingSeconds = null;
+        timerRunning = true;
+        timerVersion = (timerVersion || 1) + 1;
+        this.renderTick();
+        this.startLoop();
+      },
+
+      onBid(franchiseId) {
+        const sNow = this.getSynchronizedNow();
+        timerMode = 'BID';
+        timerDuration = 20000;
+        timerDeadline = sNow + 20000;
+        lastBidAt = sNow;
+        timerStartedAt = sNow;
+        timerSeconds = 20;
+        auctionPaused = false;
+        pausedRemainingMs = null;
+        frozenRemainingSeconds = null;
+        timerRunning = true;
+        timerVersion = (timerVersion || 1) + 1;
+        this.renderTick();
+        this.startLoop();
+      },
+
+      startLoop() {
+        if (this.rafId && typeof cancelAnimationFrame === 'function') {
+          cancelAnimationFrame(this.rafId);
+          this.rafId = null;
+        }
+        if (this.intervalId) {
+          clearInterval(this.intervalId);
+          this.intervalId = null;
+        }
+
+        const loop = () => {
+          this.renderTick();
+          if (timerRunning && !auctionPaused && typeof requestAnimationFrame === 'function') {
+            this.rafId = requestAnimationFrame(loop);
           }
-        });
+        };
 
-        // 3. Status badge update
-        const badge = document.getElementById("clockStatusBadge");
-        if (badge) {
-          if (timerSeconds === 0) {
-            badge.className = "status-badge status-blocked";
-            badge.textContent = "TIME UP (STOPPED)";
-          } else if (auctionPaused) {
-            badge.className = "status-badge status-warning";
-            badge.textContent = "PAUSED";
-          } else {
-            badge.className = "status-badge status-live";
-            badge.textContent = "CLOCK ACTIVE";
+        if (typeof requestAnimationFrame === 'function') {
+          this.rafId = requestAnimationFrame(loop);
+        }
+
+        // Background interval fallback (e.g. throttled / inactive tab)
+        this.intervalId = setInterval(() => {
+          this.renderTick();
+        }, 250);
+      },
+
+      stopLoop() {
+        if (this.rafId && typeof cancelAnimationFrame === 'function') {
+          cancelAnimationFrame(this.rafId);
+          this.rafId = null;
+        }
+        if (this.intervalId) {
+          clearInterval(this.intervalId);
+          this.intervalId = null;
+        }
+      },
+
+      renderTick() {
+        const remainingMs = this.getRemainingMs();
+        const sec = Math.max(0, Math.ceil(remainingMs / 1000));
+        timerSeconds = sec;
+
+        // Check expiry transition (Section 1: 00:00 does NOT auto-sell)
+        if (remainingMs <= 0 && timerRunning && !auctionPaused) {
+          timerSeconds = 0;
+          timerRunning = false;
+          this.stopLoop();
+          document.querySelectorAll(".hourglass-loader").forEach(el => {
+            el.classList.add("paused", "time-up", "stopped");
+          });
+          if (leadingBidderId && typeof openHammerConfirmModal === 'function') {
+            openHammerConfirmModal();
           }
         }
-      } catch (e) {
-        console.error("Timer display error:", e);
+
+        // Sound cue on critical countdown seconds (1-5s)
+        if (timerRunning && !auctionPaused && sec <= 5 && sec > 0 && sec !== this.lastTickSec) {
+          if (typeof playWarningTick === 'function') playWarningTick();
+        }
+        this.lastTickSec = sec;
+
+        this.updateDOM(remainingMs, sec);
+      },
+
+      updateDOM(remainingMs, sec) {
+        try {
+          const isPaused = !!auctionPaused;
+          const isTimeUp = sec === 0;
+          const urgencyClass = this.getUrgencyClass(sec);
+          const totalDur = timerDuration || (timerMode === 'BID' ? 20000 : 30000);
+          const progressRatio = Math.max(0, Math.min(1, remainingMs / totalDur));
+          const strokeOffset = 157 - (157 * progressRatio);
+          const strokeColor = sec <= 5 ? '#ef4444' : (sec <= 10 ? '#f59e0b' : '#10b981');
+          const textColor = sec <= 5 ? '#dc2626' : (sec <= 10 ? '#b45309' : '#047857');
+
+          // 1. All countdown number elements
+          document.querySelectorAll(".timer-countdown-number").forEach(el => {
+            el.textContent = sec;
+          });
+
+          // 2. All auction-timer-widget elements
+          document.querySelectorAll(".auction-timer-widget").forEach(el => {
+            el.classList.remove('normal', 'warning', 'critical', 'time-up', 'stopped', 'paused');
+            urgencyClass.split(' ').forEach(cls => { if (cls) el.classList.add(cls); });
+
+            const span = el.querySelector(".clock-seconds, span, .font-mono");
+            if (span) {
+              const txt = (span.textContent || "").trim();
+              if (txt.includes("SEC")) {
+                span.textContent = `${sec} SEC`;
+              } else if (txt.includes("CLOCK")) {
+                span.textContent = `${sec}s CLOCK`;
+              } else if (txt.includes("s")) {
+                span.textContent = `${sec}s`;
+              } else if (span.classList.contains("font-mono") && span.children.length === 0) {
+                span.textContent = `${sec}s`;
+              }
+            }
+          });
+
+          // 3. SVG Rings & Circular progress
+          document.querySelectorAll("svg circle[stroke-dasharray='157']").forEach(circle => {
+            circle.setAttribute("stroke", strokeColor);
+            circle.setAttribute("stroke-dashoffset", strokeOffset.toFixed(1));
+          });
+
+          // 4. Status badge update
+          const badge = document.getElementById("clockStatusBadge");
+          if (badge) {
+            if (isTimeUp) {
+              badge.className = "status-badge status-blocked";
+              badge.textContent = "TIME UP (STOPPED)";
+            } else if (isPaused) {
+              badge.className = "status-badge status-warning";
+              badge.textContent = "PAUSED";
+            } else {
+              badge.className = "status-badge status-live";
+              badge.textContent = "CLOCK ACTIVE";
+            }
+          }
+
+          // 5. Admin command center displays
+          document.querySelectorAll(".admin-timer-text").forEach(el => {
+            el.textContent = `${sec}s`;
+            el.style.color = textColor;
+          });
+
+          // 6. Admin quickstat & floor timer widgets
+          document.querySelectorAll(".admin-quickstat-timer").forEach(el => {
+            el.textContent = `${sec}s`;
+            el.style.color = sec <= 5 ? 'var(--color-red)' : 'var(--color-green)';
+          });
+          document.querySelectorAll(".admin-floortimer-number").forEach(el => {
+            el.innerHTML = `${sec}<span style="font-size: 1.1rem;">s</span>`;
+            el.style.color = sec <= 5 ? 'var(--color-red)' : 'var(--color-green)';
+          });
+          document.querySelectorAll(".admin-floortimer-box").forEach(el => {
+            el.style.borderColor = sec <= 5 ? 'var(--color-red)' : 'rgba(16, 185, 129, 0.4)';
+          });
+        } catch (e) {
+          console.error("Timer updateDOM error:", e);
+        }
       }
+    };
+    window.AuctionTimerEngine = AuctionTimerEngine;
+
+    // Tab Sleep & Wake Resilience (Section 13)
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) {
+          AuctionTimerEngine.renderTick();
+          if (timerRunning && !auctionPaused) {
+            AuctionTimerEngine.startLoop();
+          }
+        }
+      });
+    }
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener("focus", () => {
+        AuctionTimerEngine.renderTick();
+        if (timerRunning && !auctionPaused) {
+          AuctionTimerEngine.startLoop();
+        }
+      });
+      window.addEventListener("online", () => {
+        AuctionTimerEngine.renderTick();
+        if (window.RealtimeStore && typeof window.RealtimeStore.subscribeAuctionState === 'function') {
+          window.RealtimeStore.subscribeAuctionState();
+        }
+      });
     }
 
-    let timerRafId = null;
-    let lastRenderedRemaining = null;
-    let pausedRemainingMs = null;
 
-    function runTimerRafLoop() {
-      if (typeof cancelAnimationFrame === 'function' && timerRafId) {
-        cancelAnimationFrame(timerRafId);
-        timerRafId = null;
-      }
-
-      function tick() {
-        if (timerRunning && !auctionPaused && timerDeadline) {
-          const sOffset = (window.RealtimeStore && window.RealtimeStore.state.connection.serverTimeOffset) || 0;
-          const serverNow = Date.now() + sOffset;
-          const remainingMs = timerDeadline - serverNow;
-          const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
-
-          // Guard against backward jumps (snapshot reconciliation flicker)
-          if (lastRenderedRemaining !== null && remainingSec > lastRenderedRemaining && remainingSec - lastRenderedRemaining > 1 && remainingSec < 19) {
-            // retain smooth countdown
-          } else {
-            if (remainingSec !== timerSeconds) {
-              timerSeconds = remainingSec;
-              if (timerSeconds <= 5 && timerSeconds > 0) playWarningTick();
-              updateTimerDisplay();
-            }
-          }
-          lastRenderedRemaining = timerSeconds;
-
-          if (remainingMs <= 0) {
-            timerSeconds = 0;
-            timerRunning = false;
-            if (timerInterval) clearInterval(timerInterval);
-            updateTimerDisplay();
-            document.querySelectorAll(".hourglass-loader").forEach(el => {
-              el.classList.add("paused", "time-up", "stopped");
-            });
-            if (leadingBidderId) {
-              openHammerConfirmModal();
-            }
-            return;
-          }
-        }
-
-        if (timerRunning && !auctionPaused && typeof requestAnimationFrame === 'function') {
-          timerRafId = requestAnimationFrame(tick);
-        }
-      }
-
-      if (typeof requestAnimationFrame === 'function') {
-        timerRafId = requestAnimationFrame(tick);
-      }
+    function updateTimerDisplay() {
+      AuctionTimerEngine.renderTick();
     }
 
     function startTimer() {
-      const sOffset = (window.RealtimeStore && window.RealtimeStore.state.connection.serverTimeOffset) || 0;
-      const serverNow = Date.now() + sOffset;
-      if (!timerDeadline || timerDeadline <= serverNow) {
-        timerDeadline = serverNow + (timerSeconds > 0 ? timerSeconds * 1000 : 30000);
-        timerSeconds = Math.max(0, Math.ceil((timerDeadline - serverNow) / 1000));
-      }
-      if (timerRunning) return;
-      timerRunning = true;
-      runTimerRafLoop();
-
-      if (timerInterval) clearInterval(timerInterval);
-      timerInterval = setInterval(() => {
-        if (!auctionPaused && timerSeconds > 0) {
-          const sOffset = (window.RealtimeStore && window.RealtimeStore.state.connection.serverTimeOffset) || 0;
-          if (timerDeadline) {
-            const serverNow = Date.now() + sOffset;
-            const remaining = Math.max(0, Math.ceil((timerDeadline - serverNow) / 1000));
-            timerSeconds = remaining;
-          } else {
-            timerSeconds--;
-          }
-          if (timerSeconds <= 5 && timerSeconds > 0) playWarningTick();
-          updateTimerDisplay();
-          if (timerSeconds === 0) {
-            clearInterval(timerInterval);
-            timerRunning = false;
-            updateTimerDisplay();
-            document.querySelectorAll(".hourglass-loader").forEach(el => {
-              el.classList.add("paused", "time-up", "stopped");
-            });
-            if (leadingBidderId) {
-              openHammerConfirmModal();
-            }
-          }
-        }
-      }, 500);
+      AuctionTimerEngine.start();
     }
 
     function toggleAuctionPause() {
-      const sOffset = (window.RealtimeStore && window.RealtimeStore.state.connection.serverTimeOffset) || 0;
-      const serverNow = Date.now() + sOffset;
-
       auctionPaused = !auctionPaused;
       if (auctionPaused) {
-        pausedRemainingMs = timerDeadline ? Math.max(0, timerDeadline - serverNow) : timerSeconds * 1000;
-        frozenRemainingSeconds = Math.max(0, Math.ceil(pausedRemainingMs / 1000));
-        timerRunning = false;
-        if (timerInterval) clearInterval(timerInterval);
+        AuctionTimerEngine.pause();
       } else {
-        const resumeDuration = pausedRemainingMs !== null ? pausedRemainingMs : (frozenRemainingSeconds ? frozenRemainingSeconds * 1000 : 20000);
-        timerDeadline = serverNow + resumeDuration;
-        timerSeconds = Math.max(0, Math.ceil(resumeDuration / 1000));
-        pausedRemainingMs = null;
-        timerRunning = false;
-        startTimer();
+        AuctionTimerEngine.resume();
       }
-
       broadcastAuthoritativeState();
       showToast(auctionPaused ? "Auction clock paused" : "Auction clock resumed", "info");
       renderCurrentView();
     }
 
     function resetAuctionTimer() {
-      const sOffset = (window.RealtimeStore && window.RealtimeStore.state.connection.serverTimeOffset) || 0;
-      timerSeconds = 30;
-      timerDeadline = (Date.now() + sOffset) + 30000;
-      timerRunning = true;
-      startTimer();
+      AuctionTimerEngine.reset(30000);
       broadcastAuthoritativeState();
       showSpeeder("TIMER RESET", "Auction clock restarted at 30s", 500);
       showToast("Timer reset to 30 seconds", "info");
@@ -5740,14 +5948,11 @@
     }
 
     function skipPlayer() {
-      const sOffset = (window.RealtimeStore && window.RealtimeStore.state.connection.serverTimeOffset) || 0;
       lotIndex = (lotIndex + 1) % players.length;
       currentBid = players[lotIndex].basePrice;
       leadingBidderId = null;
-      timerSeconds = 30;
-      timerDeadline = (Date.now() + sOffset) + 30000;
-      timerRunning = true;
       passedFranchiseIds = [];
+      AuctionTimerEngine.reset(30000);
       showSpeeder("SKIPPING LOT...", "Advancing to next player in pool", 600);
       broadcastAuthoritativeState();
       renderCurrentView();
@@ -5756,6 +5961,8 @@
     function drawNextPlayer() {
       skipPlayer();
     }
+    window.drawNextPlayerLot = drawNextPlayer;
+
 
     // ========================================================
     // SUPER ADMIN HAMMER EXECUTION & ANIMATION (Quv3n1Fshx.svg)
@@ -7149,12 +7356,9 @@
       currentBid = players[lotIndex].basePrice || 80;
       leadingBidderId = null;
       timerMode = 'FIRST_BID';
-      timerSeconds = 30;
-      const sOffset = (window.RealtimeStore && window.RealtimeStore.state.connection.serverTimeOffset) || 0;
-      timerDeadline = Date.now() + sOffset + 30000;
-      timerRunning = false;
       passedFranchiseIds = [];
       adminNavTab = 'AUCTION';
+      AuctionTimerEngine.reset(30000);
       saveDatabase();
       broadcastAuthoritativeState();
       showToast(`Loaded #${players[lotIndex].id} ${players[lotIndex].name} to live lot`, "success");
@@ -7807,11 +8011,8 @@
       if (lotIndex === -1) lotIndex = 0;
       currentBid = targetPlayer.basePrice;
       leadingBidderId = null;
-      const sOffset = (window.RealtimeStore && window.RealtimeStore.state.connection.serverTimeOffset) || 0;
-      timerSeconds = 30;
-      timerDeadline = (Date.now() + sOffset) + 30000;
-      timerRunning = true;
       passedFranchiseIds = [];
+      AuctionTimerEngine.reset(30000);
 
       auditLog.unshift({
         time: new Date().toLocaleTimeString(),
@@ -11638,7 +11839,7 @@
                           <circle cx="29" cy="29" r="25" stroke="#e2e8f0" stroke-width="4.5" fill="none" />
                           <circle cx="29" cy="29" r="25" stroke="${timerSeconds <= 5 ? '#ef4444' : timerSeconds <= 10 ? '#f59e0b' : '#10b981'}" stroke-width="4.5" fill="none" stroke-dasharray="157" stroke-dashoffset="${157 - (157 * timerSeconds / 30)}" stroke-linecap="round" style="transition: stroke-dashoffset 0.5s ease;" />
                         </svg>
-                        <span class="font-mono" style="position: absolute; font-size: 1.15rem; font-weight: 900; color: ${timerSeconds <= 5 ? '#dc2626' : timerSeconds <= 10 ? '#b45309' : '#047857'}; font-variant-numeric: tabular-nums;">
+                        <span class="font-mono admin-timer-text" style="position: absolute; font-size: 1.15rem; font-weight: 900; color: ${timerSeconds <= 5 ? '#dc2626' : timerSeconds <= 10 ? '#b45309' : '#047857'}; font-variant-numeric: tabular-nums;">
                           ${timerSeconds}s
                         </span>
                       </div>
@@ -11846,7 +12047,7 @@
                 </div>
                 <div>
                   <div class="label-micro" style="color: var(--text-muted); font-size: 0.65rem;">COUNTDOWN CLOCK</div>
-                  <div style="font-weight: 800; font-size: 1.15rem; color: ${timerSeconds <= 5 ? 'var(--color-red)' : 'var(--color-green)'}; font-family: var(--font-mono); margin-top: 1px;">
+                  <div class="admin-quickstat-timer" style="font-weight: 800; font-size: 1.15rem; color: ${timerSeconds <= 5 ? 'var(--color-red)' : 'var(--color-green)'}; font-family: var(--font-mono); margin-top: 1px;">
                     ${lotIndex !== null ? timerSeconds + 's' : '30s'}
                   </div>
                 </div>
@@ -11939,9 +12140,9 @@
                     </div>
 
                     <!-- Prominent Timer Box -->
-                    <div style="text-align: center; padding: 14px 20px; background: var(--surface-2); border: 2px solid ${timerSeconds <= 5 ? 'var(--color-red)' : 'rgba(16, 185, 129, 0.4)'}; border-radius: 8px;">
+                    <div class="admin-floortimer-box" style="text-align: center; padding: 14px 20px; background: var(--surface-2); border: 2px solid ${timerSeconds <= 5 ? 'var(--color-red)' : 'rgba(16, 185, 129, 0.4)'}; border-radius: 8px;">
                       <div class="label-micro" style="font-size: 0.65rem; color: var(--text-muted);">FLOOR TIMER</div>
-                      <div class="font-mono" style="font-size: 2.5rem; font-weight: 900; line-height: 1; color: ${timerSeconds <= 5 ? 'var(--color-red)' : 'var(--color-green)'}; margin-top: 4px;">
+                      <div class="font-mono admin-floortimer-number" style="font-size: 2.5rem; font-weight: 900; line-height: 1; color: ${timerSeconds <= 5 ? 'var(--color-red)' : 'var(--color-green)'}; margin-top: 4px;">
                         ${timerSeconds}<span style="font-size: 1.1rem;">s</span>
                       </div>
                       <div style="font-size: 0.6875rem; color: var(--text-muted); font-weight: 600; margin-top: 4px;">
@@ -13774,7 +13975,11 @@
         if (!fbRtdb) return;
         const offsetRef = fbRtdb.ref(".info/serverTimeOffset");
         offsetRef.on("value", (snap) => {
-          RealtimeStore.state.connection.serverTimeOffset = snap.val() || 0;
+          const val = snap.val() || 0;
+          if (window.ClockSync && typeof window.ClockSync.applyExternalOffset === 'function') {
+            window.ClockSync.applyExternalOffset(val);
+          }
+          RealtimeStore.state.connection.serverTimeOffset = (window.ClockSync ? window.ClockSync.getOffset() : val);
         });
       },
 
@@ -14018,17 +14223,25 @@
     }
 
     function broadcastAuthoritativeState() {
-      const sOffset = (window.RealtimeStore && window.RealtimeStore.state.connection.serverTimeOffset) || 0;
+      const sOffset = (window.ClockSync && typeof window.ClockSync.getOffset === 'function')
+        ? window.ClockSync.getOffset()
+        : ((window.RealtimeStore && window.RealtimeStore.state && window.RealtimeStore.state.connection && window.RealtimeStore.state.connection.serverTimeOffset) || 0);
       const currentLotObj = players[lotIndex] || null;
+      const sNow = Date.now() + sOffset;
 
       const payload = {
         lotIndex,
         currentBid,
         leadingBidderId,
-        timerSeconds,
-        timerDeadline: timerDeadline || ((Date.now() + sOffset) + (timerSeconds * 1000)),
-        timerRunning,
-        auctionPaused,
+        timerSeconds: (window.AuctionTimerEngine ? window.AuctionTimerEngine.getRemainingSeconds() : timerSeconds),
+        timerDeadline: timerDeadline || (sNow + (timerSeconds * 1000)),
+        timerDuration: timerDuration || (timerMode === 'BID' ? 20000 : 30000),
+        timerStartedAt: timerStartedAt || sNow,
+        lastBidAt: lastBidAt || null,
+        timerVersion: timerVersion || 1,
+        timerRunning: !!timerRunning,
+        auctionPaused: !!auctionPaused,
+        pausedRemainingMs: pausedRemainingMs !== null ? pausedRemainingMs : null,
         passedFranchiseIds,
         franchises,
         players,
@@ -14036,7 +14249,7 @@
         auditLog,
         currentLot: currentLotObj,
         lotVersion: ((window.RealtimeStore && window.RealtimeStore.state.auction.lotVersion) || 1) + 1,
-        timestamp: Date.now() + sOffset
+        timestamp: sNow
       };
 
       saveDatabase();
@@ -14064,30 +14277,74 @@
     function applyAuthoritativeAuctionState(data, broadcast = false) {
       if (!data) return;
 
+      // Section 22: Stale Event Protection via Monotonic timerVersion
+      if (typeof data.timerVersion === 'number' && typeof timerVersion === 'number') {
+        if (data.timerVersion < timerVersion) {
+          console.warn("[AuctionTimer] Dropped stale update. Current:", timerVersion, "Received:", data.timerVersion);
+          return;
+        }
+        timerVersion = data.timerVersion;
+      } else if (typeof data.timerVersion === 'number') {
+        timerVersion = data.timerVersion;
+      }
+
       lotIndex = typeof data.lotIndex === "number" ? data.lotIndex : lotIndex;
       currentBid = typeof data.currentBid === "number" ? data.currentBid : currentBid;
       leadingBidderId = data.leadingBidderId !== undefined ? data.leadingBidderId : leadingBidderId;
-      auctionPaused = !!data.auctionPaused;
       passedFranchiseIds = Array.isArray(data.passedFranchiseIds) ? data.passedFranchiseIds : passedFranchiseIds;
 
-      const sOffset = (window.RealtimeStore && window.RealtimeStore.state.connection.serverTimeOffset) || 0;
-      const serverNow = Date.now() + sOffset;
+      if (data.timerDuration) {
+        timerDuration = data.timerDuration;
+      }
+      if (data.timerStartedAt) {
+        timerStartedAt = data.timerStartedAt;
+      }
+      if (data.lastBidAt) {
+        lastBidAt = data.lastBidAt;
+      }
 
-      // Server-authoritative timer deadline calculation (Section 35)
-      if (data.timerDeadline) {
-        timerDeadline = data.timerDeadline;
-        if (data.timerRunning && !data.auctionPaused) {
-          const remaining = Math.max(0, Math.ceil((timerDeadline - serverNow) / 1000));
+      // Authoritative Pause / Deadline Synchronization (Sections 1, 2, 18)
+      if (data.auctionPaused) {
+        auctionPaused = true;
+        timerRunning = false;
+        pausedRemainingMs = typeof data.pausedRemainingMs === 'number'
+          ? data.pausedRemainingMs
+          : (typeof data.timerSeconds === 'number' ? data.timerSeconds * 1000 : 0);
+        timerSeconds = Math.max(0, Math.ceil(pausedRemainingMs / 1000));
+        if (window.AuctionTimerEngine) {
+          window.AuctionTimerEngine.stopLoop();
+        }
+      } else {
+        auctionPaused = false;
+        pausedRemainingMs = null;
+        frozenRemainingSeconds = null;
+
+        if (data.timerDeadline) {
+          timerDeadline = data.timerDeadline;
+          const sNow = (window.ClockSync && typeof window.ClockSync.getServerNow === 'function')
+            ? window.ClockSync.getServerNow()
+            : (Date.now() + ((window.RealtimeStore && window.RealtimeStore.state && window.RealtimeStore.state.connection && window.RealtimeStore.state.connection.serverTimeOffset) || 0));
+          const remainingMs = Math.max(0, timerDeadline - sNow);
+          const remaining = Math.max(0, Math.ceil(remainingMs / 1000));
           timerSeconds = remaining;
-          if (remaining <= 0) {
-            timerRunning = false;
-          } else {
+
+          if (data.timerRunning && remainingMs > 0) {
             timerRunning = true;
-            startTimer();
+            if (window.AuctionTimerEngine) {
+              window.AuctionTimerEngine.start(timerDeadline, timerDuration, timerVersion);
+            }
+          } else {
+            timerRunning = false;
+            if (window.AuctionTimerEngine) {
+              window.AuctionTimerEngine.stopLoop();
+            }
           }
         } else {
           timerSeconds = typeof data.timerSeconds === "number" ? data.timerSeconds : 0;
           timerRunning = false;
+          if (window.AuctionTimerEngine) {
+            window.AuctionTimerEngine.stopLoop();
+          }
         }
       }
 
@@ -14124,8 +14381,13 @@
           leadingBidderId,
           timerSeconds,
           timerDeadline,
+          timerDuration,
+          timerStartedAt,
+          lastBidAt,
+          timerVersion,
           timerRunning,
           auctionPaused,
+          pausedRemainingMs,
           passedFranchiseIds,
           lotVersion: data.lotVersion || 1
         };
@@ -14135,10 +14397,15 @@
       }
 
       renderConnectionBadge("LIVE");
-      if (typeof updateTimerDisplay === 'function') updateTimerDisplay();
+      if (window.AuctionTimerEngine) {
+        window.AuctionTimerEngine.renderTick();
+      } else if (typeof updateTimerDisplay === 'function') {
+        updateTimerDisplay();
+      }
       renderHeaderNav();
       renderCurrentView();
     }
+
 
     // SECTION 52: DEBUG PANEL (/debug/realtime)
     function renderDebugRealtimeView() {
