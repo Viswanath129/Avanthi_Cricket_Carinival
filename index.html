@@ -2426,6 +2426,7 @@
       }
     }
     let passwordResetRequests = JSON.parse(localStorage.getItem("acc_reset_requests_2026")) || [];
+    const DEMO_MODE = true;
     let currentUser = JSON.parse(localStorage.getItem("acc_current_user_2026")) || { role: "PUBLIC", name: "Public Guest", title: "Public Spectator" };
     let loginRoleSelection = 'PLAYER';
     let loginFranchiseIdentity = 'COORDINATOR';
@@ -5999,6 +6000,358 @@
       return `${(w / h).toFixed(2)}:1`;
     }
 
+    // ========================================================
+    // 7.1 INTERACTIVE 4:3 PHOTO EDITOR & CROP ENGINE
+    // ========================================================
+    let photoEditorState = {
+      src: null,
+      originalSrc: null,
+      playerId: null,
+      customMsgId: null,
+      customPreviewId: null,
+      img: null,
+      naturalWidth: 0,
+      naturalHeight: 0,
+      zoom: 1,
+      minZoom: 0.5,
+      maxZoom: 3.5,
+      panX: 0,
+      panY: 0,
+      rotation: 0,
+      isDragging: false,
+      dragStartX: 0,
+      dragStartY: 0,
+      initialPanX: 0,
+      initialPanY: 0
+    };
+
+    function openPhotoEditorModal(imgSrc, playerId, customMsgId, customPreviewId) {
+      if (!imgSrc) return;
+      photoEditorState.src = imgSrc;
+      photoEditorState.originalSrc = imgSrc;
+      photoEditorState.playerId = playerId || null;
+      photoEditorState.customMsgId = customMsgId || null;
+      photoEditorState.customPreviewId = customPreviewId || null;
+      photoEditorState.zoom = 1;
+      photoEditorState.panX = 0;
+      photoEditorState.panY = 0;
+      photoEditorState.rotation = 0;
+      photoEditorState.isDragging = false;
+
+      const img = new Image();
+      img.onload = function() {
+        photoEditorState.img = img;
+        photoEditorState.naturalWidth = img.naturalWidth || img.width;
+        photoEditorState.naturalHeight = img.naturalHeight || img.height;
+        renderPhotoEditorModal();
+      };
+      img.onerror = function() {
+        showToast("Failed to load selected image into photo editor", "error");
+      };
+      img.src = imgSrc;
+    }
+
+    function renderPhotoEditorModal() {
+      const mc = document.getElementById("modalContainer");
+      if (!mc) return;
+
+      mc.innerHTML = `
+        <div class="modal-overlay" onclick="closePhotoEditorModal()" style="z-index: 10000; display: flex; align-items: center; justify-content: center; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(4px);">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="max-width: 540px; width: 95%; background: var(--surface-1); border: 1px solid var(--border-medium); border-radius: var(--radius-lg); box-shadow: var(--shadow-xl); overflow: hidden; display: flex; flex-direction: column;">
+            
+            <!-- Modal Header -->
+            <div style="padding: 16px 20px; border-bottom: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center; background: var(--surface-2);">
+              <div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <h3 style="font-family: var(--font-display); font-size: 1.15rem; font-weight: 800; color: var(--text-bright); margin: 0;">
+                    EDIT PLAYER PHOTO
+                  </h3>
+                  <span class="status-badge status-connected" style="font-size: 0.65rem; padding: 2px 6px; font-weight: 800;">4:3 LOCKED</span>
+                </div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">
+                  Drag to reposition · Scroll or slide to zoom · 4:3 catalog frame
+                </div>
+              </div>
+              <button type="button" class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.8125rem; min-height: 28px;" onclick="closePhotoEditorModal()">&times;</button>
+            </div>
+
+            <!-- Modal Body: Crop Viewport -->
+            <div style="padding: 20px; display: flex; flex-direction: column; align-items: center; gap: 16px;">
+              <div id="photoCropViewport" 
+                   style="width: 100%; max-width: 400px; aspect-ratio: 4/3; position: relative; overflow: hidden; border-radius: 8px; border: 2px solid var(--color-green); background: #0b0f19; cursor: grab; user-select: none; touch-action: none; box-shadow: inset 0 0 20px rgba(0,0,0,0.8);"
+                   onmousedown="startPhotoDrag(event)"
+                   ontouchstart="startPhotoTouchDrag(event)"
+                   onwheel="handlePhotoWheel(event)">
+                
+                <!-- Croppable Image Wrapper -->
+                <div id="photoEditorImgWrapper" style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none;">
+                  <img id="photoEditorPreviewImg" src="${photoEditorState.src}" 
+                       style="max-width: 100%; max-height: 100%; object-fit: contain; transform-origin: center center; transition: transform 0.05s ease-out; transform: translate(${photoEditorState.panX}px, ${photoEditorState.panY}px) scale(${photoEditorState.zoom}) rotate(${photoEditorState.rotation}deg);" 
+                       draggable="false" alt="Crop Preview">
+                </div>
+
+                <!-- Rule of Thirds Grid Overlay -->
+                <div style="position: absolute; inset: 0; pointer-events: none; display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr;">
+                  <div style="border-right: 1px dashed rgba(255,255,255,0.2); border-bottom: 1px dashed rgba(255,255,255,0.2);"></div>
+                  <div style="border-right: 1px dashed rgba(255,255,255,0.2); border-bottom: 1px dashed rgba(255,255,255,0.2);"></div>
+                  <div style="border-bottom: 1px dashed rgba(255,255,255,0.2);"></div>
+                  <div style="border-right: 1px dashed rgba(255,255,255,0.2); border-bottom: 1px dashed rgba(255,255,255,0.2);"></div>
+                  <div style="border-right: 1px dashed rgba(255,255,255,0.2); border-bottom: 1px dashed rgba(255,255,255,0.2);"></div>
+                  <div style="border-bottom: 1px dashed rgba(255,255,255,0.2);"></div>
+                  <div style="border-right: 1px dashed rgba(255,255,255,0.2);"></div>
+                  <div style="border-right: 1px dashed rgba(255,255,255,0.2);"></div>
+                  <div></div>
+                </div>
+
+                <!-- 4:3 Badge Corner -->
+                <div style="position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,0.6); color: #fff; font-size: 0.65rem; font-family: var(--font-mono); font-weight: 700; padding: 2px 6px; border-radius: 4px; pointer-events: none; border: 1px solid rgba(255,255,255,0.2);">
+                  4 : 3
+                </div>
+              </div>
+
+              <!-- Zoom Slider Bar -->
+              <div style="width: 100%; max-width: 400px; display: flex; align-items: center; gap: 12px;">
+                <span style="font-size: 0.75rem; font-weight: 800; color: var(--text-muted); font-family: var(--font-mono);">ZOOM</span>
+                <button type="button" class="btn btn-secondary" style="padding: 2px 8px; min-height: 28px; font-weight: 800;" onclick="adjustPhotoZoom(-0.15)">−</button>
+                <input type="range" id="photoZoomSlider" min="0.5" max="3.0" step="0.05" value="${photoEditorState.zoom}" 
+                       oninput="setPhotoZoom(parseFloat(this.value))"
+                       style="flex: 1; accent-color: var(--color-green); cursor: pointer;">
+                <button type="button" class="btn btn-secondary" style="padding: 2px 8px; min-height: 28px; font-weight: 800;" onclick="adjustPhotoZoom(0.15)">+</button>
+              </div>
+
+              <!-- Transformation Presets -->
+              <div style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 400px;">
+                <button type="button" class="btn btn-secondary" style="font-size: 0.75rem; padding: 6px 12px; min-height: 32px;" onclick="rotatePhoto(-90)">
+                  ↶ 90° Left
+                </button>
+                <button type="button" class="btn btn-secondary" style="font-size: 0.75rem; padding: 6px 12px; min-height: 32px;" onclick="rotatePhoto(90)">
+                  ↷ 90° Right
+                </button>
+                <button type="button" class="btn btn-secondary" style="font-size: 0.75rem; padding: 6px 12px; min-height: 32px;" onclick="fitPhoto()">
+                  Fit
+                </button>
+                <button type="button" class="btn btn-secondary" style="font-size: 0.75rem; padding: 6px 12px; min-height: 32px;" onclick="fillPhoto()">
+                  Fill
+                </button>
+                <button type="button" class="btn btn-secondary" style="font-size: 0.75rem; padding: 6px 12px; min-height: 32px; color: var(--color-orange);" onclick="resetPhotoTransform()">
+                  Reset
+                </button>
+              </div>
+            </div>
+
+            <!-- Modal Footer -->
+            <div style="padding: 14px 20px; border-top: 1px solid var(--border-subtle); background: var(--surface-2); display: flex; justify-content: flex-end; gap: 10px;">
+              <button type="button" class="btn btn-secondary" style="font-size: 0.8125rem; padding: 8px 18px;" onclick="closePhotoEditorModal()">
+                CANCEL
+              </button>
+              <button type="button" class="btn btn-primary" style="font-size: 0.8125rem; padding: 8px 20px; background: var(--color-green); border-color: var(--color-green); color: #000; font-weight: 800;" onclick="commitPhotoEditor()">
+                USE THIS PHOTO (4:3)
+              </button>
+            </div>
+
+          </div>
+        </div>
+      `;
+
+      if (typeof window !== 'undefined') {
+        window.onmousemove = handlePhotoMouseMove;
+        window.onmouseup = endPhotoDrag;
+        window.ontouchmove = handlePhotoTouchMove;
+        window.ontouchend = endPhotoDrag;
+      }
+    }
+
+    function updatePhotoEditorTransform() {
+      const el = document.getElementById("photoEditorPreviewImg");
+      if (el) {
+        el.style.transform = `translate(${photoEditorState.panX}px, ${photoEditorState.panY}px) scale(${photoEditorState.zoom}) rotate(${photoEditorState.rotation}deg)`;
+      }
+      const slider = document.getElementById("photoZoomSlider");
+      if (slider) slider.value = photoEditorState.zoom;
+    }
+
+    function setPhotoZoom(val) {
+      photoEditorState.zoom = Math.max(0.5, Math.min(3.5, val));
+      updatePhotoEditorTransform();
+    }
+
+    function adjustPhotoZoom(delta) {
+      setPhotoZoom(photoEditorState.zoom + delta);
+    }
+
+    function rotatePhoto(deg) {
+      photoEditorState.rotation = (photoEditorState.rotation + deg) % 360;
+      updatePhotoEditorTransform();
+    }
+
+    function fitPhoto() {
+      photoEditorState.zoom = 1;
+      photoEditorState.panX = 0;
+      photoEditorState.panY = 0;
+      updatePhotoEditorTransform();
+    }
+
+    function fillPhoto() {
+      photoEditorState.zoom = 1.35;
+      photoEditorState.panX = 0;
+      photoEditorState.panY = 0;
+      updatePhotoEditorTransform();
+    }
+
+    function resetPhotoTransform() {
+      photoEditorState.zoom = 1;
+      photoEditorState.panX = 0;
+      photoEditorState.panY = 0;
+      photoEditorState.rotation = 0;
+      updatePhotoEditorTransform();
+    }
+
+    function startPhotoDrag(e) {
+      photoEditorState.isDragging = true;
+      photoEditorState.dragStartX = e.clientX;
+      photoEditorState.dragStartY = e.clientY;
+      photoEditorState.initialPanX = photoEditorState.panX;
+      photoEditorState.initialPanY = photoEditorState.panY;
+      const vp = document.getElementById("photoCropViewport");
+      if (vp) vp.style.cursor = "grabbing";
+    }
+
+    function handlePhotoMouseMove(e) {
+      if (!photoEditorState.isDragging) return;
+      const dx = e.clientX - photoEditorState.dragStartX;
+      const dy = e.clientY - photoEditorState.dragStartY;
+      photoEditorState.panX = photoEditorState.initialPanX + dx;
+      photoEditorState.panY = photoEditorState.initialPanY + dy;
+      updatePhotoEditorTransform();
+    }
+
+    function startPhotoTouchDrag(e) {
+      if (!e.touches || !e.touches[0]) return;
+      photoEditorState.isDragging = true;
+      photoEditorState.dragStartX = e.touches[0].clientX;
+      photoEditorState.dragStartY = e.touches[0].clientY;
+      photoEditorState.initialPanX = photoEditorState.panX;
+      photoEditorState.initialPanY = photoEditorState.panY;
+    }
+
+    function handlePhotoTouchMove(e) {
+      if (!photoEditorState.isDragging || !e.touches || !e.touches[0]) return;
+      const dx = e.touches[0].clientX - photoEditorState.dragStartX;
+      const dy = e.touches[0].clientY - photoEditorState.dragStartY;
+      photoEditorState.panX = photoEditorState.initialPanX + dx;
+      photoEditorState.panY = photoEditorState.initialPanY + dy;
+      updatePhotoEditorTransform();
+    }
+
+    function endPhotoDrag() {
+      photoEditorState.isDragging = false;
+      const vp = document.getElementById("photoCropViewport");
+      if (vp) vp.style.cursor = "grab";
+    }
+
+    function handlePhotoWheel(e) {
+      if (e && e.preventDefault) e.preventDefault();
+      const delta = (e && e.deltaY < 0) ? 0.1 : -0.1;
+      adjustPhotoZoom(delta);
+    }
+
+    function closePhotoEditorModal() {
+      if (typeof window !== 'undefined') {
+        window.onmousemove = null;
+        window.onmouseup = null;
+        window.ontouchmove = null;
+        window.ontouchend = null;
+      }
+      closeModal();
+    }
+
+    function commitPhotoEditor() {
+      if (!photoEditorState.img) return;
+
+      const targetW = 800;
+      const targetH = 600; // exact 4:3
+      const canvas = document.createElement("canvas");
+      canvas.width = targetW;
+      canvas.height = targetH;
+      const ctx = canvas.getContext("2d");
+
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, targetW, targetH);
+
+      ctx.save();
+      // Center of canvas
+      ctx.translate(targetW / 2, targetH / 2);
+      ctx.rotate((photoEditorState.rotation * Math.PI) / 180);
+      ctx.scale(photoEditorState.zoom, photoEditorState.zoom);
+
+      // Viewport scale factor
+      const vp = document.getElementById("photoCropViewport");
+      const vpW = vp ? vp.clientWidth : 400;
+      const factor = targetW / (vpW || 400);
+
+      ctx.translate(photoEditorState.panX * factor, photoEditorState.panY * factor);
+
+      // Fit image into initial viewport base dimensions
+      const imgW = photoEditorState.naturalWidth;
+      const imgH = photoEditorState.naturalHeight;
+      const imgAspect = imgW / imgH;
+      const boxAspect = 4 / 3;
+
+      let drawW, drawH;
+      if (imgAspect > boxAspect) {
+        drawW = targetW;
+        drawH = targetW / imgAspect;
+      } else {
+        drawH = targetH;
+        drawW = targetH * imgAspect;
+      }
+
+      ctx.drawImage(photoEditorState.img, -drawW / 2, -drawH / 2, drawW, drawH);
+      ctx.restore();
+
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+
+      // Store in form / player record
+      if (!photoEditorState.playerId) {
+        regFormData.photo = dataUrl;
+      } else {
+        const p = players.find(x => String(x.id) === String(photoEditorState.playerId) || x.roll === photoEditorState.playerId);
+        if (p) p.photo = dataUrl;
+        const photoInput = document.getElementById("editPlayerPhoto");
+        if (photoInput) photoInput.value = dataUrl;
+      }
+
+      // Update message element
+      const msgEl = document.getElementById(photoEditorState.customMsgId || "regPhotoRatioMsg") || document.getElementById("playerPhotoRatioMessage");
+      if (msgEl) {
+        msgEl.innerHTML = `
+          <div style="color: var(--color-green); font-size: 0.75rem; font-weight: 700; padding: 8px 12px; background: rgba(5, 150, 105, 0.1); border: 1px solid rgba(5, 150, 105, 0.3); border-radius: 4px; display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 4px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <img src="${dataUrl}" style="width: 52px; height: 39px; object-fit: cover; border-radius: 4px; border: 1.5px solid var(--color-green);">
+              <div>
+                <div><strong>4:3 Photo Framed & Ready</strong></div>
+                <div style="font-size: 0.7rem; color: var(--text-muted); font-weight: 500;">Approved for Catalog & Projector (800×600)</div>
+              </div>
+            </div>
+            <div style="display: flex; gap: 6px;">
+              <button type="button" class="btn btn-secondary" style="font-size: 0.7rem; padding: 4px 8px; min-height: 28px;" onclick="openPhotoEditorModal('${dataUrl}', ${photoEditorState.playerId ? "'" + photoEditorState.playerId + "'" : 'null'})">Edit Photo</button>
+              <button type="button" class="btn btn-secondary" style="font-size: 0.7rem; padding: 4px 8px; min-height: 28px;" onclick="const inp = document.getElementById('regPhotoInput') || document.getElementById('editPlayerPhotoFile'); if (inp) inp.click();">Replace</button>
+            </div>
+          </div>
+        `;
+      }
+
+      const previewEl = photoEditorState.customPreviewId ? document.getElementById(photoEditorState.customPreviewId) : null;
+      if (previewEl) {
+        previewEl.innerHTML = `
+          <img src="${dataUrl}" style="width: 80px; height: 60px; object-fit: cover; border-radius: 4px; border: 1.5px solid var(--color-green);">
+        `;
+      }
+
+      closePhotoEditorModal();
+      showToast("Photo framed & verified: 4:3 aspect ratio!", "success");
+    }
+
     function handlePhotoUpload(input, customMsgId, customPreviewId, playerId) {
       const msgEl = document.getElementById(customMsgId || "regPhotoRatioMsg") || document.getElementById("playerPhotoRatioMessage");
       if (!input || !input.files || !input.files[0]) return;
@@ -6008,7 +6361,7 @@
         if (msgEl) {
           msgEl.innerHTML = `
             <div style="color: var(--color-red); font-size: 0.75rem; font-weight: 700; padding: 8px 12px; background: rgba(225, 29, 72, 0.1); border: 1px solid rgba(225, 29, 72, 0.3); border-radius: 4px; margin-top: 4px;">
-              Selected file is not an image. Please choose a JPG or PNG image.
+              Selected file is not an image. Please choose a JPG, PNG, or WEBP image.
             </div>
           `;
         }
@@ -6017,81 +6370,69 @@
         return;
       }
 
+      if (file.size > 10 * 1024 * 1024) {
+        if (msgEl) {
+          msgEl.innerHTML = `
+            <div style="color: var(--color-red); font-size: 0.75rem; font-weight: 700; padding: 8px 12px; background: rgba(225, 29, 72, 0.1); border: 1px solid rgba(225, 29, 72, 0.3); border-radius: 4px; margin-top: 4px;">
+              Image file exceeds 10MB limit. Please choose a smaller photo.
+            </div>
+          `;
+        }
+        input.value = "";
+        return;
+      }
+
       const reader = new FileReader();
       reader.onload = function(evt) {
-        const img = new Image();
-        img.onload = function() {
-          const w = img.naturalWidth || img.width;
-          const h = img.naturalHeight || img.height;
-          const is4to3 = checkAspectRatio4to3(w, h);
-          const ratioStr = getSimplifiedRatio(w, h);
-
-          if (!is4to3) {
-            // REJECT: Ratio is not 4:3!
-            input.value = "";
-            if (!playerId) regFormData.photo = "";
-            if (msgEl) {
-              msgEl.innerHTML = `
-                <div style="color: var(--color-red); font-size: 0.75rem; font-weight: 700; padding: 8px 12px; background: rgba(225, 29, 72, 0.1); border: 1px solid rgba(225, 29, 72, 0.3); border-radius: 4px; margin-top: 4px; line-height: 1.4;">
-                  <strong>Invalid Aspect Ratio:</strong> Image is ${w}×${h} (${ratioStr}). Photo must be in <strong>4:3 aspect ratio</strong> (e.g. 800×600, 1024×768, 1200×900). Image was not accepted. Please crop to 4:3 and try again.
-                </div>
-              `;
-            }
-            showToast(`Photo rejected: ${w}×${h} (${ratioStr}) is not 4:3 aspect ratio`, "error");
-          } else {
-            // ACCEPT: Take the image and resample to standardized 4:3 dimensions (600x450)
-            const canvas = document.createElement("canvas");
-            const targetW = 600;
-            const targetH = 450; // exact 4:3
-            canvas.width = targetW;
-            canvas.height = targetH;
-            const ctx = canvas.getContext("2d");
-            ctx.drawImage(img, 0, 0, targetW, targetH);
-            const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
-
-            if (!playerId) {
-              regFormData.photo = dataUrl;
-            } else {
-              const p = players.find(x => String(x.id) === String(playerId) || x.roll === playerId);
-              if (p) p.photo = dataUrl;
-              const photoInput = document.getElementById("editPlayerPhoto");
-              if (photoInput) photoInput.value = dataUrl;
-            }
-
-            if (msgEl) {
-              msgEl.innerHTML = `
-                <div style="color: var(--color-green); font-size: 0.75rem; font-weight: 700; padding: 8px 12px; background: rgba(5, 150, 105, 0.1); border: 1px solid rgba(5, 150, 105, 0.3); border-radius: 4px; display: flex; align-items: center; gap: 10px; margin-top: 4px;">
-                  <img src="${dataUrl}" style="width: 52px; height: 39px; object-fit: cover; border-radius: 4px; border: 1.5px solid var(--color-green);">
-                  <div>
-                    <div><strong>Aspect Ratio Verified (4:3)</strong></div>
-                    <div style="font-size: 0.7rem; color: var(--text-muted); font-weight: 500;">Original: ${w}×${h} (${ratioStr}) · Photo accepted successfully</div>
+        const mc = typeof document !== 'undefined' ? document.getElementById("modalContainer") : null;
+        if (mc && typeof mc.innerHTML !== 'undefined') {
+          openPhotoEditorModal(evt.target.result, playerId, customMsgId, customPreviewId);
+        } else {
+          // Fallback direct 4:3 processing if modalContainer is not present
+          const img = new Image();
+          img.onload = function() {
+            const w = img.naturalWidth || img.width;
+            const h = img.naturalHeight || img.height;
+            const is4to3 = checkAspectRatio4to3(w, h);
+            const ratioStr = getSimplifiedRatio(w, h);
+            if (!is4to3) {
+              if (msgEl) {
+                msgEl.innerHTML = `
+                  <div style="color: var(--color-red); font-size: 0.75rem; font-weight: 700; padding: 8px 12px; background: rgba(225, 29, 72, 0.1); border: 1px solid rgba(225, 29, 72, 0.3); border-radius: 4px; margin-top: 4px;">
+                    Invalid Aspect Ratio: ${w}×${h} (${ratioStr}). Photo must be in 4:3 aspect ratio.
                   </div>
-                </div>
-              `;
+                `;
+              }
+              showToast(`Photo rejected: ${w}×${h} is not 4:3`, "error");
+            } else {
+              const canvas = document.createElement("canvas");
+              canvas.width = 600;
+              canvas.height = 450;
+              const ctx = canvas.getContext("2d");
+              ctx.drawImage(img, 0, 0, 600, 450);
+              const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+              if (!playerId) regFormData.photo = dataUrl;
+              else {
+                const p = players.find(x => String(x.id) === String(playerId) || x.roll === playerId);
+                if (p) p.photo = dataUrl;
+              }
+              if (msgEl) {
+                msgEl.innerHTML = `<div style="color: var(--color-green); font-size: 0.75rem;">Aspect Ratio Verified (4:3)</div>`;
+              }
+              showToast("Photo verified & accepted: 4:3 ratio", "success");
             }
-
-            const previewEl = customPreviewId ? document.getElementById(customPreviewId) : null;
-            if (previewEl) {
-              previewEl.innerHTML = `
-                <img src="${dataUrl}" style="width: 80px; height: 60px; object-fit: cover; border-radius: 4px; border: 1.5px solid var(--color-green);">
-              `;
-            }
-
-            showToast(`Photo verified & accepted: 4:3 ratio (${w}×${h})`, "success");
-          }
-        };
-        img.onerror = function() {
-          if (msgEl) {
-            msgEl.innerHTML = `
-              <div style="color: var(--color-red); font-size: 0.75rem; font-weight: 700; padding: 8px 12px; background: rgba(225, 29, 72, 0.1); border: 1px solid rgba(225, 29, 72, 0.3); border-radius: 4px; margin-top: 4px;">
-                Failed to decode image file. Please select a valid PNG or JPEG image.
-              </div>
-            `;
-          }
-          input.value = "";
-          if (!playerId) regFormData.photo = "";
-        };
-        img.src = evt.target.result;
+          };
+          img.src = evt.target.result;
+        }
+      };
+      reader.onerror = function() {
+        if (msgEl) {
+          msgEl.innerHTML = `
+            <div style="color: var(--color-red); font-size: 0.75rem; font-weight: 700; padding: 8px 12px; background: rgba(225, 29, 72, 0.1); border: 1px solid rgba(225, 29, 72, 0.3); border-radius: 4px; margin-top: 4px;">
+              Failed to read selected image. Please try again.
+            </div>
+          `;
+        }
       };
       reader.readAsDataURL(file);
     }
@@ -8878,13 +9219,22 @@
                     <input type="file" accept="image/*" class="form-input" id="regPhotoInput" onchange="handlePhotoUpload(this)" style="padding: 7px 12px;">
                     <div id="playerPhotoRatioMessage" style="font-size: 0.75rem; margin-top: 6px;">
                       ${regFormData.photo ? `
-                        <div style="color: var(--color-green); font-size: 0.75rem; font-weight: 700; padding: 6px 10px; background: rgba(5, 150, 105, 0.1); border: 1px solid rgba(5, 150, 105, 0.3); border-radius: 4px; display: flex; align-items: center; gap: 8px;">
-                          <img src="${regFormData.photo}" style="width: 48px; height: 36px; object-fit: cover; border-radius: 3px; border: 1px solid var(--border-medium);">
-                          <span>4:3 Photo loaded</span>
+                        <div style="color: var(--color-green); font-size: 0.75rem; font-weight: 700; padding: 6px 10px; background: rgba(5, 150, 105, 0.1); border: 1px solid rgba(5, 150, 105, 0.3); border-radius: 4px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                          <div style="display: flex; align-items: center; gap: 8px;">
+                            <img src="${regFormData.photo}" style="width: 48px; height: 36px; object-fit: cover; border-radius: 3px; border: 1px solid var(--border-medium);">
+                            <div>
+                              <div>4:3 Photo Framed & Ready</div>
+                              <div style="font-size: 0.6875rem; color: var(--text-muted); font-weight: 500;">Approved for Catalog & Projector</div>
+                            </div>
+                          </div>
+                          <div style="display: flex; gap: 6px;">
+                            <button type="button" class="btn btn-secondary" style="font-size: 0.7rem; padding: 3px 8px; min-height: 26px;" onclick="openPhotoEditorModal(regFormData.photo)">Edit Photo</button>
+                            <button type="button" class="btn btn-secondary" style="font-size: 0.7rem; padding: 3px 8px; min-height: 26px;" onclick="document.getElementById('regPhotoInput').click()">Replace</button>
+                          </div>
                         </div>
                       ` : `
                         <div style="font-size: 0.72rem; color: var(--text-faint); margin-top: 2px;">
-                          Mandatory: Image must be in 4:3 aspect ratio (e.g. 800×600, 1024×768).
+                          Mandatory: Image must be in 4:3 aspect ratio (e.g. 800×600, 1024×768). Select any photo to frame in 4:3.
                         </div>
                       `}
                     </div>
@@ -10566,7 +10916,11 @@
         return true;
       });
 
-      const navTabs = isSuperAdmin ? ['OVERVIEW', 'PLAYERS', 'PLAYER VERIFICATION', 'REGISTRATIONS', 'FRANCHISES', 'FRANCHISE MEMBERS', 'AUCTION', 'ROUND 2', 'UNDO', 'DATA MANAGEMENT', 'AUDIT', 'EXPORT', 'SETTINGS', 'ADMIN ACCOUNTS'] : ['AUCTION', 'OVERVIEW', 'ROUND 2', 'AUDIT'];
+      const navTabs = isSuperAdmin 
+        ? (DEMO_MODE 
+            ? ['OVERVIEW', 'AUCTION', 'PLAYERS', 'PLAYER VERIFICATION', 'REGISTRATIONS', 'FRANCHISES', 'ROUND 2', 'AUDIT', 'SETTINGS'] 
+            : ['OVERVIEW', 'PLAYERS', 'PLAYER VERIFICATION', 'REGISTRATIONS', 'FRANCHISES', 'FRANCHISE MEMBERS', 'AUCTION', 'ROUND 2', 'UNDO', 'DATA MANAGEMENT', 'AUDIT', 'EXPORT', 'SETTINGS', 'ADMIN ACCOUNTS'])
+        : ['AUCTION', 'OVERVIEW', 'ROUND 2', 'AUDIT'];
       const activeFranchisesDisplay = (window.RealtimeStore && window.RealtimeStore.state.presence.activeFranchises) !== undefined
         ? window.RealtimeStore.state.presence.activeFranchises
         : 0;
@@ -10791,7 +11145,9 @@
                               ${f.status !== 'DISABLED' ? `
                                 <button class="btn btn-secondary" style="font-size: 0.6875rem; padding: 4px 8px; min-height: 28px; color: var(--color-yellow); border-color: rgba(255,209,102,0.4);" onclick="adminDisableFranchise(${f.id})">DISABLE</button>
                               ` : ''}
-                              <button class="btn btn-secondary" style="font-size: 0.6875rem; padding: 4px 8px; min-height: 28px; color: var(--text-muted);" onclick="adminArchiveFranchise(${f.id})">ARCHIVE</button>
+                              ${!DEMO_MODE ? `
+                                <button class="btn btn-secondary" style="font-size: 0.6875rem; padding: 4px 8px; min-height: 28px; color: var(--text-muted);" onclick="adminArchiveFranchise(${f.id})">ARCHIVE</button>
+                              ` : ''}
                             ` : ''}
                           </div>
                         </td>
@@ -10873,7 +11229,7 @@
                               ${isSuperAdmin && m.approvalStatus !== 'APPROVED' ? `
                                 <button class="btn btn-primary" style="font-size: 0.6875rem; padding: 4px 8px; min-height: 28px;" onclick="adminApproveMember('${m.id}')">APPROVE</button>
                               ` : ''}
-                              ${isSuperAdmin ? `
+                              ${isSuperAdmin && !DEMO_MODE ? `
                                 <button class="btn btn-danger" style="font-size: 0.6875rem; padding: 4px 8px; min-height: 28px;" onclick="adminRemoveMember('${m.id}')">REMOVE</button>
                               ` : ''}
                             </div>
@@ -11470,8 +11826,232 @@
 
             </div>
           ` : adminNavTab === 'OVERVIEW' ? `
-            <!-- TAB: OVERVIEW & TOURNAMENT KPI -->
-            <div style="display: flex; flex-direction: column; gap: var(--space-5);">
+            <!-- TAB: TOURNAMENT COMMAND CENTER & OPERATIONAL OVERVIEW -->
+            <div style="display: flex; flex-direction: column; gap: var(--space-4);">
+              
+              <!-- 1. PRIMARY STATUS STRIP -->
+              <div class="surface-card" style="padding: 12px 18px; display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 14px; background: rgba(16, 185, 129, 0.04); border: 1px solid var(--border-subtle); border-radius: 8px;">
+                <div>
+                  <div class="label-micro" style="color: var(--text-muted); font-size: 0.65rem;">AUCTION STATE</div>
+                  <div style="display: flex; align-items: center; gap: 6px; margin-top: 2px;">
+                    <span class="status-indicator ${auctionState === 'LIVE' ? 'status-live' : 'status-connected'}" style="width: 8px; height: 8px;"></span>
+                    <span style="font-weight: 800; font-size: 0.95rem; color: ${auctionState === 'LIVE' ? 'var(--color-green)' : 'var(--text-bright)'}; font-family: var(--font-mono);">${auctionState || 'IDLE'}</span>
+                  </div>
+                </div>
+                <div>
+                  <div class="label-micro" style="color: var(--text-muted); font-size: 0.65rem;">CURRENT LOT</div>
+                  <div style="font-weight: 800; font-size: 0.95rem; color: var(--text-bright); font-family: var(--font-mono); margin-top: 2px;">
+                    ${lotIndex !== null ? 'LOT #' + (lotIndex + 1) + ' / ' + players.length : 'LOT #1 (READY)'}
+                  </div>
+                </div>
+                <div>
+                  <div class="label-micro" style="color: var(--text-muted); font-size: 0.65rem;">COUNTDOWN CLOCK</div>
+                  <div style="font-weight: 800; font-size: 1.15rem; color: ${timerSeconds <= 5 ? 'var(--color-red)' : 'var(--color-green)'}; font-family: var(--font-mono); margin-top: 1px;">
+                    ${lotIndex !== null ? timerSeconds + 's' : '30s'}
+                  </div>
+                </div>
+                <div>
+                  <div class="label-micro" style="color: var(--text-muted); font-size: 0.65rem;">ACTIVE BIDS</div>
+                  <div style="font-weight: 800; font-size: 0.95rem; color: var(--color-orange); font-family: var(--font-mono); margin-top: 2px;">
+                    ${(cur && cur.bids) ? cur.bids.length : 0} Bids
+                  </div>
+                </div>
+                <div>
+                  <div class="label-micro" style="color: var(--text-muted); font-size: 0.65rem;">FRANCHISES ONLINE</div>
+                  <div style="font-weight: 800; font-size: 0.95rem; color: var(--color-blue); font-family: var(--font-mono); margin-top: 2px;">
+                    ${activeFranchisesDisplay} / 11 Connected
+                  </div>
+                </div>
+              </div>
+
+              <!-- 2. LIVE AUCTION COMMAND CENTER HERO CARD (VISUAL CENTERPIECE) -->
+              <div class="surface-card" style="padding: 20px; border-left: 4px solid var(--color-green); display: flex; flex-direction: column; gap: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="label-micro" style="color: var(--color-green); font-size: 0.75rem; font-weight: 800;">LIVE AUCTION COMMAND CENTER</span>
+                    <span class="status-badge status-live" style="font-size: 0.625rem;">REALTIME STAGE</span>
+                  </div>
+                  <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                    <button class="btn btn-primary" style="font-size: 0.8125rem; font-weight: 800; padding: 6px 16px; min-height: 34px;" onclick="adminNavTab='AUCTION'; renderCurrentView();">
+                      CONTROL AUCTION FLOOR &rarr;
+                    </button>
+                    <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 6px 12px; min-height: 34px;" onclick="drawNextPlayerLot(); adminNavTab='AUCTION'; renderCurrentView();">
+                      Draw Player
+                    </button>
+                    <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 6px 12px; min-height: 34px;" onclick="toggleAuctionPause()">
+                      ${auctionPaused ? 'Resume' : 'Pause'}
+                    </button>
+                    <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 6px 12px; min-height: 34px;" onclick="switchView('projector')">
+                      Projector
+                    </button>
+                    <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 6px 12px; min-height: 34px;" onclick="switchView('live')">
+                      Public Live
+                    </button>
+                  </div>
+                </div>
+
+                ${cur ? `
+                  <div style="display: grid; grid-template-columns: auto 1fr auto; gap: 20px; align-items: center;" class="admin-hero-grid">
+                    <!-- Player Photo -->
+                    <div style="position: relative;">
+                      ${getPlayerAvatar(cur, 140, 105)}
+                      <div style="position: absolute; bottom: 4px; left: 4px; background: rgba(0,0,0,0.7); color: #34d399; font-size: 0.6875rem; font-family: var(--font-mono); font-weight: 800; padding: 1px 6px; border-radius: 3px;">
+                        ${cur.bucket}
+                      </div>
+                    </div>
+
+                    <!-- Player Metadata -->
+                    <div>
+                      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                        <h3 style="font-family: var(--font-display); font-size: 1.45rem; font-weight: 800; color: var(--text-bright); margin: 0;">
+                          ${cur.name}
+                        </h3>
+                        <span class="font-mono" style="font-size: 0.875rem; font-weight: 700; color: var(--color-green);">${cur.roll}</span>
+                      </div>
+                      <div style="font-size: 0.8125rem; color: var(--text-muted); margin-top: 4px; display: flex; gap: 10px; flex-wrap: wrap;">
+                        <span>${cur.program || 'B.Tech'} · ${cur.department || cur.branch || 'CSE'}</span>
+                        <span>·</span>
+                        <span>Year ${cur.year || 1}</span>
+                        <span>·</span>
+                        <span style="font-weight: 700; color: var(--text-bright);">${cur.derivedType || cur.role || 'ALL-ROUNDER'}</span>
+                      </div>
+
+                      <div style="display: flex; gap: 18px; margin-top: 12px; flex-wrap: wrap;">
+                        <div>
+                          <span class="label-micro" style="font-size: 0.625rem; color: var(--text-muted);">BASE PRICE</span>
+                          <div class="font-mono" style="font-size: 1.15rem; font-weight: 800; color: var(--text-bright);">₹${cur.basePrice || 60}C</div>
+                        </div>
+                        <div style="border-left: 1px solid var(--border-subtle); padding-left: 14px;">
+                          <span class="label-micro" style="font-size: 0.625rem; color: var(--color-green);">CURRENT BID</span>
+                          <div class="font-mono" style="font-size: 1.35rem; font-weight: 800; color: var(--color-green);">₹${currentBid || cur.basePrice || 60}C</div>
+                        </div>
+                        <div style="border-left: 1px solid var(--border-subtle); padding-left: 14px;">
+                          <span class="label-micro" style="font-size: 0.625rem; color: var(--color-blue);">HIGHEST BIDDER</span>
+                          <div style="font-weight: 800; font-size: 1.1rem; color: ${leader ? 'var(--color-blue)' : 'var(--text-muted)'}; margin-top: 1px;">
+                            ${leader ? leader.name : 'Floor Open'}
+                          </div>
+                        </div>
+                        <div style="border-left: 1px solid var(--border-subtle); padding-left: 14px;">
+                          <span class="label-micro" style="font-size: 0.625rem; color: var(--text-muted);">BIDS</span>
+                          <div class="font-mono" style="font-size: 1.15rem; font-weight: 800; color: var(--text-bright);">${(cur.bids || []).length}</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Prominent Timer Box -->
+                    <div style="text-align: center; padding: 14px 20px; background: var(--surface-2); border: 2px solid ${timerSeconds <= 5 ? 'var(--color-red)' : 'rgba(16, 185, 129, 0.4)'}; border-radius: 8px;">
+                      <div class="label-micro" style="font-size: 0.65rem; color: var(--text-muted);">FLOOR TIMER</div>
+                      <div class="font-mono" style="font-size: 2.5rem; font-weight: 900; line-height: 1; color: ${timerSeconds <= 5 ? 'var(--color-red)' : 'var(--color-green)'}; margin-top: 4px;">
+                        ${timerSeconds}<span style="font-size: 1.1rem;">s</span>
+                      </div>
+                      <div style="font-size: 0.6875rem; color: var(--text-muted); font-weight: 600; margin-top: 4px;">
+                        ${auctionPaused ? 'PAUSED' : 'AUTO-COUNTDOWN'}
+                      </div>
+                    </div>
+                  </div>
+                ` : `
+                  <div style="padding: 30px; text-align: center;">
+                    <h4 style="font-family: var(--font-display); font-size: 1.25rem; font-weight: 800; color: var(--text-bright); margin: 0;">THE AUCTION FLOOR IS READY</h4>
+                    <div style="font-size: 0.8125rem; color: var(--text-muted); margin-top: 6px;">11 Franchises online. All squad quotas and ₹1,000L purse caps active.</div>
+                    <button class="btn btn-primary" style="margin-top: 14px; font-weight: 800; padding: 8px 24px;" onclick="drawNextPlayerLot(); adminNavTab='AUCTION'; renderCurrentView();">
+                      DRAW FIRST PLAYER TO BEGIN &rarr;
+                    </button>
+                  </div>
+                `}
+              </div>
+
+              <!-- 3. TEAM STATUS / PURSE OVERVIEW (11 FRANCHISES MONITOR) -->
+              <div class="surface-card" style="padding: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+                  <span class="label-micro" style="color: var(--color-green); font-size: 0.75rem; font-weight: 800;">11 FRANCHISES STATUS & PURSE OVERVIEW</span>
+                  <span style="font-size: 0.75rem; color: var(--text-muted);">Total Purse in Play: <strong class="font-mono" style="color: var(--color-green);">${franchises.reduce((sum, f) => sum + f.purse, 0)}C</strong></span>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px;">
+                  ${franchises.map(f => {
+                    const isLead = leadingBidderId === f.id;
+                    const squadCount = f.squad.length;
+                    return `
+                      <div style="background: var(--surface-2); border: 1px solid ${isLead ? 'var(--color-green)' : 'var(--border-subtle)'}; border-radius: 6px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                          <div style="display: flex; align-items: center; gap: 8px;">
+                            ${getTeamEmblem(f.id, 24)}
+                            <strong style="font-size: 0.875rem; color: var(--text-bright);">${f.name}</strong>
+                          </div>
+                          ${isLead ? `<span class="status-badge status-live" style="font-size: 0.58rem; padding: 1px 5px;">LEADING</span>` : ''}
+                        </div>
+                        <div style="display: flex; justify-content: space-between; font-size: 0.75rem; margin-top: 4px;">
+                          <span style="color: var(--text-muted);">Purse:</span>
+                          <strong class="font-mono" style="color: var(--color-green);">${f.purse}C</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; font-size: 0.75rem;">
+                          <span style="color: var(--text-muted);">Squad:</span>
+                          <span class="font-mono">${squadCount} / 15</span>
+                        </div>
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+              </div>
+
+              <!-- 4. RECENT ACTIVITY TIMELINE & SYSTEM HEALTH -->
+              <div style="display: grid; grid-template-columns: 2fr 1fr; gap: var(--space-4);" class="admin-timeline-grid">
+                <!-- Activity Timeline -->
+                <div class="surface-card" style="padding: 16px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <span class="label-micro" style="color: var(--color-green); font-size: 0.75rem; font-weight: 800;">REAL-TIME ACTIVITY TIMELINE</span>
+                    <span class="status-indicator status-live" style="width: 6px; height: 6px;"></span>
+                  </div>
+                  <div class="font-mono" style="font-size: 0.72rem; color: #475569; max-height: 180px; overflow-y: auto; display: flex; flex-direction: column-reverse; gap: 4px;">
+                    ${(auditLedger && auditLedger.length > 0) ? auditLedger.slice(-15).map(e => `
+                      <div style="padding: 4px 8px; background: var(--surface-2); border-radius: 4px; display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                          <span style="color: #94a3b8;">[${new Date(e.timestamp).toLocaleTimeString()}]</span>
+                          <strong style="color: ${e.type === 'HAMMER' || e.type === 'SOLD' ? '#047857' : e.type === 'UNDO' ? '#dc2626' : '#b45309'}; margin: 0 4px;">${e.type}</strong>
+                          <span style="color: var(--text-bright); font-weight: 700;">${e.playerName || ''}</span>
+                          <span style="color: #0284c7;">${e.franchiseName ? '→ ' + e.franchiseName : ''}</span>
+                        </div>
+                        <span style="color: #047857; font-weight: 800;">${e.price ? e.price + 'C' : ''}</span>
+                      </div>
+                    `).join('') : `
+                      <div style="padding: 12px; text-align: center; color: var(--text-muted);">Floor initialized. Standing by for opening bids.</div>
+                    `}
+                  </div>
+                </div>
+
+                <!-- System Health & Connectivity -->
+                <div class="surface-card" style="padding: 16px; display: flex; flex-direction: column; gap: 10px;">
+                  <span class="label-micro" style="color: var(--color-blue); font-size: 0.75rem; font-weight: 800;">SYSTEM HEALTH & SERVICES</span>
+                  
+                  <div style="display: flex; flex-direction: column; gap: 8px; font-size: 0.78125rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                      <span style="color: var(--text-muted);">Firebase Auth</span>
+                      <span class="status-badge status-connected" style="font-size: 0.6rem;">CONNECTED</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                      <span style="color: var(--text-muted);">Firestore Engine</span>
+                      <span class="status-badge status-connected" style="font-size: 0.6rem;">CONNECTED</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                      <span style="color: var(--text-muted);">Realtime State Sync</span>
+                      <span class="status-badge status-connected" style="font-size: 0.6rem;">ACTIVE (${liveUsersCount} Peers)</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                      <span style="color: var(--text-muted);">Auction Engine Lock</span>
+                      <span class="status-badge status-connected" style="font-size: 0.6rem;">DETERMINISTIC</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                      <span style="color: var(--text-muted);">Projector Display</span>
+                      <span class="status-badge status-connected" style="font-size: 0.6rem;">SYNCHRONIZED</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                      <span style="color: var(--text-muted);">Public Floor Stream</span>
+                      <span class="status-badge status-connected" style="font-size: 0.6rem;">ONLINE</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 5. REGISTRATION PIPELINE & BUCKET QUOTAS -->
               <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;">
                 <div class="surface-card" style="padding: 16px;">
                   <span class="label-micro" style="color: var(--color-green);">TOTAL REGISTERED</span>
@@ -11750,7 +12330,7 @@
                               <button class="btn btn-secondary" style="font-size: 0.6875rem; padding: 3px 8px; min-height: 26px;" onclick="openPlayerDetailModal('${p.id}')">Inspect</button>
 
                               ${isDel ? `
-                                <button class="btn btn-secondary" style="font-size: 0.6875rem; padding: 3px 8px; min-height: 26px; background: var(--color-green); border-color: var(--color-green); color: #000; font-weight: 800;" onclick="adminRestorePlayerGovernance('${p.id}')">Restore</button>
+                                ${!DEMO_MODE ? `<button class="btn btn-secondary" style="font-size: 0.6875rem; padding: 3px 8px; min-height: 26px; background: var(--color-green); border-color: var(--color-green); color: #000; font-weight: 800;" onclick="adminRestorePlayerGovernance('${p.id}')">Restore</button>` : ''}
                               ` : isPending || isChg ? `
                                 <button class="btn btn-secondary" style="font-size: 0.6875rem; padding: 3px 8px; min-height: 26px;" onclick="openPlayerEditModal('${p.id}')">Edit</button>
                                 <button class="btn btn-primary" style="font-size: 0.6875rem; padding: 3px 8px; min-height: 26px; background: var(--color-green); border-color: var(--color-green); color: #000; font-weight: 800;" onclick="executeApprovePlayer('${p.id}')">Approve</button>
@@ -11758,13 +12338,13 @@
                               ` : isBlocked ? `
                                 <button class="btn btn-secondary" style="font-size: 0.6875rem; padding: 3px 8px; min-height: 26px;" onclick="openPlayerEditModal('${p.id}')">Edit</button>
                                 <button class="btn btn-primary" style="font-size: 0.6875rem; padding: 3px 8px; min-height: 26px; background: var(--color-green); border-color: var(--color-green); color: #000; font-weight: 800;" onclick="adminUnblockPlayerGovernance('${p.id}')">Unblock</button>
-                                <button class="btn btn-secondary text-danger" style="font-size: 0.6875rem; padding: 3px 8px; min-height: 26px; color: var(--color-red);" onclick="openDeletePlayerModal('${p.id}')">Delete</button>
+                                ${!DEMO_MODE ? `<button class="btn btn-secondary text-danger" style="font-size: 0.6875rem; padding: 3px 8px; min-height: 26px; color: var(--color-red);" onclick="openDeletePlayerModal('${p.id}')">Delete</button>` : ''}
                               ` : isArchived ? `
-                                <button class="btn btn-secondary" style="font-size: 0.6875rem; padding: 3px 8px; min-height: 26px;" onclick="adminRestorePlayerGovernance('${p.id}')">Restore</button>
+                                ${!DEMO_MODE ? `<button class="btn btn-secondary" style="font-size: 0.6875rem; padding: 3px 8px; min-height: 26px;" onclick="adminRestorePlayerGovernance('${p.id}')">Restore</button>` : ''}
                               ` : `
                                 <button class="btn btn-secondary" style="font-size: 0.6875rem; padding: 3px 8px; min-height: 26px;" onclick="openPlayerEditModal('${p.id}')">Edit</button>
                                 <button class="btn btn-secondary" style="font-size: 0.6875rem; padding: 3px 8px; min-height: 26px; color: var(--color-red);" onclick="openBlockPlayerModal('${p.id}')">Block</button>
-                                <button class="btn btn-secondary text-danger" style="font-size: 0.6875rem; padding: 3px 8px; min-height: 26px; color: var(--color-red);" onclick="openDeletePlayerModal('${p.id}')">Delete</button>
+                                ${!DEMO_MODE ? `<button class="btn btn-secondary text-danger" style="font-size: 0.6875rem; padding: 3px 8px; min-height: 26px; color: var(--color-red);" onclick="openDeletePlayerModal('${p.id}')">Delete</button>` : ''}
                               `}
                             </div>
                           </td>
@@ -11821,7 +12401,7 @@
                         <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 6px 12px; min-height: 36px;" onclick="openPlayerDetailModal('${p.id}')">Inspect</button>
 
                         ${isDel ? `
-                          <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 6px 14px; min-height: 36px; background: var(--color-green); border-color: var(--color-green); color: #000; font-weight: 800;" onclick="adminRestorePlayerGovernance('${p.id}')">Restore</button>
+                          ${!DEMO_MODE ? `<button class="btn btn-secondary" style="font-size: 0.75rem; padding: 6px 14px; min-height: 36px; background: var(--color-green); border-color: var(--color-green); color: #000; font-weight: 800;" onclick="adminRestorePlayerGovernance('${p.id}')">Restore</button>` : ''}
                         ` : isPending || isChg ? `
                           <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 6px 14px; min-height: 36px;" onclick="openPlayerEditModal('${p.id}')">Edit</button>
                           <button class="btn btn-primary" style="font-size: 0.75rem; padding: 6px 14px; min-height: 36px; background: var(--color-green); border-color: var(--color-green); color: #000; font-weight: 800;" onclick="executeApprovePlayer('${p.id}')">Approve</button>
@@ -11829,13 +12409,13 @@
                         ` : isBlocked ? `
                           <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 6px 14px; min-height: 36px;" onclick="openPlayerEditModal('${p.id}')">Edit</button>
                           <button class="btn btn-primary" style="font-size: 0.75rem; padding: 6px 14px; min-height: 36px; background: var(--color-green); border-color: var(--color-green); color: #000; font-weight: 800;" onclick="adminUnblockPlayerGovernance('${p.id}')">Unblock</button>
-                          <button class="btn btn-secondary text-danger" style="font-size: 0.75rem; padding: 6px 14px; min-height: 36px; color: var(--color-red);" onclick="openDeletePlayerModal('${p.id}')">Delete</button>
+                          ${!DEMO_MODE ? `<button class="btn btn-secondary text-danger" style="font-size: 0.75rem; padding: 6px 14px; min-height: 36px; color: var(--color-red);" onclick="openDeletePlayerModal('${p.id}')">Delete</button>` : ''}
                         ` : isArchived ? `
-                          <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 6px 14px; min-height: 36px;" onclick="adminRestorePlayerGovernance('${p.id}')">Restore</button>
+                          ${!DEMO_MODE ? `<button class="btn btn-secondary" style="font-size: 0.75rem; padding: 6px 14px; min-height: 36px;" onclick="adminRestorePlayerGovernance('${p.id}')">Restore</button>` : ''}
                         ` : `
                           <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 6px 14px; min-height: 36px;" onclick="openPlayerEditModal('${p.id}')">Edit</button>
                           <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 6px 14px; min-height: 36px; color: var(--color-red);" onclick="openBlockPlayerModal('${p.id}')">Block</button>
-                          <button class="btn btn-secondary text-danger" style="font-size: 0.75rem; padding: 6px 14px; min-height: 36px; color: var(--color-red);" onclick="openDeletePlayerModal('${p.id}')">Delete</button>
+                          ${!DEMO_MODE ? `<button class="btn btn-secondary text-danger" style="font-size: 0.75rem; padding: 6px 14px; min-height: 36px; color: var(--color-red);" onclick="openDeletePlayerModal('${p.id}')">Delete</button>` : ''}
                         `}
                       </div>
                     </div>
