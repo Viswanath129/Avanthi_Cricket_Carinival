@@ -19,18 +19,17 @@ export function ProtectedRoute({
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-900 p-6">
-        <div className="w-full max-w-md space-y-4 animate-pulse">
-          <div className="h-8 bg-white/10 rounded-md w-1/3 mx-auto"></div>
-          <div className="h-4 bg-white/5 rounded-md w-2/3 mx-auto"></div>
-          <div className="h-48 bg-white/5 rounded-2xl border border-white/10 p-6 space-y-3">
-            <div className="h-4 bg-white/10 rounded w-3/4"></div>
-            <div className="h-4 bg-white/10 rounded w-1/2"></div>
-            <div className="h-10 bg-white/10 rounded w-full mt-6"></div>
+      <div className="min-h-screen flex items-center justify-center p-6 relative z-10">
+        <div className="w-full max-w-md bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl p-8 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4 text-center">
+          <div className="w-10 h-10 border-3 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <div className="space-y-1">
+            <h3 className="font-display font-bold text-sm text-slate-800 dark:text-white uppercase tracking-wider">
+              Restoring ACC 2026 Session
+            </h3>
+            <p className="font-mono text-xs text-slate-500">
+              Resolving server-authoritative role & permissions...
+            </p>
           </div>
-          <p className="text-center font-mono text-xs text-slate-400">
-            Resolving server-authoritative role & permissions...
-          </p>
         </div>
       </div>
     );

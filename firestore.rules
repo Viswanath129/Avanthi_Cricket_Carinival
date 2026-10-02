@@ -92,14 +92,14 @@ service cloud.firestore {
       allow create: if isAuthenticated() && 
         request.resource.data.accountStatus == 'PENDING' &&
         request.resource.data.approvalStatus == 'PENDING_APPROVAL' &&
-        request.resource.data.auctionable == false;
+        request.resource.data.auctionEligible == false;
       allow update: if isAuthenticated() && (
         isAdmin() ||
         (
           (resource.data.uid == request.auth.uid || resource.data.authUid == request.auth.uid) &&
           request.resource.data.accountStatus == resource.data.accountStatus &&
           request.resource.data.approvalStatus == resource.data.approvalStatus &&
-          request.resource.data.auctionable == resource.data.auctionable
+          request.resource.data.auctionEligible == resource.data.auctionEligible
         )
       );
       allow delete: if isSuperAdmin();

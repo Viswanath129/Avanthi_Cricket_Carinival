@@ -11,27 +11,20 @@ if (!fs.existsSync(distDir)) {
   fs.mkdirSync(distDir, { recursive: true });
 }
 
-// 1. Move/copy React bundle index.html to portal.html
+// 1. Maintain React bundle as the primary SPA index.html and portal.html alias
 const distIndex = path.join(distDir, 'index.html');
 const distPortal = path.join(distDir, 'portal.html');
 if (fs.existsSync(distIndex)) {
   fs.copyFileSync(distIndex, distPortal);
-  console.log('[sync-dist] Preserved React bundle as portal.html');
+  console.log('[sync-dist] Maintained React bundle as dist/index.html and dist/portal.html');
 }
 
-// 2. Copy root index.html (Acc-Auction-Os.html) into dist
-const rootIndex = path.join(rootDir, 'index.html');
+// 2. Sync standalone legacy OS to dist/os.html and dist/Acc-Auction-Os.html (DO NOT overwrite dist/index.html!)
 const rootOs = path.join(rootDir, 'Acc-Auction-Os.html');
-
-if (fs.existsSync(rootIndex)) {
-  fs.copyFileSync(rootIndex, path.join(distDir, 'index.html'));
-  fs.copyFileSync(rootIndex, path.join(distDir, 'os.html'));
-  console.log('[sync-dist] Synced primary ACC 2026 application into dist/index.html and dist/os.html');
-}
-
 if (fs.existsSync(rootOs)) {
+  fs.copyFileSync(rootOs, path.join(distDir, 'os.html'));
   fs.copyFileSync(rootOs, path.join(distDir, 'Acc-Auction-Os.html'));
-  console.log('[sync-dist] Synced Acc-Auction-Os.html into dist/');
+  console.log('[sync-dist] Synced standalone legacy OS into dist/os.html and dist/Acc-Auction-Os.html');
 }
 
 // 3. Copy static assets

@@ -4,7 +4,26 @@ import { useLocation, Link } from 'wouter';
 import { Shield, Users, User, ArrowRight, RefreshCw, KeyRound, AlertCircle, CheckCircle2, Lock, ExternalLink } from 'lucide-react';
 
 export default function LoginPage() {
-  const [activeTab, setActiveTab] = useState<'PLAYER' | 'FRANCHISE' | 'ADMIN'>('PLAYER');
+  const [activeTab, setActiveTab] = useState<'PLAYER' | 'FRANCHISE' | 'ADMIN'>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const mode = params.get('mode')?.toUpperCase();
+      if (mode === 'ADMIN') return 'ADMIN';
+      if (mode === 'FRANCHISE') return 'FRANCHISE';
+      if (mode === 'PLAYER') return 'PLAYER';
+    }
+    return 'PLAYER';
+  });
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const mode = params.get('mode')?.toUpperCase();
+      if (mode === 'ADMIN') setActiveTab('ADMIN');
+      else if (mode === 'FRANCHISE') setActiveTab('FRANCHISE');
+      else if (mode === 'PLAYER') setActiveTab('PLAYER');
+    }
+  }, [typeof window !== 'undefined' ? window.location.search : '']);
 
   // Admin form state
   const [adminIdentifier, setAdminIdentifier] = useState('');

@@ -38,59 +38,67 @@
     "rewrites": [
       {
         "source": "/portal",
-        "destination": "/portal.html"
+        "destination": "/index.html"
       },
       {
         "source": "/portal/**",
-        "destination": "/portal.html"
+        "destination": "/index.html"
       },
       {
         "source": "/admin",
-        "destination": "/portal.html"
+        "destination": "/index.html"
       },
       {
         "source": "/admin/**",
-        "destination": "/portal.html"
+        "destination": "/index.html"
       },
       {
         "source": "/operator",
-        "destination": "/portal.html"
+        "destination": "/index.html"
       },
       {
         "source": "/operator/**",
-        "destination": "/portal.html"
+        "destination": "/index.html"
       },
       {
         "source": "/login",
-        "destination": "/portal.html"
+        "destination": "/index.html"
       },
       {
         "source": "/register",
-        "destination": "/portal.html"
+        "destination": "/index.html"
+      },
+      {
+        "source": "/franchise",
+        "destination": "/index.html"
       },
       {
         "source": "/franchise/**",
-        "destination": "/portal.html"
+        "destination": "/index.html"
+      },
+      {
+        "source": "/player",
+        "destination": "/index.html"
       },
       {
         "source": "/player/**",
-        "destination": "/portal.html"
+        "destination": "/index.html"
       },
       {
         "source": "/live",
-        "destination": "/portal.html"
+        "destination": "/index.html"
       },
       {
         "source": "/players",
-        "destination": "/portal.html"
+        "destination": "/index.html"
       },
       {
         "source": "/teams",
-        "destination": "/portal.html"
+        "destination": "/index.html"
       },
       {
         "source": "/projector",
-        "destination": "/portal.html"
+        "destination": "/index.html"
       },
       {
         "source": "**",
