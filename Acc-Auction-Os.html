@@ -7634,7 +7634,7 @@
               <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                 <span class="status-badge status-scarcity">SCARCITY ALERT</span>
                 <span style="font-size: 0.8125rem; font-weight: 700; color: var(--color-yellow);">
-                  ${scarcity.bucket}: ${scarcity.available} available vs ${scarcity.unfilledSlots} mandatory slots remaining.
+                  ${scarcity.bucket}: ${scarcity.available} available vs ${scarcity.totalPlayersNeeded} mandatory slots remaining.
                 </span>
               </div>
               <button class="btn btn-secondary" style="padding: 6px 12px; min-height: 32px; font-size: 0.75rem;" onclick="switchView('live')">WATCH BIDDING</button>
@@ -12528,12 +12528,6 @@
     }
 
     function switchView(viewName) {
-      if (viewName === "login") {
-        if (typeof window !== 'undefined' && window.location.pathname !== '/login' && window.location.protocol !== 'file:') {
-          window.location.href = '/login';
-          return;
-        }
-      }
       if (viewName === "franchise/register" || viewName === "franchise-register") {
         viewName = "franchise-register";
       }
@@ -13637,10 +13631,10 @@
       if (savedUserStr) {
         try {
           const parsed = JSON.parse(savedUserStr);
-          if (parsed && parsed.role && parsed.uid) {
-            // VULN-6 FIX: Validate restored session against canonical users database
-            const canonicalUser = users.find(u => u.uid === parsed.uid);
-            if (canonicalUser && canonicalUser.role === parsed.role && canonicalUser.status !== 'LOCKED') {
+          if (parsed && parsed.role && (parsed.uid || parsed.id || parsed.roll)) {
+            // Validate restored session against canonical users database with fallback to parsed credentials
+            const canonicalUser = users.find(u => (parsed.uid && u.uid === parsed.uid) || (parsed.email && u.email === parsed.email)) || parsed;
+            if (canonicalUser && canonicalUser.status !== 'LOCKED') {
               currentUser = canonicalUser;
             } else {
               // Invalid, tampered, or locked session. Revert to PUBLIC.
@@ -13648,20 +13642,22 @@
               localStorage.removeItem("acc_current_user_2026");
             }
             if (window.RealtimeStore) {
-              window.RealtimeStore.state.auth.user = parsed;
-              window.RealtimeStore.state.auth.role = parsed.role;
-              window.RealtimeStore.state.auth.franchiseId = parsed.franchiseId || null;
-              window.RealtimeStore.state.auth.playerId = parsed.playerId || null;
-              window.RealtimeStore.state.auth.identityType = parsed.identityType || 'PUBLIC';
+              window.RealtimeStore.state.auth.user = currentUser;
+              window.RealtimeStore.state.auth.role = currentUser.role;
+              window.RealtimeStore.state.auth.franchiseId = currentUser.franchiseId || null;
+              window.RealtimeStore.state.auth.playerId = currentUser.playerId || null;
+              window.RealtimeStore.state.auth.identityType = currentUser.identityType || currentUser.role || 'PUBLIC';
             }
           }
         } catch(e) {}
       }
 
       const authCtx = getCurrentUserContext();
+      let pathname = (typeof window !== "undefined" && window.location.pathname) ? window.location.pathname.replace(/^\/+|\/+$/g, "") : "";
       let rawHash = window.location.hash.replace(/^#\/?/, "");
-      let hash = rawHash.split('/')[0] || "public";
-      if (rawHash === "franchise/register" || rawHash === "franchise-register") hash = "franchise-register";
+      let routeSource = rawHash || pathname;
+      let hash = routeSource.split('/')[0] || "public";
+      if (routeSource === "franchise/register" || routeSource === "franchise-register") hash = "franchise-register";
       if (hash === "home" || !hash) hash = "public";
 
       if (hash && ["public", "live", "franchise", "teams", "register", "franchise-register", "player", "admin", "projector", "login", "debug/realtime", "debug-realtime"].includes(hash)) {
