@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   collection, 
   query, 
@@ -7,13 +7,13 @@ import {
   doc, 
   getDocs, 
   updateDoc, 
-  deleteDoc, 
   setDoc, 
   addDoc, 
   serverTimestamp,
   orderBy 
 } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { db, functions } from '@/lib/firebase';
+import { httpsCallable } from 'firebase/functions';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocation } from 'wouter';
 import { BUCKET_LABELS, type BucketId, type PlayerDoc, type FranchiseDoc } from '@shared/types';
@@ -110,6 +110,9 @@ export default function AdminDashboardPage() {
 
   // Realtime Users Directory State
   const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [userSearch, setUserSearch] = useState('');
+  const [userActionUid, setUserActionUid] = useState<string | null>(null);
+  const userActionLock = useRef(false);
   const [createAdminModal, setCreateAdminModal] = useState(false);
   const [adminFormData, setAdminFormData] = useState({
     name: '',
@@ -192,9 +195,18 @@ export default function AdminDashboardPage() {
         setAllUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       }, () => {});
 
-      const aq = query(collection(db, 'auditLog'), orderBy('timestamp', 'desc'));
-      const unsubAudit = onSnapshot(aq, (snap) => {
-        setAuditLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const auditRows = new Map<string, any>();
+      const publishAuditRows = () => setAuditLogs([...auditRows.values()].sort((a, b) => {
+        const time = (v: any) => v?.toDate ? v.toDate().getTime() : (typeof v === 'number' ? v : Date.parse(v || '') || 0);
+        return time(b.timestamp) - time(a.timestamp);
+      }));
+      const unsubAudit = onSnapshot(collection(db, 'auditLogs'), (snap) => {
+        snap.docs.forEach(d => auditRows.set(`auditLogs:${d.id}`, { id: d.id, ...d.data() }));
+        publishAuditRows();
+      }, () => {});
+      const unsubLegacyAudit = onSnapshot(collection(db, 'auditLog'), (snap) => {
+        snap.docs.forEach(d => auditRows.set(`auditLog:${d.id}`, { id: d.id, ...d.data(), legacy: true }));
+        publishAuditRows();
       }, () => {});
 
       return () => {
@@ -202,6 +214,7 @@ export default function AdminDashboardPage() {
         unsubFranchises();
         unsubUsers();
         unsubAudit();
+        unsubLegacyAudit();
       };
     } catch {
       setLoading(false);
@@ -209,19 +222,36 @@ export default function AdminDashboardPage() {
   }, []);
 
   const logAudit = async (action: string, targetId: string, details: string) => {
-    const entry = {
-      timestamp: new Date().toISOString(),
-      action,
-      targetId,
-      actorUid: user?.uid || 'usr_admin',
-      role: userDoc?.role || 'SUPER_ADMIN',
-      details,
-    };
     try {
-      await addDoc(collection(db, 'auditLog'), entry);
+      const write = httpsCallable(functions, 'recordAuditEvent');
+      await write({ action, targetType: 'ADMINISTRATION', targetId, details, editionId: EDITION_ID });
     } catch {
-      // Local fallback
-      setAuditLogs(prev => [entry, ...prev]);
+      showToast('Audit event could not be persisted; operation was not recorded.', 'error');
+    }
+  };
+
+  const manageUserRecord = async (target: any, action: 'DELETE' | 'RESTORE' | 'PERMANENT_DELETE') => {
+    if (!isSuperAdmin || userActionLock.current) return;
+    const uid = target.id || target.uid;
+    const label = target.name || target.displayName || target.email || uid;
+    if (action === 'DELETE' && !window.confirm(`Move ${label} (${uid}) to Trash? Their account will be disabled. Historical auction records are preserved.`)) return;
+    let confirmation: string | undefined;
+    if (action === 'PERMANENT_DELETE') {
+      confirmation = window.prompt(`Permanently delete ${label} (${uid})? Historical tournament records are preserved. Type DELETE ${uid} to confirm.`) || '';
+      if (confirmation !== `DELETE ${uid}`) return;
+    }
+    if (action === 'RESTORE' && !window.confirm(`Restore ${label} (${uid}) with its existing role?`)) return;
+    userActionLock.current = true;
+    setUserActionUid(uid);
+    try {
+      const call = httpsCallable(functions, 'manageUserRecord');
+      await call({ uid, action, confirmation });
+      showToast(action === 'DELETE' ? 'User moved to Trash.' : action === 'RESTORE' ? 'User restored.' : 'User permanently deleted.');
+    } catch (err: any) {
+      showToast(err.message || 'User management action failed.', 'error');
+    } finally {
+      userActionLock.current = false;
+      setUserActionUid(null);
     }
   };
 
@@ -326,53 +356,23 @@ export default function AdminDashboardPage() {
 
   const handleArchivePlayer = async (p: any) => {
     try {
-      await updateDoc(doc(db, 'players', p.id), {
-        approvalStatus: 'ARCHIVED',
-        status: 'ARCHIVED',
-        auctionEligible: false,
-        publicVisibility: false,
-        updatedAt: new Date().toISOString()
-      });
-      await logAudit('PLAYER_ARCHIVED', p.rollNumber || p.id, `Player ${p.name} moved to archive.`);
+      await httpsCallable(functions, 'managePlayerRecord')({ playerId: p.id, action: 'ARCHIVE', reason: 'Admin dashboard archive' });
       showToast(`Player ${p.name} archived.`);
-    } catch {
-      setPlayers(prev => prev.map(x => x.id === p.id ? { ...x, approvalStatus: 'ARCHIVED', status: 'ARCHIVED' } : x));
+    } catch (err: any) {
+      showToast(err.message || 'Player archive failed.', 'error');
     }
   };
 
   const handleDeletePlayer = async (p: any) => {
-    if (p.auctionHistory || p.status === 'SOLD') {
-      showToast("CANNOT DELETE: Player has auction sale history. Must ARCHIVE instead.", "error");
-      return;
-    }
-    try {
-      await updateDoc(doc(db, 'players', p.id), {
-        status: 'DELETED',
-        deletedAt: new Date().toISOString(),
-        publicVisibility: false,
-        auctionEligible: false
-      });
-      await logAudit('PLAYER_DELETED_TO_TRASH', p.rollNumber || p.id, `Player ${p.name} moved to trash.`);
-      showToast(`Player ${p.name} moved to Trash bin.`);
-    } catch {
-      setPlayers(prev => prev.filter(x => x.id !== p.id));
-      setDeletedPlayers(prev => [...prev, { ...p, status: 'DELETED' }]);
-    }
+    await handleArchivePlayer(p);
   };
 
   const handleRestorePlayer = async (p: any) => {
     try {
-      await updateDoc(doc(db, 'players', p.id), {
-        status: 'AVAILABLE',
-        approvalStatus: 'PENDING_APPROVAL',
-        verificationStatus: 'PENDING_VERIFICATION',
-        deletedAt: null
-      });
-      await logAudit('PLAYER_RESTORED', p.rollNumber || p.id, `Player ${p.name} restored from trash.`);
+      await httpsCallable(functions, 'managePlayerRecord')({ playerId: p.id, action: 'RESTORE' });
       showToast(`Player ${p.name} restored to Pending roster.`);
-    } catch {
-      setDeletedPlayers(prev => prev.filter(x => x.id !== p.id));
-      setPlayers(prev => [...prev, { ...p, status: 'AVAILABLE', approvalStatus: 'PENDING_APPROVAL' }]);
+    } catch (err: any) {
+      showToast(err.message || 'Player restore failed.', 'error');
     }
   };
 
@@ -381,12 +381,13 @@ export default function AdminDashboardPage() {
       showToast("ACCESS DENIED: Super Admin required for permanent purge.", "error");
       return;
     }
+    const confirmation = window.prompt(`Type DELETE ${p.rollNumber || p.id} to confirm. Protected auction history will block this action.`) || '';
+    if (confirmation !== `DELETE ${p.rollNumber || p.id}`) return;
     try {
-      await deleteDoc(doc(db, 'players', p.id));
-      await logAudit('PLAYER_PERMANENTLY_PURGED', p.rollNumber || p.id, `Player ${p.name} permanently wiped.`);
+      await httpsCallable(functions, 'managePlayerRecord')({ playerId: p.id, action: 'PERMANENT_DELETE', confirmation });
       showToast(`Player ${p.name} permanently removed.`);
-    } catch {
-      setDeletedPlayers(prev => prev.filter(x => x.id !== p.id));
+    } catch (err: any) {
+      showToast(err.message || 'Player has protected history and must be archived.', 'error');
     }
   };
 
@@ -1142,6 +1143,35 @@ export default function AdminDashboardPage() {
                 </p>
               </div>
 
+              <div className="p-6 rounded-2xl bg-white/[0.03] border border-white/[0.08] space-y-4">
+                <div>
+                  <h3 className="font-display font-bold text-lg text-white">User Records</h3>
+                  <p className="text-xs text-slate-400">Search by name, roll number, email, or franchise. Passwords and authentication secrets are never shown.</p>
+                </div>
+                <input value={userSearch} onChange={e => setUserSearch(e.target.value)} placeholder="Search users…" className="w-full max-w-md bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white" />
+                <div className="overflow-x-auto rounded-xl border border-white/[0.08]">
+                  <table className="w-full text-left text-xs">
+                    <thead><tr className="border-b border-white/[0.08] text-slate-400 font-mono"><th className="p-3">Name</th><th className="p-3">Roll / Email</th><th className="p-3">Franchise</th><th className="p-3">Role / Status</th><th className="p-3 text-right">Action</th></tr></thead>
+                    <tbody className="divide-y divide-white/[0.05]">
+                      {allUsers.filter(u => `${u.name || u.displayName || ''} ${u.rollNumber || u.playerId || ''} ${u.email || ''} ${u.franchiseName || u.franchiseId || ''}`.toLowerCase().includes(userSearch.trim().toLowerCase())).slice(0, 100).map(u => {
+                        const uid = u.id || u.uid;
+                        const deleted = u.status === 'DELETED';
+                        return <tr key={uid}>
+                          <td className="p-3 text-white">{u.name || u.displayName || 'Unnamed'}</td>
+                          <td className="p-3 text-slate-400">{u.rollNumber || u.playerId || u.email || uid}</td>
+                          <td className="p-3 text-slate-400">{u.franchiseName || u.franchiseId || '—'}</td>
+                          <td className="p-3 text-slate-400">{u.role || '—'} · {deleted ? 'TRASH' : u.accountStatus || u.status || '—'}</td>
+                          <td className="p-3 text-right">{isSuperAdmin && u.role !== 'SUPER_ADMIN' && uid !== user?.uid && (deleted
+                            ? <><button disabled={userActionUid === uid} onClick={() => manageUserRecord(u, 'RESTORE')} className="px-2 py-1 mr-2 rounded bg-emerald-700 text-white disabled:opacity-50">RESTORE</button><button disabled={userActionUid === uid} onClick={() => manageUserRecord(u, 'PERMANENT_DELETE')} className="px-2 py-1 rounded bg-red-900 text-red-100 disabled:opacity-50">PERMANENT DELETE</button></>
+                            : <button disabled={userActionUid === uid} onClick={() => manageUserRecord(u, 'DELETE')} className="px-2 py-1 rounded bg-red-900/70 text-red-100 disabled:opacity-50">DELETE</button>)}</td>
+                        </tr>;
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                {!isSuperAdmin && <p className="text-xs text-slate-400">User deletion and restoration are restricted to Super Admin.</p>}
+              </div>
+
               {/* Trash Bin Table */}
               <div className="p-6 rounded-2xl bg-white/[0.03] border border-white/[0.08] space-y-4">
                 <div className="flex justify-between items-center">
@@ -1297,6 +1327,17 @@ export default function AdminDashboardPage() {
               <div className="border-b border-white/[0.08] pb-4">
                 <h1 className="font-display font-black text-2xl text-white">TOURNAMENT SETTINGS & GOVERNANCE</h1>
                 <p className="text-xs text-slate-400 mt-1">Configure academic rollover dates, minimum bucket quotas, and fee verification rules.</p>
+              </div>
+
+              <div className="p-5 rounded-2xl bg-white/[0.03] border border-white/[0.08] space-y-3">
+                <h2 className="font-display font-bold text-white">DATA MANAGEMENT</h2>
+                <p className="text-xs text-slate-400">Governance tools for account recovery, auction corrections, and tournament exports.</p>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  <button onClick={() => setActiveSection('datamanagement')} className="p-4 rounded-xl text-left bg-blue-950/30 border border-blue-500/20 text-white"><b>Users / Trash / Archive</b><div className="text-xs text-slate-400 mt-1">Search, disable, restore, and inspect user records.</div></button>
+                  <button onClick={() => setLocation('/admin/auction')} className="p-4 rounded-xl text-left bg-amber-950/20 border border-amber-500/20 text-white"><b>Auction Undo</b><div className="text-xs text-slate-400 mt-1">Forensic sale undo uses the authoritative transaction.</div></button>
+                  <button onClick={() => setActiveSection('export')} className="p-4 rounded-xl text-left bg-blue-950/30 border border-blue-500/20 text-white"><b>Export Database</b><div className="text-xs text-slate-400 mt-1">Download tournament data and audit trail.</div></button>
+                  <div className="p-4 rounded-xl bg-amber-950/20 border border-amber-500/20 text-slate-300"><b>Reset Demo Data</b><div className="text-xs text-slate-400 mt-1">Unavailable: no explicit demo dataset is defined for safe isolation.</div></div>
+                </div>
               </div>
 
               <div className="p-6 rounded-2xl bg-white/[0.03] border border-white/[0.08] space-y-6">

@@ -53,12 +53,12 @@ describe('ACC Admin & Operator Access Control & Capabilities Matrix', () => {
     expect(caps.canHammer).toBe(true);
     expect(caps.canSkip).toBe(true);
     expect(caps.canPauseResume).toBe(true);
-    expect(caps.canUndoSale).toBe(true);
+    expect(caps.canUndoSale).toBe(false);
     expect(caps.canBidOnBehalf).toBe(true);
     expect(caps.canDirectAssign).toBe(true);
     expect(caps.canSwitchDrawMode).toBe(true);
-    expect(caps.canExportDatabase).toBe(true);
-    expect(caps.canSnapshotJson).toBe(true);
+    expect(caps.canExportDatabase).toBe(false);
+    expect(caps.canSnapshotJson).toBe(false);
     expect(caps.canViewAuditLog).toBe(true);
 
     // Operator CANNOT perform governance / destructive mutations

@@ -3,7 +3,7 @@ import { db, verifyCaller } from '../utils/auth';
 import * as admin from 'firebase-admin';
 
 export const undoSale = onCall({ maxInstances: 5 }, async (request) => {
-  const caller = await verifyCaller(request.auth?.uid, ['SUPER_ADMIN', 'ADMIN']);
+  const caller = await verifyCaller(request.auth?.uid, ['SUPER_ADMIN']);
   
   const { acquisitionId, reason } = request.data;
   if (!acquisitionId) throw new HttpsError('invalid-argument', 'acquisitionId is required.');
@@ -35,13 +35,14 @@ export const undoSale = onCall({ maxInstances: 5 }, async (request) => {
     if (!franchiseSnap.exists) throw new HttpsError('internal', 'Franchise not found during undo.');
     const franchise = franchiseSnap.data()!;
     
-    const currentBucketCount = franchise.squad?.bucketCounts?.[acq.lotId] || 0;
-    
     // We need to get the lot to know the bucket
     const lotRef = db.collection('lots').doc(acq.lotId);
     const lotSnap = await txn.get(lotRef);
-    const lot = lotSnap.exists ? lotSnap.data()! : null;
-    const bucketId = lot?.bucketId || 'B1';
+    if (!lotSnap.exists) throw new HttpsError('failed-precondition', 'Auction lot is missing; sale cannot be safely undone.');
+    const lot = lotSnap.data()!;
+    if (lot.status !== 'SOLD') throw new HttpsError('failed-precondition', 'Auction lot is not in the SOLD state.');
+    const bucketId = lot.bucketId;
+    if (!bucketId) throw new HttpsError('failed-precondition', 'Auction lot has no bucket; sale cannot be safely undone.');
     
     const currentBucketCountForBucket = franchise.squad?.bucketCounts?.[bucketId] || 0;
     
@@ -53,14 +54,12 @@ export const undoSale = onCall({ maxInstances: 5 }, async (request) => {
     });
     
     // Return player to pool (mark lot as available/unsold for rebidding)
-    if (lot) {
-      txn.update(lotRef, {
-        status: 'AVAILABLE',
-        currentPrice: lot.basePrice,
-        highestBidderFranchiseId: null,
-        version: admin.firestore.FieldValue.increment(1),
-      });
-    }
+    txn.update(lotRef, {
+      status: 'AVAILABLE',
+      currentPrice: lot.basePrice,
+      highestBidderFranchiseId: null,
+      version: admin.firestore.FieldValue.increment(1),
+    });
     
     // Return player to auctionable state
     if (acq.playerId) {
@@ -76,7 +75,7 @@ export const undoSale = onCall({ maxInstances: 5 }, async (request) => {
       editionId: acq.editionId,
       actorUid: caller.uid,
       actorRole: caller.role,
-      action: 'UNDO_SALE',
+      action: 'AUCTION_UNDO',
       entityType: 'ACQUISITION',
       entityId: acquisitionId,
       beforeState: { status: 'ACTIVE', price: acq.price, franchiseId: acq.franchiseId, playerId: acq.playerId },

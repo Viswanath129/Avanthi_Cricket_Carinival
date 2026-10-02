@@ -24,6 +24,10 @@ export async function verifyCaller(uid: string | undefined, allowedRoles: UserRo
   
   const data = userDoc.data()!;
   const role = data.role as UserRole;
+
+  if (data.accountStatus === 'DISABLED' || data.accountStatus === 'BLOCKED' || data.status === 'DELETED') {
+    throw new HttpsError('permission-denied', 'This account is disabled.');
+  }
   
   if (!allowedRoles.includes(role)) {
     throw new HttpsError('permission-denied', `Role ${role} is not authorized for this operation.`);

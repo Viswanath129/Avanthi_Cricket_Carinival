@@ -61,13 +61,13 @@ export function useCapabilities(modeOverride?: 'SUPER_ADMIN' | 'OPERATOR'): Capa
     canHammer: true,
     canSkip: true,
     canPauseResume: true,
-    canUndoSale: true,
+    canUndoSale: false,
     canBidOnBehalf: true,
     canDirectAssign: true,
     canSwitchDrawMode: true,
     canRelaxBucketMinimum: false, // Forbidden for Operator
-    canExportDatabase: true,
-    canSnapshotJson: true,
+    canExportDatabase: false,
+    canSnapshotJson: false,
     canManageFranchises: false, // Forbidden for Operator
     canEditPhones: false, // Forbidden for Operator
     canEditTournamentSettings: false, // Forbidden for Operator

@@ -51,6 +51,9 @@ async function verifyCaller(uid, allowedRoles) {
         throw new https_1.HttpsError('not-found', 'User account not found.');
     const data = userDoc.data();
     const role = data.role;
+    if (data.accountStatus === 'DISABLED' || data.accountStatus === 'BLOCKED' || data.status === 'DELETED') {
+        throw new https_1.HttpsError('permission-denied', 'This account is disabled.');
+    }
     if (!allowedRoles.includes(role)) {
         throw new https_1.HttpsError('permission-denied', `Role ${role} is not authorized for this operation.`);
     }

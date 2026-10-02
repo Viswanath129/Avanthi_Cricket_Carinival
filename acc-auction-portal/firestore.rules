@@ -53,12 +53,10 @@ service cloud.firestore {
            request.resource.data.accountStatus == 'PENDING' &&
            request.resource.data.approvalStatus == 'PENDING_APPROVAL')
         );
-      allow update: if isSuperAdmin() || (
-        isAdmin() && 
-        request.resource.data.role != 'SUPER_ADMIN' && 
-        resource.data.role != 'SUPER_ADMIN'
-      );
-      allow delete: if isSuperAdmin();
+      allow update: if isSuperAdmin();
+      // Player identity is referenced by historical auction records. Purging is
+      // only available through the server-side reference-checking governance function.
+      allow delete: if false;
     }
 
     // ── Editions (public read, Super Admin write) ─────────────────────
@@ -117,7 +115,8 @@ service cloud.firestore {
     // Write restricted to admin and Cloud Functions.
     match /playersPublic/{playerId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create, update: if isAdmin();
+      allow delete: if false;
     }
 
     // ── Franchises (private, admin and authorized franchise owner read) ─
@@ -184,8 +183,15 @@ service cloud.firestore {
     // Immutable audit trail.
     match /auditLogs/{logId} {
       allow read: if isAdmin();
-      allow create: if isAdmin();
+      allow create: if false;
       allow update, delete: if false;
+    }
+
+    // Legacy audit records remain readable in the unified timeline. New writes
+    // go through the server-side writer into auditLogs.
+    match /auditLog/{logId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
     }
 
     // ── Settings (admin read/write) ───────────────────────────────────
