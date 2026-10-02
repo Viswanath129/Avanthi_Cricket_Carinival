@@ -38,67 +38,67 @@
     "rewrites": [
       {
         "source": "/portal",
-        "destination": "/index.html"
+        "destination": "/portal.html"
       },
       {
         "source": "/portal/**",
-        "destination": "/index.html"
+        "destination": "/portal.html"
       },
       {
         "source": "/admin",
-        "destination": "/index.html"
+        "destination": "/portal.html"
       },
       {
         "source": "/admin/**",
-        "destination": "/index.html"
+        "destination": "/portal.html"
       },
       {
         "source": "/operator",
-        "destination": "/index.html"
+        "destination": "/portal.html"
       },
       {
         "source": "/operator/**",
-        "destination": "/index.html"
+        "destination": "/portal.html"
       },
       {
         "source": "/login",
-        "destination": "/index.html"
+        "destination": "/portal.html"
       },
       {
         "source": "/register",
-        "destination": "/index.html"
+        "destination": "/portal.html"
       },
       {
         "source": "/franchise",
-        "destination": "/index.html"
+        "destination": "/portal.html"
       },
       {
         "source": "/franchise/**",
-        "destination": "/index.html"
+        "destination": "/portal.html"
       },
       {
         "source": "/player",
-        "destination": "/index.html"
+        "destination": "/portal.html"
       },
       {
         "source": "/player/**",
-        "destination": "/index.html"
+        "destination": "/portal.html"
       },
       {
         "source": "/live",
-        "destination": "/index.html"
+        "destination": "/portal.html"
       },
       {
         "source": "/players",
-        "destination": "/index.html"
+        "destination": "/portal.html"
       },
       {
         "source": "/teams",
-        "destination": "/index.html"
+        "destination": "/portal.html"
       },
       {
         "source": "/projector",
-        "destination": "/index.html"
+        "destination": "/portal.html"
       },
       {
         "source": "**",

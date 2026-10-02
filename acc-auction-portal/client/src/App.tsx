@@ -1,8 +1,7 @@
 import { useState } from "react";
-import { Switch, Route, Link, useLocation, Redirect } from "wouter";
+import { Switch, Route, Link, useLocation } from "wouter";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
-import { BlueAnimatedBackground } from "./components/BlueAnimatedBackground";
 
 import Home from "./pages/Home";
 import LoginPage from "./pages/LoginPage";
@@ -147,46 +146,11 @@ const FranchiseDashboardPage = () => {
   );
 };
 
-const RootRoute = () => {
-  const { user, userDoc, loading } = useAuth();
-
-  // 1. If Firebase Auth is still resolving on initial boot, show smooth glass restoration UI
-  if (loading) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-6">
-        <div className="flex flex-col items-center gap-4 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl p-8 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl">
-          <div className="w-10 h-10 border-3 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>
-          <span className="font-display font-bold text-sm text-slate-800 dark:text-white tracking-wide uppercase">
-            ACC 2026 · Restoring Session...
-          </span>
-          <span className="font-mono text-xs text-slate-500">
-            Verifying server-authoritative credentials
-          </span>
-        </div>
-      </div>
-    );
-  }
-
-  // 2. If authenticated, route directly to the authoritative dashboard
-  if (user && userDoc) {
-    const accStatus = userDoc.accountStatus || (userDoc.status === 'ACTIVE' ? 'ACTIVE' : 'PENDING');
-    if (accStatus === 'ACTIVE' || accStatus === 'APPROVED') {
-      if (userDoc.role === 'SUPER_ADMIN') return <Redirect to="/admin" />;
-      if (userDoc.role === 'ADMIN') return <Redirect to="/operator" />;
-      if (userDoc.role === 'FRANCHISE_COORDINATOR' || userDoc.role === 'FRANCHISE_TEAM_LEADER') return <Redirect to="/franchise" />;
-      if (userDoc.role === 'PLAYER') return <Redirect to="/player" />;
-    }
-  }
-
-  // 3. Unauthenticated root route renders intended public portal
-  return <Home />;
-};
-
 function Router() {
   return (
     <Switch>
       {/* Public Routes */}
-      <Route path="/" component={RootRoute} />
+      <Route path="/" component={Home} />
       <Route path="/players" component={PlayerBoardPage} />
       <Route path="/teams" component={TeamsBoardPage} />
       <Route path="/live" component={LiveAuctionPage} />
@@ -197,86 +161,86 @@ function Router() {
 
       {/* Admin & Operator Live Dashboards */}
       <Route path="/admin">
-        <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN']} redirectTo="/login?mode=admin">
+        <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN']}>
           <AdminLiveDashboard mode="SUPER_ADMIN" />
         </ProtectedRoute>
       </Route>
       <Route path="/portal/admin">
-        <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN']} redirectTo="/login?mode=admin">
+        <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN']}>
           <AdminLiveDashboard mode="SUPER_ADMIN" />
         </ProtectedRoute>
       </Route>
       <Route path="/operator">
-        <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN']} redirectTo="/login?mode=admin">
+        <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN']}>
           <AdminLiveDashboard mode="OPERATOR" />
         </ProtectedRoute>
       </Route>
       <Route path="/portal/operator">
-        <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN']} redirectTo="/login?mode=admin">
+        <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN']}>
           <AdminLiveDashboard mode="OPERATOR" />
         </ProtectedRoute>
       </Route>
       <Route path="/admin/auction">
-        <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN']} redirectTo="/login?mode=admin">
+        <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN']}>
           <AdminLiveDashboard mode="SUPER_ADMIN" />
         </ProtectedRoute>
       </Route>
       <Route path="/portal/admin/auction">
-        <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN']} redirectTo="/login?mode=admin">
+        <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN']}>
           <AdminLiveDashboard mode="SUPER_ADMIN" />
         </ProtectedRoute>
       </Route>
       <Route path="/admin/management">
-        <ProtectedRoute allowedRoles={['SUPER_ADMIN']} redirectTo="/login?mode=admin">
+        <ProtectedRoute allowedRoles={['SUPER_ADMIN']}>
           <AdminDashboardPage />
         </ProtectedRoute>
       </Route>
       <Route path="/portal/admin/management">
-        <ProtectedRoute allowedRoles={['SUPER_ADMIN']} redirectTo="/login?mode=admin">
+        <ProtectedRoute allowedRoles={['SUPER_ADMIN']}>
           <AdminDashboardPage />
         </ProtectedRoute>
       </Route>
 
       {/* Franchise Routes */}
       <Route path="/franchise">
-        <ProtectedRoute allowedRoles={['FRANCHISE_COORDINATOR', 'FRANCHISE_TEAM_LEADER']} redirectTo="/login?mode=franchise">
+        <ProtectedRoute allowedRoles={['FRANCHISE_COORDINATOR', 'FRANCHISE_TEAM_LEADER']}>
           <FranchiseDashboardPage />
         </ProtectedRoute>
       </Route>
       <Route path="/portal/franchise">
-        <ProtectedRoute allowedRoles={['FRANCHISE_COORDINATOR', 'FRANCHISE_TEAM_LEADER']} redirectTo="/login?mode=franchise">
+        <ProtectedRoute allowedRoles={['FRANCHISE_COORDINATOR', 'FRANCHISE_TEAM_LEADER']}>
           <FranchiseDashboardPage />
         </ProtectedRoute>
       </Route>
       <Route path="/franchise/bid">
-        <ProtectedRoute allowedRoles={['FRANCHISE_COORDINATOR', 'FRANCHISE_TEAM_LEADER']} redirectTo="/login?mode=franchise">
+        <ProtectedRoute allowedRoles={['FRANCHISE_COORDINATOR', 'FRANCHISE_TEAM_LEADER']}>
           <FranchiseBiddingPage />
         </ProtectedRoute>
       </Route>
       <Route path="/portal/franchise/bid">
-        <ProtectedRoute allowedRoles={['FRANCHISE_COORDINATOR', 'FRANCHISE_TEAM_LEADER']} redirectTo="/login?mode=franchise">
+        <ProtectedRoute allowedRoles={['FRANCHISE_COORDINATOR', 'FRANCHISE_TEAM_LEADER']}>
           <FranchiseBiddingPage />
         </ProtectedRoute>
       </Route>
 
       {/* Player Routes */}
       <Route path="/player">
-        <ProtectedRoute allowedRoles={['PLAYER', 'SUPER_ADMIN', 'ADMIN']} redirectTo="/login?mode=player">
+        <ProtectedRoute allowedRoles={['PLAYER', 'SUPER_ADMIN', 'ADMIN']}>
           <PlayerDashboardPage />
         </ProtectedRoute>
       </Route>
       <Route path="/portal/player">
-        <ProtectedRoute allowedRoles={['PLAYER', 'SUPER_ADMIN', 'ADMIN']} redirectTo="/login?mode=player">
+        <ProtectedRoute allowedRoles={['PLAYER', 'SUPER_ADMIN', 'ADMIN']}>
           <PlayerDashboardPage />
         </ProtectedRoute>
       </Route>
       <Route path="/player/dashboard">
-        <ProtectedRoute allowedRoles={['PLAYER', 'SUPER_ADMIN', 'ADMIN']} redirectTo="/login?mode=player">
+        <ProtectedRoute allowedRoles={['PLAYER', 'SUPER_ADMIN', 'ADMIN']}>
           <PlayerDashboardPage />
         </ProtectedRoute>
       </Route>
       <Route path="/portal/player/dashboard">
-        <ProtectedRoute allowedRoles={['PLAYER', 'SUPER_ADMIN', 'ADMIN']} redirectTo="/login?mode=player">
+        <ProtectedRoute allowedRoles={['PLAYER', 'SUPER_ADMIN', 'ADMIN']}>
           <PlayerDashboardPage />
         </ProtectedRoute>
       </Route>
@@ -302,12 +266,7 @@ function Router() {
 function App() {
   return (
     <AuthProvider>
-      <div className="relative min-h-screen text-slate-900 font-sans selection:bg-emerald-500 selection:text-white">
-        <BlueAnimatedBackground />
-        <div className="relative z-10 min-h-screen flex flex-col">
-          <Router />
-        </div>
-      </div>
+      <Router />
     </AuthProvider>
   );
 }
