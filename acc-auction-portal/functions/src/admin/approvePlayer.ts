@@ -1,6 +1,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { db, verifyCaller } from '../utils/auth';
 import * as admin from 'firebase-admin';
+import { writeAuditEvent } from '../utils/audit';
 
 export const approvePlayer = onCall(async (request) => {
   const caller = await verifyCaller(request.auth?.uid, ['SUPER_ADMIN']);
@@ -20,18 +21,8 @@ export const approvePlayer = onCall(async (request) => {
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   });
   
-  await db.collection('auditLogs').add({
-    editionId: player.editionId,
-    actorUid: caller.uid,
-    actorRole: caller.role,
-    action: `PLAYER_${approvalAction}`,
-    entityType: 'PLAYER',
-    entityId: playerId,
-    beforeState: { status: player.registration?.status },
-    afterState: { status: newStatus },
-    reason: null,
-    timestamp: admin.firestore.FieldValue.serverTimestamp(),
-  });
+  await writeAuditEvent({ actor: caller, action: `PLAYER_${approvalAction}`, targetType: 'PLAYER', targetId: playerId,
+    editionId: player.editionId, before: { status: player.registration?.status }, after: { status: newStatus } });
   
   return { success: true, playerId, status: newStatus };
 });

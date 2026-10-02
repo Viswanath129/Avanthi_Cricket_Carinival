@@ -37,6 +37,7 @@ exports.skipLot = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const auth_1 = require("../utils/auth");
 const admin = __importStar(require("firebase-admin"));
+const audit_1 = require("../utils/audit");
 exports.skipLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => {
     const caller = await (0, auth_1.verifyCaller)(request.auth?.uid, ['SUPER_ADMIN', 'ADMIN']);
     const { lotId } = request.data;
@@ -55,19 +56,8 @@ exports.skipLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => {
             status: 'SKIPPED',
             version: admin.firestore.FieldValue.increment(1),
         });
-        const auditRef = auth_1.db.collection('auditLogs').doc();
-        txn.set(auditRef, {
-            editionId: lot.editionId,
-            actorUid: caller.uid,
-            actorRole: caller.role,
-            action: 'SKIP_LOT',
-            entityType: 'LOT',
-            entityId: lotId,
-            beforeState: { status: lot.status },
-            afterState: { status: 'SKIPPED' },
-            reason: null,
-            timestamp: admin.firestore.FieldValue.serverTimestamp(),
-        });
+        (0, audit_1.writeAuditEvent)({ actor: caller, action: 'SKIP', targetType: 'LOT', targetId: lotId, editionId: lot.editionId,
+            before: { status: lot.status }, after: { status: 'SKIPPED' }, transaction: txn });
         return { success: true, lotId };
     });
     return result;

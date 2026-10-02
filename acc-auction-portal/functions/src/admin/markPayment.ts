@@ -1,6 +1,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { db, verifyCaller } from '../utils/auth';
 import * as admin from 'firebase-admin';
+import { writeAuditEvent } from '../utils/audit';
 
 export const markPayment = onCall(async (request) => {
   const caller = await verifyCaller(request.auth?.uid, ['SUPER_ADMIN']);
@@ -25,18 +26,8 @@ export const markPayment = onCall(async (request) => {
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   });
   
-  await db.collection('auditLogs').add({
-    editionId: player.editionId,
-    actorUid: caller.uid,
-    actorRole: caller.role,
-    action: paid ? 'MARK_PAID' : 'MARK_UNPAID',
-    entityType: 'PLAYER',
-    entityId: playerId,
-    beforeState: { paid: player.registration?.paid },
-    afterState: { paid, auctionable: isAuctionable },
-    reason: null,
-    timestamp: admin.firestore.FieldValue.serverTimestamp(),
-  });
+  await writeAuditEvent({ actor: caller, action: paid ? 'MARK_PAID' : 'MARK_UNPAID', targetType: 'PLAYER', targetId: playerId,
+    editionId: player.editionId, before: { paid: player.registration?.paid }, after: { paid, auctionable: isAuctionable } });
   
   return { success: true, playerId, paid, auctionable: isAuctionable };
 });

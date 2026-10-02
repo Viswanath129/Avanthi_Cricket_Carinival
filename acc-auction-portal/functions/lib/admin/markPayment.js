@@ -37,6 +37,7 @@ exports.markPayment = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const auth_1 = require("../utils/auth");
 const admin = __importStar(require("firebase-admin"));
+const audit_1 = require("../utils/audit");
 exports.markPayment = (0, https_1.onCall)(async (request) => {
     const caller = await (0, auth_1.verifyCaller)(request.auth?.uid, ['SUPER_ADMIN']);
     const { playerId, paid } = request.data;
@@ -58,18 +59,8 @@ exports.markPayment = (0, https_1.onCall)(async (request) => {
         auctionable: isAuctionable,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
-    await auth_1.db.collection('auditLogs').add({
-        editionId: player.editionId,
-        actorUid: caller.uid,
-        actorRole: caller.role,
-        action: paid ? 'MARK_PAID' : 'MARK_UNPAID',
-        entityType: 'PLAYER',
-        entityId: playerId,
-        beforeState: { paid: player.registration?.paid },
-        afterState: { paid, auctionable: isAuctionable },
-        reason: null,
-        timestamp: admin.firestore.FieldValue.serverTimestamp(),
-    });
+    await (0, audit_1.writeAuditEvent)({ actor: caller, action: paid ? 'MARK_PAID' : 'MARK_UNPAID', targetType: 'PLAYER', targetId: playerId,
+        editionId: player.editionId, before: { paid: player.registration?.paid }, after: { paid, auctionable: isAuctionable } });
     return { success: true, playerId, paid, auctionable: isAuctionable };
 });
 //# sourceMappingURL=markPayment.js.map

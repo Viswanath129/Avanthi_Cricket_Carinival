@@ -37,6 +37,7 @@ exports.hammerLot = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const auth_1 = require("../utils/auth");
 const admin = __importStar(require("firebase-admin"));
+const audit_1 = require("../utils/audit");
 exports.hammerLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => {
     // Super Admin or Operator can hammer
     const caller = await (0, auth_1.verifyCaller)(request.auth?.uid, ['SUPER_ADMIN', 'ADMIN']);
@@ -97,19 +98,10 @@ exports.hammerLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => 
             }
         }
         // Write audit log
-        const auditRef = auth_1.db.collection('auditLogs').doc();
-        txn.set(auditRef, {
+        (0, audit_1.writeAuditEvent)({ actor: caller, action: 'HAMMER', targetType: 'LOT', targetId: lotId,
             editionId: lot.editionId,
-            actorUid: caller.uid,
-            actorRole: caller.role,
-            action: hasHighestBidder ? 'HAMMER_SOLD' : 'HAMMER_UNSOLD',
-            entityType: 'LOT',
-            entityId: lotId,
-            beforeState: { status: 'LIVE', currentPrice: lot.currentPrice, highestBidder: lot.highestBidderFranchiseId },
-            afterState: { status: newStatus },
-            reason: null,
-            timestamp: admin.firestore.FieldValue.serverTimestamp(),
-        });
+            before: { status: 'LIVE', currentPrice: lot.currentPrice, highestBidder: lot.highestBidderFranchiseId },
+            after: { status: newStatus }, metadata: { outcome: hasHighestBidder ? 'SOLD' : 'UNSOLD' }, transaction: txn });
         return {
             status: newStatus,
             playerId: lot.playerId,

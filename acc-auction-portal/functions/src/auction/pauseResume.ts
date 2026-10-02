@@ -1,6 +1,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { db, verifyCaller } from '../utils/auth';
 import * as admin from 'firebase-admin';
+import { writeAuditEvent } from '../utils/audit';
 
 export const pauseResumeAuction = onCall({ maxInstances: 5 }, async (request) => {
   const caller = await verifyCaller(request.auth?.uid, ['SUPER_ADMIN', 'ADMIN']);
@@ -19,18 +20,8 @@ export const pauseResumeAuction = onCall({ maxInstances: 5 }, async (request) =>
   }, { merge: true });
   
   // Audit
-  await db.collection('auditLogs').add({
-    editionId,
-    actorUid: caller.uid,
-    actorRole: caller.role,
-    action: controlAction === 'PAUSE' ? 'PAUSE_AUCTION' : 'RESUME_AUCTION',
-    entityType: 'AUCTION',
-    entityId: editionId,
-    beforeState: null,
-    afterState: { status: controlAction === 'PAUSE' ? 'PAUSED' : 'LIVE' },
-    reason: null,
-    timestamp: admin.firestore.FieldValue.serverTimestamp(),
-  });
+  await writeAuditEvent({ actor: caller, action: controlAction, targetType: 'AUCTION', targetId: editionId,
+    editionId, after: { status: controlAction === 'PAUSE' ? 'PAUSED' : 'LIVE' } });
   
   return { success: true, status: controlAction === 'PAUSE' ? 'PAUSED' : 'LIVE' };
 });

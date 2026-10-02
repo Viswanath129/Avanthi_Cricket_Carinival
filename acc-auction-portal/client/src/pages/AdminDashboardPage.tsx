@@ -8,12 +8,12 @@ import {
   getDocs, 
   updateDoc, 
   setDoc, 
-  addDoc, 
   serverTimestamp,
   orderBy 
 } from 'firebase/firestore';
 import { db, functions } from '@/lib/firebase';
 import { httpsCallable } from 'firebase/functions';
+import { mergeAuditTimeline } from '@/services/auditTimeline';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocation } from 'wouter';
 import { BUCKET_LABELS, type BucketId, type PlayerDoc, type FranchiseDoc } from '@shared/types';
@@ -111,6 +111,14 @@ export default function AdminDashboardPage() {
   // Realtime Users Directory State
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [userSearch, setUserSearch] = useState('');
+  const [userRoleFilter, setUserRoleFilter] = useState('ALL');
+  const [userStatusFilter, setUserStatusFilter] = useState('ALL');
+  const [dataView, setDataView] = useState<'USERS' | 'TRASH' | 'CORRECTIONS' | 'AUDIT'>('USERS');
+  const [managementPlayer, setManagementPlayer] = useState<any | null>(null);
+  const [editDraft, setEditDraft] = useState<any | null>(null);
+  const [managementBusy, setManagementBusy] = useState(false);
+  const [playerHistory, setPlayerHistory] = useState<any[]>([]);
+  const [saleAcquisitions, setSaleAcquisitions] = useState<any[]>([]);
   const [userActionUid, setUserActionUid] = useState<string | null>(null);
   const userActionLock = useRef(false);
   const [createAdminModal, setCreateAdminModal] = useState(false);
@@ -173,8 +181,8 @@ export default function AdminDashboardPage() {
       const pq = query(collection(db, 'players'));
       const unsubPlayers = onSnapshot(pq, (snap) => {
         const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        setPlayers(list.filter((p: any) => p.status !== 'DELETED'));
-        setDeletedPlayers(list.filter((p: any) => p.status === 'DELETED'));
+        setPlayers(list.filter((p: any) => p.status !== 'DELETED' && p.status !== 'ARCHIVED'));
+        setDeletedPlayers(list.filter((p: any) => p.status === 'DELETED' || p.status === 'ARCHIVED'));
         setLoading(false);
       }, (err) => {
         console.warn("Firestore players listen error, using memory state", err);
@@ -195,11 +203,10 @@ export default function AdminDashboardPage() {
         setAllUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       }, () => {});
 
+      const unsubAcquisitions = onSnapshot(collection(db, 'acquisitions'), snap => setSaleAcquisitions(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter((a:any)=>a.status!=='UNDONE').sort((a:any,b:any)=>{const at=a.createdAt?.toMillis?.()||Date.parse(a.createdAt||'')||0;const bt=b.createdAt?.toMillis?.()||Date.parse(b.createdAt||'')||0;return bt-at;})), () => {});
+
       const auditRows = new Map<string, any>();
-      const publishAuditRows = () => setAuditLogs([...auditRows.values()].sort((a, b) => {
-        const time = (v: any) => v?.toDate ? v.toDate().getTime() : (typeof v === 'number' ? v : Date.parse(v || '') || 0);
-        return time(b.timestamp) - time(a.timestamp);
-      }));
+      const publishAuditRows = () => setAuditLogs(mergeAuditTimeline(Array.from(auditRows.values())));
       const unsubAudit = onSnapshot(collection(db, 'auditLogs'), (snap) => {
         snap.docs.forEach(d => auditRows.set(`auditLogs:${d.id}`, { id: d.id, ...d.data() }));
         publishAuditRows();
@@ -213,6 +220,7 @@ export default function AdminDashboardPage() {
         unsubPlayers();
         unsubFranchises();
         unsubUsers();
+        unsubAcquisitions();
         unsubAudit();
         unsubLegacyAudit();
       };
@@ -391,6 +399,50 @@ export default function AdminDashboardPage() {
     }
   };
 
+  const savePlayerEdit = async () => {
+    if (!editDraft || !isSuperAdmin) return;
+    const original = players.find(p => p.id === editDraft.id) || editDraft;
+    const fields = ['name', 'mobile', 'email', 'program', 'branch', 'year', 'bucket', 'basePrice', 'cricHeroesUrl'];
+    const before: Record<string, unknown> = {}, after: Record<string, unknown> = {};
+    fields.forEach(key => { if ((original[key] ?? '') !== (editDraft[key] ?? '')) { before[key] = original[key] ?? ''; after[key] = editDraft[key] ?? ''; } });
+    if (JSON.stringify(original.skills || []) !== JSON.stringify(editDraft.skills || [])) { before.skills = original.skills || []; after.skills = editDraft.skills || []; }
+    if (!Object.keys(after).length) { showToast('No profile changes to save.', 'warning'); return; }
+    setManagementBusy(true);
+    try {
+      await updateDoc(doc(db, 'players', editDraft.id), { ...after, updatedAt: serverTimestamp() });
+      await httpsCallable(functions, 'recordAuditEvent')({ action: 'PLAYER_PROFILE_UPDATED', targetType: 'PLAYER', targetId: editDraft.rollNumber || editDraft.id, details: `Changed fields: ${Object.keys(after).join(', ')}`, editionId: EDITION_ID });
+      setEditDraft(null); showToast('Player profile saved and audit event recorded.');
+    } catch (err: any) { showToast(err.message || 'Profile update failed.', 'error'); }
+    finally { setManagementBusy(false); }
+  };
+
+  const archiveManagementPlayer = async (p: any) => {
+    setManagementBusy(true);
+    try { await httpsCallable(functions, 'managePlayerRecord')({ playerId: p.id, action: 'ARCHIVE', reason: 'Admin console archive' }); showToast(`${p.name} archived.`); }
+    catch (err: any) { showToast(err.message || 'Archive failed.', 'error'); }
+    finally { setManagementBusy(false); }
+  };
+
+  const undoAcquisition = async (acq: any) => {
+    if (!isSuperAdmin) return;
+    if (!window.confirm(`REVERSE SALE? This restores franchise purse, squad count, bucket quota, player availability and lot state for ${acq.playerName || 'this sale'}.`)) return;
+    const reason = window.prompt('Reason for undo (at least 3 characters):') || '';
+    if (reason.trim().length < 3) { showToast('Undo cancelled: a reason of at least 3 characters is required.', 'warning'); return; }
+    setManagementBusy(true);
+    try { await httpsCallable(functions, 'undoSale')({ acquisitionId: acq.id, reason }); showToast('Sale reversed. Auction state and audit timeline are updating.'); }
+    catch (err:any) { showToast(err.message || 'Sale could not be reversed.', 'error'); }
+    finally { setManagementBusy(false); }
+  };
+
+  useEffect(() => {
+    if (!managementPlayer?.id) { setPlayerHistory([]); return; }
+    let active = true;
+    Promise.all(['acquisitions', 'lots', 'bids'].map(name => getDocs(query(collection(db, name), where('playerId', '==', managementPlayer.id))))).then(results => {
+      if (active) setPlayerHistory(results.flatMap((snap, i) => snap.docs.map(d => ({ id: d.id, type: ['PURCHASE','LOT','BID'][i], ...d.data() }))));
+    }).catch(() => { if (active) setPlayerHistory([]); });
+    return () => { active = false; };
+  }, [managementPlayer?.id]);
+
   const handleBulkDeleteAllPlayers = async () => {
     if (confirmInput !== 'DELETE ALL PLAYERS') {
       showToast("Typed confirmation text mismatch.", "error");
@@ -438,7 +490,7 @@ export default function AdminDashboardPage() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    logAudit('EXPORT_CSV', 'PLAYERS', `Exported ${players.length} player records to CSV.`);
+    logAudit('DATABASE_EXPORT', 'PLAYERS', `Exported ${players.length} player records to CSV.`);
     showToast("CSV Export downloaded successfully.");
   };
 
@@ -459,7 +511,7 @@ export default function AdminDashboardPage() {
     link.download = `ACC_2026_Full_Database_Snapshot_${Date.now()}.json`;
     link.click();
     URL.revokeObjectURL(url);
-    logAudit('EXPORT_SNAPSHOT', 'DATABASE', `Full JSON snapshot exported.`);
+    logAudit('DATABASE_EXPORT', 'DATABASE', `Full JSON snapshot exported.`);
     showToast("JSON Database snapshot exported.");
   };
 
@@ -1135,42 +1187,27 @@ export default function AdminDashboardPage() {
 
           {/* SECTION: DATA MANAGEMENT & TRASH */}
           {activeSection === 'datamanagement' && (
-            <div className="space-y-6 max-w-7xl mx-auto">
-              <div className="border-b border-white/[0.08] pb-4">
-                <h1 className="font-display font-black text-2xl text-white">DATA MANAGEMENT & DELETION RECOVERY</h1>
-                <p className="text-xs text-slate-400 mt-1">
-                  Controlled bulk operations, soft-delete trash recovery, and permanent database purge.
-                </p>
-              </div>
+            <div className="space-y-5 max-w-7xl mx-auto text-slate-800">
+              <header className="rounded-2xl border border-blue-100 bg-white p-5">
+                <h1 className="font-display font-black text-2xl text-slate-900">DATA MANAGEMENT</h1>
+                <p className="text-sm text-slate-600 mt-1">Manage player and account records without affecting historical auction integrity.</p>
+                <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-3 mt-5">
+                  {([['USERS','MANAGE USERS','Search and manage registered ACC accounts.'],['TRASH','TRASH & RESTORE','Review archived records and restore them.'],['CORRECTIONS','AUCTION CORRECTIONS','Review and reverse eligible auction sales.'],['AUDIT','EXPORT DATABASE','Export the tournament dataset.']] as const).map(([view,title,description]) => <button key={view} onClick={() => view === 'AUDIT' ? setActiveSection('export') : setDataView(view)} className={`rounded-xl border p-4 text-left transition ${dataView===view?'border-blue-500 bg-blue-50':'border-slate-200 bg-white hover:border-blue-300'}`}><b className="block text-sm text-slate-900">{title}</b><span className="mt-1 block text-xs text-slate-600">{description}</span></button>)}
+                </div>
+              </header>
 
-              <div className="p-6 rounded-2xl bg-white/[0.03] border border-white/[0.08] space-y-4">
-                <div>
-                  <h3 className="font-display font-bold text-lg text-white">User Records</h3>
-                  <p className="text-xs text-slate-400">Search by name, roll number, email, or franchise. Passwords and authentication secrets are never shown.</p>
-                </div>
-                <input value={userSearch} onChange={e => setUserSearch(e.target.value)} placeholder="Search users…" className="w-full max-w-md bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white" />
-                <div className="overflow-x-auto rounded-xl border border-white/[0.08]">
-                  <table className="w-full text-left text-xs">
-                    <thead><tr className="border-b border-white/[0.08] text-slate-400 font-mono"><th className="p-3">Name</th><th className="p-3">Roll / Email</th><th className="p-3">Franchise</th><th className="p-3">Role / Status</th><th className="p-3 text-right">Action</th></tr></thead>
-                    <tbody className="divide-y divide-white/[0.05]">
-                      {allUsers.filter(u => `${u.name || u.displayName || ''} ${u.rollNumber || u.playerId || ''} ${u.email || ''} ${u.franchiseName || u.franchiseId || ''}`.toLowerCase().includes(userSearch.trim().toLowerCase())).slice(0, 100).map(u => {
-                        const uid = u.id || u.uid;
-                        const deleted = u.status === 'DELETED';
-                        return <tr key={uid}>
-                          <td className="p-3 text-white">{u.name || u.displayName || 'Unnamed'}</td>
-                          <td className="p-3 text-slate-400">{u.rollNumber || u.playerId || u.email || uid}</td>
-                          <td className="p-3 text-slate-400">{u.franchiseName || u.franchiseId || '—'}</td>
-                          <td className="p-3 text-slate-400">{u.role || '—'} · {deleted ? 'TRASH' : u.accountStatus || u.status || '—'}</td>
-                          <td className="p-3 text-right">{isSuperAdmin && u.role !== 'SUPER_ADMIN' && uid !== user?.uid && (deleted
-                            ? <><button disabled={userActionUid === uid} onClick={() => manageUserRecord(u, 'RESTORE')} className="px-2 py-1 mr-2 rounded bg-emerald-700 text-white disabled:opacity-50">RESTORE</button><button disabled={userActionUid === uid} onClick={() => manageUserRecord(u, 'PERMANENT_DELETE')} className="px-2 py-1 rounded bg-red-900 text-red-100 disabled:opacity-50">PERMANENT DELETE</button></>
-                            : <button disabled={userActionUid === uid} onClick={() => manageUserRecord(u, 'DELETE')} className="px-2 py-1 rounded bg-red-900/70 text-red-100 disabled:opacity-50">DELETE</button>)}</td>
-                        </tr>;
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-                {!isSuperAdmin && <p className="text-xs text-slate-400">User deletion and restoration are restricted to Super Admin.</p>}
-              </div>
+              <nav className="flex flex-wrap gap-2">{([['USERS','USER MANAGEMENT'],['TRASH','TRASH & RESTORE'],['CORRECTIONS','AUCTION CORRECTIONS'],['AUDIT','AUDIT TIMELINE']] as const).map(([id,label])=><button key={id} onClick={()=>setDataView(id)} className={`rounded-lg px-4 py-2 text-xs font-bold ${dataView===id?'bg-blue-700 text-white':'bg-white border border-slate-200 text-slate-700'}`}>{label}</button>)}</nav>
+
+              {dataView === 'USERS' && <section className="rounded-2xl border border-slate-200 bg-white p-4 space-y-4">
+                <div className="flex flex-col md:flex-row gap-3"><input value={userSearch} onChange={e=>setUserSearch(e.target.value)} placeholder="Search name / roll / email / franchise" className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"/><select value={userRoleFilter} onChange={e=>setUserRoleFilter(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">{['ALL','PLAYER','FRANCHISE','FRANCHISE_COORDINATOR','FRANCHISE_TEAM_LEADER','ADMIN'].map(x=><option key={x}>{x}</option>)}</select><select value={userStatusFilter} onChange={e=>setUserStatusFilter(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">{['ALL','ACTIVE','PENDING','BLOCKED','ARCHIVED','DELETED'].map(x=><option key={x}>{x}</option>)}</select></div>
+                <div className="overflow-x-auto rounded-xl border border-slate-200"><table className="w-full text-left text-sm"><thead className="bg-blue-50 text-slate-600"><tr>{['PHOTO','NAME','ROLL / USER ID','ROLE','STATUS','FRANCHISE','CREATED','ACTIONS'].map(h=><th className="p-3" key={h}>{h}</th>)}</tr></thead><tbody className="divide-y divide-slate-100">{allUsers.filter(u=>{const text=`${u.name||u.displayName||''} ${u.rollNumber||u.playerId||''} ${u.email||''} ${u.franchiseName||u.franchiseId||''}`.toLowerCase(); const status=u.status==='DELETED'?'DELETED':u.status==='ARCHIVED'?'ARCHIVED':u.approvalStatus?.startsWith('PENDING')||u.accountStatus==='PENDING'?'PENDING':u.status==='BLOCKED'||u.accountStatus==='DISABLED'?'BLOCKED':'ACTIVE'; return text.includes(userSearch.trim().toLowerCase())&&(userRoleFilter==='ALL'||u.role===userRoleFilter||(userRoleFilter==='FRANCHISE'&&String(u.role).startsWith('FRANCHISE'))||(userRoleFilter==='TEAM LEAD'&&u.role==='FRANCHISE_TEAM_LEADER'))&&(userStatusFilter==='ALL'||status===userStatusFilter);}).map(u=>{const uid=u.id||u.uid, player=players.find(p=>p.uid===uid||p.authUid===uid||p.id===u.playerId||p.rollNumber===u.rollNumber);return <tr key={uid} className="align-middle"><td className="p-3"><img src={u.photoUrl||player?.photoUrl||''} className="h-9 w-9 rounded-full bg-slate-100 object-cover" alt=""/></td><td className="p-3 font-semibold">{u.name||u.displayName||player?.name||'Unnamed'}<span className="block text-xs font-normal text-slate-500">{u.email||'—'}</span></td><td className="p-3 font-mono text-xs">{u.rollNumber||player?.rollNumber||uid}</td><td className="p-3">{u.role||'—'}</td><td className="p-3">{u.status||u.accountStatus||u.approvalStatus||'ACTIVE'}</td><td className="p-3">{u.franchiseName||u.franchiseId||'—'}</td><td className="p-3 text-xs">{u.createdAt?.toDate?u.createdAt.toDate().toLocaleDateString():u.createdAt?new Date(u.createdAt).toLocaleDateString():'—'}</td><td className="p-3"><div className="flex flex-wrap gap-1"><button onClick={()=>player?setManagementPlayer(player):showToast('Player profile record unavailable for this account.','warning')} className="rounded bg-blue-100 px-2 py-1 text-xs text-blue-800">VIEW</button>{player&&isSuperAdmin&&<><button onClick={()=>setEditDraft({...player})} className="rounded bg-slate-100 px-2 py-1 text-xs">EDIT</button><button onClick={()=>archiveManagementPlayer(player)} disabled={managementBusy} className="rounded bg-amber-100 px-2 py-1 text-xs text-amber-900 disabled:opacity-50">ARCHIVE</button>{player.status==='ARCHIVED'&&<button onClick={()=>handlePermanentDelete(player)} className="rounded bg-red-100 px-2 py-1 text-xs text-red-700">DELETE</button>}</>}{isSuperAdmin&&u.role!=='SUPER_ADMIN'&&uid!==user?.uid&&!player&&<button disabled={userActionUid===uid} onClick={()=>manageUserRecord(u,u.status==='DELETED'?'RESTORE':'DELETE')} className="rounded bg-red-50 px-2 py-1 text-xs text-red-700 disabled:opacity-50">{u.status==='DELETED'?'RESTORE':'ARCHIVE'}</button>}</div></td></tr>})}</tbody></table></div>
+              </section>}
+
+              {dataView === 'TRASH' && <section className="rounded-2xl border border-slate-200 bg-white p-4 space-y-5"><h2 className="text-lg font-bold">TRASH & RESTORE</h2><div className="grid md:grid-cols-2 gap-4"><div><h3 className="mb-2 font-bold text-slate-700">ARCHIVED PLAYERS</h3>{deletedPlayers.filter(p=>p.status==='ARCHIVED').length===0&&<p className="rounded-lg bg-slate-50 p-5 text-sm text-slate-500">No archived players.</p>}{deletedPlayers.filter(p=>p.status==='ARCHIVED').map(p=><div key={p.id} className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 p-3"><span><b>{p.name}</b><small className="block text-slate-500">{p.rollNumber} · history preserved</small></span><div className="flex gap-2"><button onClick={()=>handleRestorePlayer(p)} disabled={!isSuperAdmin||managementBusy} className="rounded bg-emerald-100 px-3 py-1 text-xs text-emerald-800 disabled:opacity-50">RESTORE</button>{isSuperAdmin&&<button onClick={()=>handlePermanentDelete(p)} className="rounded bg-red-100 px-3 py-1 text-xs text-red-800">PERMANENT DELETE</button>}</div></div>)}</div><div><h3 className="mb-2 font-bold text-slate-700">DELETED ACCOUNTS</h3>{allUsers.filter(u=>u.status==='DELETED').map(u=><div key={u.id||u.uid} className="mb-2 flex items-center justify-between rounded-lg border border-slate-200 p-3"><span><b>{u.name||u.displayName||u.email}</b><small className="block text-slate-500">{u.role} · {u.deletedAt?.toDate?u.deletedAt.toDate().toLocaleString():'Account archived'}</small></span>{isSuperAdmin&&<div className="flex gap-2"><button onClick={()=>manageUserRecord(u,'RESTORE')} className="rounded bg-emerald-100 px-3 py-1 text-xs">RESTORE</button><button onClick={()=>manageUserRecord(u,'PERMANENT_DELETE')} className="rounded bg-red-100 px-3 py-1 text-xs">PERMANENT DELETE</button></div>}</div>)}</div></div></section>}
+
+              {dataView === 'CORRECTIONS' && <section className="rounded-2xl border border-slate-200 bg-white p-4"><h2 className="mb-3 text-lg font-bold">AUCTION CORRECTIONS</h2><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-blue-50"><tr>{['LOT','PLAYER','FRANCHISE','PRICE','TIME','STATUS','ACTION'].map(x=><th key={x} className="p-3">{x}</th>)}</tr></thead><tbody className="divide-y">{saleAcquisitions.map(a=><tr key={a.id}><td className="p-3">LOT #{a.drawNumber||a.lotNumber||a.lotId||'—'}</td><td className="p-3 font-semibold">{a.playerName||a.playerId}</td><td className="p-3">{a.franchiseName||a.franchiseId}</td><td className="p-3">{a.price} Credits</td><td className="p-3">{a.createdAt?.toDate?a.createdAt.toDate().toLocaleString():a.createdAt?new Date(a.createdAt).toLocaleString():'—'}</td><td className="p-3">SOLD</td><td className="p-3">{isSuperAdmin?<button disabled={managementBusy} onClick={()=>undoAcquisition(a)} className="rounded bg-red-50 px-3 py-1 text-xs font-bold text-red-700 disabled:opacity-50">{managementBusy?'PROCESSING…':'UNDO SALE'}</button>:<span className="text-xs text-slate-500">Super Admin only</span>}</td></tr>)}{saleAcquisitions.length===0&&<tr><td colSpan={7} className="p-8 text-center text-slate-500">No completed sales found.</td></tr>}</tbody></table></div></section>}
+
+              {dataView === 'AUDIT' && <section className="rounded-2xl border border-slate-200 bg-white p-4"><h2 className="mb-3 text-lg font-bold">AUDIT TIMELINE</h2><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-blue-50"><tr>{['TIME','ACTOR','ACTION','TARGET','RESULT'].map(x=><th key={x} className="p-3">{x}</th>)}</tr></thead><tbody className="divide-y">{auditLogs.map((log,i)=><tr key={log.id||i}><td className="p-3">{log.timestamp?.toDate?log.timestamp.toDate().toLocaleString():'—'}</td><td className="p-3">{log.actorName||log.actorUid||log.actor||'—'}</td><td className="p-3 font-semibold">{log.action}</td><td className="p-3">{log.targetId||log.entityId||'—'}</td><td className="p-3">{log.result||'SUCCESS'}</td></tr>)}</tbody></table></div></section>}
 
               {/* Trash Bin Table */}
               <div className="p-6 rounded-2xl bg-white/[0.03] border border-white/[0.08] space-y-4">
@@ -1257,11 +1294,11 @@ export default function AdminDashboardPage() {
                     <tbody className="divide-y divide-white/[0.05] font-mono">
                       {auditLogs.map((log, idx) => (
                         <tr key={log.id || idx} className="hover:bg-white/[0.02]">
-                          <td className="p-3 text-slate-400">{log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : 'N/A'}</td>
+                          <td className="p-3 text-slate-400">{log.timestamp?.toDate ? log.timestamp.toDate().toLocaleTimeString() : log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : 'N/A'}</td>
                           <td className="p-3 font-bold text-emerald-400">{log.action}</td>
                           <td className="p-3 text-white">{log.targetId || '-'}</td>
-                          <td className="p-3 text-slate-400">{log.role || 'SUPER_ADMIN'}</td>
-                          <td className="p-3 text-slate-300 font-sans">{log.details || '-'}</td>
+                          <td className="p-3 text-slate-400">{log.actorRole || log.role || '—'} · {log.actorUid || ''}</td>
+                          <td className="p-3 text-slate-300 font-sans">{log.details || log.metadata?.details || log.reason || '-'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1329,14 +1366,72 @@ export default function AdminDashboardPage() {
                 <p className="text-xs text-slate-400 mt-1">Configure academic rollover dates, minimum bucket quotas, and fee verification rules.</p>
               </div>
 
-              <div className="p-5 rounded-2xl bg-white/[0.03] border border-white/[0.08] space-y-3">
-                <h2 className="font-display font-bold text-white">DATA MANAGEMENT</h2>
-                <p className="text-xs text-slate-400">Governance tools for account recovery, auction corrections, and tournament exports.</p>
-                <div className="grid sm:grid-cols-2 gap-3">
-                  <button onClick={() => setActiveSection('datamanagement')} className="p-4 rounded-xl text-left bg-blue-950/30 border border-blue-500/20 text-white"><b>Users / Trash / Archive</b><div className="text-xs text-slate-400 mt-1">Search, disable, restore, and inspect user records.</div></button>
-                  <button onClick={() => setLocation('/admin/auction')} className="p-4 rounded-xl text-left bg-amber-950/20 border border-amber-500/20 text-white"><b>Auction Undo</b><div className="text-xs text-slate-400 mt-1">Forensic sale undo uses the authoritative transaction.</div></button>
-                  <button onClick={() => setActiveSection('export')} className="p-4 rounded-xl text-left bg-blue-950/30 border border-blue-500/20 text-white"><b>Export Database</b><div className="text-xs text-slate-400 mt-1">Download tournament data and audit trail.</div></button>
-                  <div className="p-4 rounded-xl bg-amber-950/20 border border-amber-500/20 text-slate-300"><b>Reset Demo Data</b><div className="text-xs text-slate-400 mt-1">Unavailable: no explicit demo dataset is defined for safe isolation.</div></div>
+              <div className="p-6 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-4">
+                <div>
+                  <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-blue-600">DATA MANAGEMENT</span>
+                  <h2 className="font-display font-bold text-xl text-slate-900 mt-1">DATA MANAGEMENT</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">Manage ACC player, franchise, and account records.</p>
+                </div>
+                <div className="grid sm:grid-cols-2 gap-4">
+                  {/* CARD 1: USER MANAGEMENT */}
+                  <div className="p-5 rounded-xl border border-slate-200 bg-slate-50 flex flex-col justify-between">
+                    <div>
+                      <h3 className="font-bold text-sm text-slate-900 uppercase">USER MANAGEMENT</h3>
+                      <p className="text-xs text-slate-600 mt-1 mb-4">Search and manage ACC accounts. Filter players, franchises, team leads, and admin roles.</p>
+                    </div>
+                    <button onClick={() => { setDataView('USERS'); setActiveSection('datamanagement'); }} className="w-full py-2.5 px-4 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs uppercase tracking-wider transition-colors shadow-sm">
+                      MANAGE USERS
+                    </button>
+                  </div>
+
+                  {/* CARD 2: TRASH & RESTORE */}
+                  <div className="p-5 rounded-xl border border-slate-200 bg-slate-50 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-bold text-sm text-slate-900 uppercase">TRASH & RESTORE</h3>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700">
+                          {deletedPlayers.length}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 mt-1 mb-4">Recover archived/deleted records. View audit history and restore previous statuses.</p>
+                    </div>
+                    <button onClick={() => { setDataView('TRASH'); setActiveSection('datamanagement'); }} className="w-full py-2.5 px-4 rounded-lg bg-white border border-rose-300 hover:bg-rose-50 text-rose-700 font-bold text-xs uppercase tracking-wider transition-colors">
+                      OPEN TRASH
+                    </button>
+                  </div>
+
+                  {/* CARD 3: AUCTION CORRECTIONS */}
+                  <div className="p-5 rounded-xl border border-slate-200 bg-slate-50 flex flex-col justify-between">
+                    <div>
+                      <h3 className="font-bold text-sm text-slate-900 uppercase">AUCTION CORRECTIONS</h3>
+                      <p className="text-xs text-slate-600 mt-1 mb-4">Review authoritative auction reversals. Reverse sold lots with instant purse and bucket restoration.</p>
+                    </div>
+                    <button onClick={() => { setDataView('CORRECTIONS'); setActiveSection('datamanagement'); }} className="w-full py-2.5 px-4 rounded-lg bg-white border border-amber-300 hover:bg-amber-50 text-amber-700 font-bold text-xs uppercase tracking-wider transition-colors">
+                      AUCTION UNDO
+                    </button>
+                  </div>
+
+                  {/* CARD 4: DATABASE */}
+                  <div className="p-5 rounded-xl border border-slate-200 bg-slate-50 flex flex-col justify-between">
+                    <div>
+                      <h3 className="font-bold text-sm text-slate-900 uppercase">DATABASE</h3>
+                      <p className="text-xs text-slate-600 mt-1 mb-4">Export the ACC tournament dataset (Players, Squads, and Audit records).</p>
+                    </div>
+                    <button onClick={() => setActiveSection('export')} className="w-full py-2.5 px-4 rounded-lg bg-white border border-blue-300 hover:bg-blue-50 text-blue-700 font-bold text-xs uppercase tracking-wider transition-colors">
+                      EXPORT DATABASE
+                    </button>
+                  </div>
+                </div>
+
+                {/* DEMO RESET SAFETY NOTICE */}
+                <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-between">
+                  <div>
+                    <span className="font-bold text-xs text-amber-900">DEMO RESET</span>
+                    <p className="text-[11px] text-amber-800 mt-0.5">Unavailable until an isolated demo dataset is configured.</p>
+                  </div>
+                  <span className="px-2.5 py-1 rounded font-mono font-bold text-[10px] bg-amber-100 text-amber-900 border border-amber-300">
+                    ISOLATED
+                  </span>
                 </div>
               </div>
 
@@ -1692,11 +1787,11 @@ export default function AdminDashboardPage() {
                   <p className="text-xs text-slate-400 mt-1">Full operational floor cockpit with Hammer, Skip, Pause/Resume, and Behalf Bidding.</p>
                 </div>
                 <button
-                  onClick={() => setLocation('/admin/auction')}
+                    onClick={() => setLocation('/admin/auction')}
                   className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider transition-colors shadow-lg flex items-center gap-2"
                 >
                   <Gavel size={16} />
-                  <span>LAUNCH FULL COCKPIT →</span>
+                  <span>OPEN LIVE AUCTION COCKPIT →</span>
                 </button>
               </div>
             </div>
@@ -2207,6 +2302,8 @@ export default function AdminDashboardPage() {
           </div>
         </div>
       )}
+      {managementPlayer && <div className="fixed inset-0 z-[70] bg-slate-900/40 flex justify-end" onClick={()=>setManagementPlayer(null)}><aside onClick={e=>e.stopPropagation()} className="h-full w-full max-w-2xl overflow-y-auto bg-white p-5 shadow-2xl text-slate-800"><div className="flex justify-between"><div><h2 className="text-xl font-black">PLAYER PROFILE</h2><p className="text-sm text-slate-500">Historical auction records remain visible for archived players.</p></div><button onClick={()=>setManagementPlayer(null)} className="rounded-lg bg-slate-100 px-3 py-1">CLOSE</button></div><div className="mt-5 flex items-center gap-4"><img src={managementPlayer.photoUrl||''} alt="" className="h-20 w-20 rounded-xl bg-slate-100 object-cover"/><div><h3 className="text-lg font-bold">{managementPlayer.name}</h3><p className="font-mono text-sm text-slate-500">{managementPlayer.rollNumber||managementPlayer.roll}</p></div></div><div className="mt-5 grid grid-cols-2 gap-3">{[['Mobile',managementPlayer.mobile],['Email',managementPlayer.email],['Academic program',managementPlayer.program||managementPlayer.academic?.program],['Branch',managementPlayer.branch||managementPlayer.academic?.branch],['Year',managementPlayer.year||managementPlayer.academic?.studyYear],['Bucket',managementPlayer.bucket||managementPlayer.academic?.bucket],['Skills',(managementPlayer.skills||[]).join?.(', ')||managementPlayer.skills],['CricHeroes',managementPlayer.cricHeroesUrl],['Base price',managementPlayer.basePrice],['Approval status',managementPlayer.approvalStatus],['Payment status',managementPlayer.paid?'PAID':'UNPAID']].map(([k,v])=><div key={String(k)} className="rounded-lg bg-slate-50 p-3"><small className="block text-slate-500">{k}</small><b className="break-words">{String(v||'—')}</b></div>)}</div><h3 className="mt-7 text-lg font-bold">AUCTION HISTORY</h3>{playerHistory.length===0?<p className="mt-2 rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No linked lots, bids, or purchases were found.</p>:<div className="mt-2 space-y-2">{playerHistory.map(row=><div key={`${row.type}-${row.id}`} className="flex justify-between rounded-lg border border-slate-200 p-3 text-sm"><span><b>{row.type}</b> · Lot #{row.drawNumber||row.lotNumber||row.lotId||'—'} · {row.franchiseName||'—'}</span><span>{row.price||row.amount||row.status||'—'} Cr</span></div>)}</div>}</aside></div>}
+      {editDraft && <div className="fixed inset-0 z-[70] bg-slate-900/40 flex items-center justify-center p-3"><section className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5 text-slate-800 shadow-2xl"><h2 className="text-xl font-black">EDIT PLAYER</h2><p className="mb-4 text-sm text-slate-500">Review field changes before saving. The successful update is recorded in the canonical audit log.</p><div className="grid sm:grid-cols-2 gap-3">{[['name','Name'],['photoUrl','Photo URL'],['mobile','Mobile'],['email','Email'],['program','Academic program'],['branch','Branch'],['year','Year'],['bucket','Bucket'],['basePrice','Base price'],['cricHeroesUrl','CricHeroes']].map(([key,label])=><label key={key} className="text-xs font-semibold text-slate-600">{label}<input value={editDraft[key]??''} onChange={e=>setEditDraft((d:any)=>({...d,[key]:e.target.value}))} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"/></label>)}</div><label className="mt-3 block text-xs font-semibold text-slate-600">Skills (comma separated)<input value={(editDraft.skills||[]).join?.(', ')||editDraft.skills||''} onChange={e=>setEditDraft((d:any)=>({...d,skills:e.target.value.split(',').map((x:string)=>x.trim()).filter(Boolean)}))} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"/></label><div className="mt-4 rounded-xl bg-blue-50 p-3"><b className="text-sm">CHANGES TO SAVE</b>{['name','photoUrl','mobile','email','program','branch','year','bucket','basePrice','cricHeroesUrl','skills'].filter(k=>JSON.stringify(editDraft[k]??'')!==JSON.stringify((players.find(p=>p.id===editDraft.id)||{})[k]??'')).map(k=><div key={k} className="mt-1 text-xs"><b>{k}</b>: {String((players.find(p=>p.id===editDraft.id)||{})[k]??'—')} → {String(editDraft[k]??'—')}</div>)}</div><div className="mt-4 flex justify-end gap-2"><button onClick={()=>setEditDraft(null)} className="rounded-lg border px-4 py-2">CANCEL</button><button disabled={managementBusy||!isSuperAdmin} onClick={savePlayerEdit} className="rounded-lg bg-blue-700 px-4 py-2 font-bold text-white disabled:opacity-50">{managementBusy?'SAVING…':'SAVE CHANGES'}</button></div></section></div>}
     </div>
   );
 }

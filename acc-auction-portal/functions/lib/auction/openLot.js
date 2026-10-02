@@ -37,6 +37,7 @@ exports.openLot = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const auth_1 = require("../utils/auth");
 const admin = __importStar(require("firebase-admin"));
+const audit_1 = require("../utils/audit");
 exports.openLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => {
     const caller = await (0, auth_1.verifyCaller)(request.auth?.uid, ['SUPER_ADMIN', 'ADMIN']);
     const { lotId } = request.data;
@@ -76,19 +77,8 @@ exports.openLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => {
         });
         txn.set(auctionRef, { franchiseStatuses }, { merge: true });
         // Audit
-        const auditRef = auth_1.db.collection('auditLogs').doc();
-        txn.set(auditRef, {
-            editionId: lot.editionId,
-            actorUid: caller.uid,
-            actorRole: caller.role,
-            action: 'OPEN_LOT',
-            entityType: 'LOT',
-            entityId: lotId,
-            beforeState: { status: lot.status },
-            afterState: { status: 'LIVE', basePrice: lot.basePrice },
-            reason: null,
-            timestamp: admin.firestore.FieldValue.serverTimestamp(),
-        });
+        (0, audit_1.writeAuditEvent)({ actor: caller, action: 'OPEN_LOT', targetType: 'LOT', targetId: lotId, editionId: lot.editionId,
+            before: { status: lot.status }, after: { status: 'LIVE', basePrice: lot.basePrice }, transaction: txn });
         return { success: true, lotId, basePrice: lot.basePrice };
     });
     return result;

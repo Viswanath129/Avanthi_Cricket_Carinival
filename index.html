@@ -2268,14 +2268,14 @@
     // ========================================================
     function isPlayerApproved(p) {
       if (!p) return false;
-      if (p.status === 'DELETED' || p.approvalStatus === 'DELETED') return false;
+      if (p.status === 'DELETED' || p.status === 'ARCHIVED' || p.approvalStatus === 'DELETED' || p.approvalStatus === 'ARCHIVED') return false;
       if (p.status === 'BLOCKED' || p.approvalStatus === 'BLOCKED' || p.verificationStatus === 'BLOCKED') return false;
       return p.approvalStatus === 'APPROVED' || p.verificationStatus === 'VERIFIED' || p.status === 'AVAILABLE' || p.status === 'SOLD' || p.status === 'UNSOLD';
     }
 
     function isPlayerPending(p) {
       if (!p || isPlayerApproved(p)) return false;
-      if (p.status === 'DELETED' || p.approvalStatus === 'DELETED' || p.status === 'BLOCKED' || p.approvalStatus === 'BLOCKED' || p.verificationStatus === 'BLOCKED') return false;
+      if (p.status === 'DELETED' || p.status === 'ARCHIVED' || p.approvalStatus === 'DELETED' || p.approvalStatus === 'ARCHIVED' || p.status === 'BLOCKED' || p.approvalStatus === 'BLOCKED' || p.verificationStatus === 'BLOCKED') return false;
       return p.approvalStatus === 'PENDING' || p.approvalStatus === 'PENDING_APPROVAL' || p.verificationStatus === 'PENDING_VERIFICATION' || p.status === 'PENDING_VERIFICATION' || !p.approvalStatus;
     }
 
@@ -2478,9 +2478,10 @@
 
       if (typeof fbDb !== 'undefined' && fbDb) {
         if (action === 'DELETE') {
-          fbDb.collection("players").doc(docKey).delete().catch(() => {});
-          fbDb.collection("publicPlayers").doc(docKey).delete().catch(() => {});
-          fbDb.collection("deletedPlayers").doc(docKey).set({ ...p, status: 'DELETED', publicVisibility: false }).catch(() => {});
+          const archived = { ...p, status: 'ARCHIVED', approvalStatus: 'ARCHIVED', auctionEligible: false, publicVisibility: false };
+          fbDb.collection("players").doc(docKey).set(archived, { merge: true }).catch(() => {});
+          fbDb.collection("publicPlayers").doc(docKey).set({ id: p.id, name: p.name, roll: p.roll, status: 'ARCHIVED', auctionStatus: 'ARCHIVED', publicVisibility: false, auctionEligible: false }, { merge: true }).catch(() => {});
+          fbDb.collection("deletedPlayers").doc(docKey).set({ ...archived, deletedAt: p.deletedAt || new Date().toISOString() }, { merge: true }).catch(() => {});
         } else {
           fbDb.collection("players").doc(docKey).set(p, { merge: true }).catch(() => {});
 
@@ -3803,11 +3804,13 @@
       const p = players.find(x => x.id == playerId || x.playerId == playerId);
       if (!p) return;
       const prev = p.approvalStatus || 'APPROVED';
+      p.governancePreviousState = p.governancePreviousState || { status: p.status, approvalStatus: p.approvalStatus, verificationStatus: p.verificationStatus, accountStatus: p.accountStatus, auctionEligible: p.auctionEligible, publicVisibility: p.publicVisibility };
       p.approvalStatus = 'ARCHIVED';
       p.verificationStatus = 'ARCHIVED';
       p.accountStatus = 'DISABLED';
       p.status = 'ARCHIVED';
       p.auctionEligible = false;
+      p.publicVisibility = false;
       p.archiveReason = reason || 'Tournament archival';
       auditLog.unshift({
         time: new Date().toLocaleTimeString(),
@@ -3821,6 +3824,7 @@
         details: `${p.name} (${p.roll}) archived by ${currentUser.name}`
       });
       saveDatabase();
+      syncPlayerToFirebase(p, 'DELETE');
       broadcastAuthoritativeState();
       renderCurrentView();
     }
@@ -4009,12 +4013,15 @@
         showToast("Reason is required to archive a player", "error");
         return;
       }
+      if (p.status === 'ARCHIVED' || p.status === 'DELETED') { closeModal(); return; }
       const prev = p.approvalStatus || 'APPROVED';
+      p.governancePreviousState = { status: p.status, approvalStatus: p.approvalStatus, verificationStatus: p.verificationStatus, accountStatus: p.accountStatus, auctionEligible: p.auctionEligible, publicVisibility: p.publicVisibility };
       p.approvalStatus = 'ARCHIVED';
       p.verificationStatus = 'ARCHIVED';
       p.accountStatus = 'DISABLED';
       p.status = 'ARCHIVED';
       p.auctionEligible = false;
+      p.publicVisibility = false;
       p.archiveReason = reason;
 
       auditLog.unshift({
@@ -4031,6 +4038,7 @@
       });
 
       saveDatabase();
+      syncPlayerToFirebase(p, 'DELETE');
       broadcastAuthoritativeState();
       closeModal();
       showToast(`Player ${p.name} archived safely`, "info");
@@ -4043,17 +4051,21 @@
       if (!p) {
         const dIdx = deletedPlayers.findIndex(x => x.id == playerId || x.playerId == playerId || (x.roll && x.roll.toUpperCase() === String(playerId).toUpperCase()));
         if (dIdx !== -1) {
-          p = deletedPlayers.splice(dIdx, 1)[0];
-          players.push(p);
+          p = deletedPlayers[dIdx];
           fromDeleted = true;
         }
       }
       if (!p) return;
-      p.approvalStatus = 'PENDING_APPROVAL';
-      p.verificationStatus = 'PENDING_VERIFICATION';
-      p.status = 'PENDING_VERIFICATION';
-      p.publicVisibility = false;
-      p.auctionEligible = false;
+      if (fromDeleted) deletedPlayers = deletedPlayers.filter(x => String(x.id) !== String(p.id));
+      const previous = p.governancePreviousState || {};
+      p.approvalStatus = previous.approvalStatus || 'PENDING_APPROVAL';
+      p.verificationStatus = previous.verificationStatus || 'PENDING_VERIFICATION';
+      p.status = previous.status || 'PENDING_VERIFICATION';
+      p.accountStatus = previous.accountStatus || 'ACTIVE';
+      p.publicVisibility = previous.publicVisibility ?? false;
+      p.auctionEligible = previous.auctionEligible ?? false;
+      delete p.governancePreviousState;
+      if (!players.some(x => String(x.id) === String(p.id) || (x.roll && x.roll === p.roll))) players.push(p);
       delete p.archiveReason;
       delete p.blockReason;
       delete p.deletedAt;
@@ -4119,26 +4131,26 @@
           <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 480px;">
             <div style="border-left: 4px solid var(--color-red); padding-left: 12px; margin-bottom: 16px;">
               <h3 style="font-family: var(--font-display); font-size: 1.25rem; font-weight: 800; color: var(--color-red); margin: 0;">
-                DELETE PLAYER?
+                ARCHIVE PLAYER?
               </h3>
               <div style="font-size: 0.8125rem; color: var(--text-bright); margin-top: 4px;">
                 Player: <strong>${p.name}</strong><br>
                 Roll: <strong class="font-mono">${p.roll}</strong>
               </div>
               <div style="font-size: 0.75rem; color: var(--color-red); font-weight: 700; margin-top: 8px;">
-                This action is permanent and cannot be reversed.
+                The canonical player record will be retained. Historical auction references remain intact.
               </div>
             </div>
 
             <div class="form-group" style="margin-bottom: 16px;">
-              <label class="form-label" style="font-size: 0.75rem;">TYPE "DELETE" TO CONFIRM:</label>
-              <input type="text" id="deleteConfirmTypedInput" class="form-input font-mono" placeholder="DELETE" oninput="document.getElementById('confirmDeletePlayerBtn').disabled = (this.value.trim() !== 'DELETE');">
+              <label class="form-label" style="font-size: 0.75rem;">TYPE "ARCHIVE" TO CONFIRM:</label>
+              <input type="text" id="deleteConfirmTypedInput" class="form-input font-mono" placeholder="ARCHIVE" oninput="document.getElementById('confirmDeletePlayerBtn').disabled = (this.value.trim() !== 'ARCHIVE');">
             </div>
 
             <div style="display: flex; justify-content: flex-end; gap: 10px;">
               <button class="btn btn-secondary" onclick="closeModal()">CANCEL</button>
               <button id="confirmDeletePlayerBtn" class="btn btn-primary" style="background: var(--color-red); border-color: var(--color-red); color: #fff;" disabled onclick="executeDeletePlayer('${p.id}')">
-                DELETE PLAYER
+                ARCHIVE PLAYER
               </button>
             </div>
           </div>
@@ -4147,12 +4159,21 @@
     }
 
     function executeDeletePlayer(playerId) {
+      const confirmation = (document.getElementById("deleteConfirmTypedInput")?.value || '').trim();
+      if (confirmation !== 'ARCHIVE') {
+        showToast("Type ARCHIVE to confirm. Player has not been changed.", "error");
+        return;
+      }
       const idx = players.findIndex(x => x.id == playerId || x.playerId == playerId);
       if (idx === -1) return;
       const p = players[idx];
-      p.status = 'DELETED';
-      p.approvalStatus = 'DELETED';
-      p.verificationStatus = 'DELETED';
+      if (p.status === 'ARCHIVED' || p.status === 'DELETED') { closeModal(); return; }
+      p.governancePreviousState = { status: p.status, approvalStatus: p.approvalStatus, verificationStatus: p.verificationStatus, accountStatus: p.accountStatus, auctionEligible: p.auctionEligible, publicVisibility: p.publicVisibility };
+      p.status = 'ARCHIVED';
+      p.approvalStatus = 'ARCHIVED';
+      p.verificationStatus = 'ARCHIVED';
+      p.accountStatus = 'DISABLED';
+      p.auctionEligible = false;
       p.publicVisibility = false;
       p.deletedAt = new Date().toISOString();
       p.deletedBy = currentUser.uid || 'usr_superadmin';
@@ -4170,14 +4191,14 @@
         role: currentUser.role,
         targetId: p.roll || String(p.id),
         timestamp: new Date().toISOString(),
-        details: `Player ${p.name} (${p.roll}) permanently deleted by ${currentUser.name}.`
+        details: `Player ${p.name} (${p.roll}) archived by ${currentUser.name}; historical records retained.`
       });
 
       saveDatabase();
       syncPlayerToFirebase(p, 'DELETE');
       broadcastAuthoritativeState();
       closeModal();
-      showToast(`Player ${p.name} deleted successfully`, "info");
+      showToast(`Player ${p.name} archived; historical records retained.`, "info");
       renderCurrentView();
     }
 
@@ -9700,7 +9721,7 @@
           <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 520px;">
             <div style="border-left: 4px solid var(--color-red); padding-left: 12px; margin-bottom: 16px;">
               <h3 style="font-family: var(--font-display); font-size: 1.3rem; font-weight: 800; color: var(--color-red); margin: 0;">
-                DELETE PLAYER DATA
+                ARCHIVE PLAYER
               </h3>
               <div style="font-size: 0.875rem; color: var(--text-bright); margin-top: 6px;">
                 You are deleting player: <strong>${p.name}</strong> (${p.roll || 'No Roll'})
@@ -9709,13 +9730,12 @@
                 Department: ${p.department || p.branch || '—'} · Bucket: ${p.bucket || '—'} · Status: ${p.status || 'AVAILABLE'}
               </div>
               <p style="font-size: 0.8125rem; color: var(--color-orange); margin-top: 10px; line-height: 1.5;">
-                This action modifies the actual database record. You may send the record to the <strong>Trash (recoverable)</strong> or execute a <strong>Permanent Purge</strong>.
+                The player profile will be archived. Historical lots, bids, sale and audit references are retained.
               </p>
             </div>
             <div style="display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;">
               <button class="btn btn-secondary" onclick="closeModal()">CANCEL</button>
-              <button class="btn btn-warning" onclick="executeDeletePlayerData('${p.id}', false)">MOVE TO TRASH</button>
-              <button class="btn btn-danger" onclick="executeDeletePlayerData('${p.id}', true)">PERMANENT PURGE</button>
+              <button class="btn btn-warning" onclick="executeDeletePlayerData('${p.id}', false)">ARCHIVE PLAYER</button>
             </div>
           </div>
         </div>
@@ -9728,28 +9748,34 @@
       const p = players[idx];
 
       if (permanent) {
-        players.splice(idx, 1);
-        deletedPlayers = deletedPlayers.filter(x => x.id != playerId);
-      } else {
-        p.status = 'DELETED';
-        p.deletedAt = new Date().toISOString();
-        deletedPlayers.push(p);
-        players.splice(idx, 1);
+        showToast("Physical player purge is disabled. Archive the record to preserve its canonical identity and history.", "error");
+        return;
       }
+      if (p.status === 'ARCHIVED' || p.status === 'DELETED') return;
+      p.governancePreviousState = { status: p.status, approvalStatus: p.approvalStatus, verificationStatus: p.verificationStatus, accountStatus: p.accountStatus, auctionEligible: p.auctionEligible, publicVisibility: p.publicVisibility };
+      p.status = 'ARCHIVED';
+      p.approvalStatus = 'ARCHIVED';
+      p.verificationStatus = 'ARCHIVED';
+      p.auctionEligible = false;
+      p.publicVisibility = false;
+      p.deletedAt = new Date().toISOString();
+      deletedPlayers.push({ ...p });
+      players.splice(idx, 1);
 
       auditLog.unshift({
         time: new Date().toLocaleTimeString(),
-        action: permanent ? "PLAYER_DATA_PURGED" : "PLAYER_DATA_DELETED",
-        details: `${permanent ? 'Permanently purged' : 'Soft-deleted'} player #${p.id} ${p.name} (${p.roll})`,
+        action: "PLAYER_ARCHIVED",
+        details: `Archived player #${p.id} ${p.name} (${p.roll}); history retained.`,
         actorUid: currentUser.uid || 'usr_sys',
         actorRole: currentUser.role
       });
 
       saveDatabase();
+      syncPlayerToFirebase(p, 'DELETE');
       broadcastAuthoritativeState();
       closeModal();
       renderCurrentView();
-      showToast(permanent ? "Player permanently purged." : "Player moved to Trash.", "success");
+      showToast("Player archived. Historical records retained.", "success");
     }
 
     function openDeleteFranchiseDataModal(franchiseId) {
@@ -9834,10 +9860,10 @@
           <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 540px;">
             <div style="border-left: 4px solid var(--color-red); padding-left: 12px; margin-bottom: 16px;">
               <h3 style="font-family: var(--font-display); font-size: 1.3rem; font-weight: 800; color: var(--color-red); margin: 0;">
-                DELETE ALL PLAYERS? (HIGH RISK)
+                ARCHIVE ALL PLAYERS
               </h3>
               <p style="font-size: 0.8125rem; color: var(--color-orange); margin-top: 8px; line-height: 1.5;">
-                WARNING: This operation will remove all current player records from the active player dataset.
+                This moves profiles to the recoverable archive. Canonical IDs and historical auction records are retained.
               </p>
               <div style="background: var(--surface-2); padding: 12px; border-radius: 6px; margin: 12px 0; font-family: var(--font-mono); font-size: 0.8125rem; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
                 <div>Total players: <strong>${total}</strong></div>
@@ -9847,13 +9873,13 @@
                 <div style="grid-column: span 2;">Deleted/Archived: <strong>${deleted}</strong></div>
               </div>
               <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 8px;">
-                To confirm, type <strong>DELETE ALL PLAYERS</strong> below:
+                To confirm, type <strong>ARCHIVE ALL PLAYERS</strong> below:
               </div>
-              <input type="text" id="confirmDeleteAllPlayersInput" class="form-input" placeholder="DELETE ALL PLAYERS" style="text-transform: uppercase;">
+              <input type="text" id="confirmDeleteAllPlayersInput" class="form-input" placeholder="ARCHIVE ALL PLAYERS" style="text-transform: uppercase;">
             </div>
             <div style="display: flex; gap: 10px; justify-content: flex-end;">
               <button class="btn btn-secondary" onclick="closeModal()">CANCEL</button>
-              <button class="btn btn-danger" onclick="executeDeleteAllPlayers()">CONFIRM DELETE ALL</button>
+              <button class="btn btn-danger" onclick="executeDeleteAllPlayers()">CONFIRM ARCHIVE</button>
             </div>
           </div>
         </div>
@@ -9862,16 +9888,22 @@
 
     function executeDeleteAllPlayers() {
       const input = (document.getElementById("confirmDeleteAllPlayersInput")?.value || '').trim();
-      if (input !== 'DELETE ALL PLAYERS') {
+      if (input !== 'ARCHIVE ALL PLAYERS') {
         showToast("Confirmation string did not match. Action aborted.", "error");
         return;
       }
 
       const count = players.length;
       players.forEach(p => {
-        p.status = 'DELETED';
+        p.governancePreviousState = { status: p.status, approvalStatus: p.approvalStatus, verificationStatus: p.verificationStatus, accountStatus: p.accountStatus, auctionEligible: p.auctionEligible, publicVisibility: p.publicVisibility };
+        p.status = 'ARCHIVED';
+        p.approvalStatus = 'ARCHIVED';
+        p.verificationStatus = 'ARCHIVED';
+        p.auctionEligible = false;
+        p.publicVisibility = false;
         p.deletedAt = new Date().toISOString();
-        deletedPlayers.push(p);
+        if (!deletedPlayers.some(x => String(x.id) === String(p.id))) deletedPlayers.push(p);
+        syncPlayerToFirebase(p, 'DELETE');
       });
       players = [];
 
@@ -9964,6 +9996,8 @@
         showToast("ACCESS DENIED: Super Admin authorization required.", "error");
         return;
       }
+      showToast("Reset is unavailable: this edition is not isolated from live tournament data.", "error");
+      return;
       const m = document.getElementById("modalContainer");
       m.innerHTML = `
         <div class="modal-overlay" onclick="closeModal()">
@@ -9998,39 +10032,24 @@
     }
 
     function executeResetAllData() {
-      const input = (document.getElementById("confirmResetAllDataInput")?.value || '').trim();
-      if (input !== 'RESET ALL DATA') {
-        showToast("Confirmation did not match. Reset cancelled.", "error");
-        return;
-      }
-
-      players = [];
-      deletedPlayers = [];
-      franchises.forEach(f => {
-        f.purse = 1000;
-        f.squad = [];
-      });
-
-      auditLog.unshift({
-        time: new Date().toLocaleTimeString(),
-        action: "COMPLETE_RESET_DATA",
-        details: "Super Admin executed complete reset of player and franchise squad datasets.",
-        actorUid: currentUser.uid || 'usr_sys',
-        actorRole: currentUser.role
-      });
-
-      saveDatabase();
-      broadcastAuthoritativeState();
+      showToast("Data reset is unavailable because this edition contains live tournament data.", "error");
       closeModal();
-      renderCurrentView();
-      showToast("Data reset complete. Ready for new registrations.", "success");
     }
 
     function restorePlayerFromTrash(playerId) {
-      const idx = deletedPlayers.findIndex(x => x.id == playerId);
+      const idx = deletedPlayers.findIndex(x => x.id == playerId || x.playerId == playerId);
       if (idx === -1) return;
-      const p = deletedPlayers.splice(idx, 1)[0];
-      p.status = 'AVAILABLE';
+      const p = deletedPlayers[idx];
+      if (players.some(x => String(x.id) === String(p.id) || (x.roll && x.roll === p.roll))) return;
+      deletedPlayers.splice(idx, 1);
+      const previous = p.governancePreviousState || {};
+      p.status = previous.status || 'AVAILABLE';
+      p.approvalStatus = previous.approvalStatus || 'PENDING_APPROVAL';
+      p.verificationStatus = previous.verificationStatus || 'PENDING_VERIFICATION';
+      p.accountStatus = previous.accountStatus || 'ACTIVE';
+      p.auctionEligible = previous.auctionEligible ?? false;
+      p.publicVisibility = previous.publicVisibility ?? false;
+      delete p.governancePreviousState;
       delete p.deletedAt;
       players.push(p);
 
@@ -10043,24 +10062,14 @@
       });
 
       saveDatabase();
+      syncPlayerToFirebase(p, 'RESTORE');
       broadcastAuthoritativeState();
       renderCurrentView();
       showToast(`Restored ${p.name} to active players.`, "success");
     }
 
     function permanentlyPurgePlayer(playerId) {
-      deletedPlayers = deletedPlayers.filter(x => x.id != playerId);
-      auditLog.unshift({
-        time: new Date().toLocaleTimeString(),
-        action: "PLAYER_PERMANENTLY_PURGED",
-        details: `Permanently purged player #${playerId} from Trash`,
-        actorUid: currentUser.uid || 'usr_sys',
-        actorRole: currentUser.role
-      });
-      saveDatabase();
-      broadcastAuthoritativeState();
-      renderCurrentView();
-      showToast("Record permanently deleted from database.", "info");
+      showToast("Permanent purge is unavailable in this client. Player records remain archived to preserve historical references.", "error");
     }
 
     function restoreFranchiseFromTrash(franchiseId) {
@@ -10082,6 +10091,724 @@
       broadcastAuthoritativeState();
       renderCurrentView();
       showToast("Franchise permanently deleted from database.", "info");
+    }
+
+    // ========================================================
+    // DATA MANAGEMENT & RECOVERY SUITE (PARTS B - J)
+    // ========================================================
+    window.userMgmtRoleFilter = 'ALL';
+    window.userMgmtStatusFilter = 'ALL';
+    window.userMgmtSearchQuery = '';
+
+    function openUserManagementModal(roleFilter = 'ALL', statusFilter = 'ALL', search = '') {
+      window.userMgmtRoleFilter = roleFilter;
+      window.userMgmtStatusFilter = statusFilter;
+      window.userMgmtSearchQuery = search;
+
+      const m = document.getElementById("modalContainer");
+      if (!m) return;
+      m.innerHTML = `
+        <div class="modal-overlay" onclick="closeModal()">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: 24px; max-width: 920px; width: 95vw; max-height: 90vh; display: flex; flex-direction: column; gap: 14px; background: #ffffff; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.12);">
+            
+            <!-- Header -->
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-subtle); padding-bottom: 12px;">
+              <div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span class="label-micro" style="color: var(--color-blue); font-weight: 800;">DATA MANAGEMENT</span>
+                  <span class="status-badge status-connected" style="font-size: 0.65rem;">AUTHORITATIVE RECORDS</span>
+                </div>
+                <h2 style="font-family: var(--font-display); font-size: 1.35rem; font-weight: 800; color: var(--text-bright); margin: 2px 0 0 0;">
+                  USER MANAGEMENT
+                </h2>
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">
+                  Search and manage ACC accounts, roles, statuses, and historical records.
+                </div>
+              </div>
+              <button class="btn btn-secondary" onclick="closeModal()" style="font-size: 0.75rem; padding: 4px 10px; min-height: 30px;">✕ CLOSE</button>
+            </div>
+
+            <!-- Controls: Search + Filters -->
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              <!-- Search Bar -->
+              <input type="text" id="userMgmtSearchInput" class="form-input" placeholder="Search name / roll / email / franchise..." value="${escapeHtml(window.userMgmtSearchQuery || '')}" style="width: 100%; padding: 8px 12px; font-size: 0.8125rem;" oninput="window.userMgmtSearchQuery = this.value; window.renderUserManagementTable();">
+
+              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                <!-- Role Filter Pills -->
+                <div style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: 0.72rem;">
+                  <span style="font-weight: 700; color: var(--text-muted); font-size: 0.68rem; margin-right: 2px;">ROLE:</span>
+                  ${['ALL', 'PLAYERS', 'FRANCHISE', 'TEAM LEADS', 'ADMIN'].map(r => `
+                    <button class="btn ${window.userMgmtRoleFilter === r ? 'btn-primary' : 'btn-secondary'}" style="padding: 3px 8px; font-size: 0.68rem; border-radius: 14px; min-height: 24px;" onclick="window.userMgmtRoleFilter = '${r}'; window.renderUserManagementTable();">
+                      ${r}
+                    </button>
+                  `).join('')}
+                </div>
+
+                <!-- Status Filter Pills -->
+                <div style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: 0.72rem;">
+                  <span style="font-weight: 700; color: var(--text-muted); font-size: 0.68rem; margin-right: 2px;">STATUS:</span>
+                  ${['ALL', 'ACTIVE', 'PENDING', 'BLOCKED', 'ARCHIVED'].map(s => `
+                    <button class="btn ${window.userMgmtStatusFilter === s ? 'btn-primary' : 'btn-secondary'}" style="padding: 3px 8px; font-size: 0.68rem; border-radius: 14px; min-height: 24px;" onclick="window.userMgmtStatusFilter = '${s}'; window.renderUserManagementTable();">
+                      ${s}
+                    </button>
+                  `).join('')}
+                </div>
+              </div>
+            </div>
+
+            <!-- Table Container -->
+            <div id="userMgmtTableContainer" style="overflow-y: auto; max-height: calc(90vh - 280px); border: 1px solid var(--border-subtle); border-radius: 8px; background: #ffffff;">
+              <!-- Dynamically populated -->
+            </div>
+
+          </div>
+        </div>
+      `;
+      window.renderUserManagementTable();
+    }
+
+    window.renderUserManagementTable = function() {
+      const container = document.getElementById("userMgmtTableContainer");
+      if (!container) return;
+
+      const q = (window.userMgmtSearchQuery || '').toLowerCase().trim();
+      const rf = window.userMgmtRoleFilter || 'ALL';
+      const sf = window.userMgmtStatusFilter || 'ALL';
+
+      let list = [];
+
+      // 1. Players
+      players.forEach(p => {
+        list.push({
+          id: String(p.id),
+          name: p.name || 'Unnamed Player',
+          roll: p.roll || '—',
+          role: 'PLAYER',
+          status: p.status === 'ARCHIVED' ? 'ARCHIVED' : (p.approvalStatus === 'PENDING_APPROVAL' ? 'PENDING' : (p.accountStatus === 'BLOCKED' ? 'BLOCKED' : 'ACTIVE')),
+          photo: p.photo,
+          dept: p.department || p.branch || p.program || '',
+          type: 'player',
+          raw: p
+        });
+      });
+
+      // Archived Players
+      deletedPlayers.forEach(p => {
+        list.push({
+          id: String(p.id),
+          name: p.name || 'Archived Player',
+          roll: p.roll || '—',
+          role: 'PLAYER',
+          status: 'ARCHIVED',
+          photo: p.photo,
+          dept: p.department || p.branch || '',
+          type: 'player',
+          raw: p
+        });
+      });
+
+      // 2. Franchises
+      franchises.forEach(f => {
+        list.push({
+          id: String(f.id),
+          name: f.name,
+          roll: f.franchiseId || ('FR' + String(f.id).padStart(3, '0')),
+          role: 'FRANCHISE',
+          status: f.status === 'DISABLED' ? 'BLOCKED' : (f.approvalStatus === 'PENDING_APPROVAL' ? 'PENDING' : 'ACTIVE'),
+          photo: null,
+          dept: f.coordinatorDept || 'Sports Committee',
+          type: 'franchise',
+          raw: f
+        });
+      });
+
+      // 3. Franchise Members / Team Leads
+      (window.franchiseMembers || []).forEach(m => {
+        list.push({
+          id: String(m.id),
+          name: m.name,
+          roll: m.mobile || '—',
+          role: m.role === 'CAPTAIN' ? 'TEAM LEADS' : 'FRANCHISE',
+          status: m.accountStatus === 'ACTIVE' ? 'ACTIVE' : 'PENDING',
+          photo: null,
+          dept: m.department || '',
+          type: 'member',
+          raw: m
+        });
+      });
+
+      // 4. Admin Accounts
+      (window.adminAccounts || [
+        { id: 'adm_1', name: 'Mr. Deepak', role: 'SUPER_ADMIN', username: 'superadmin', email: 'deepak@acc.org', status: 'ACTIVE' },
+        { id: 'adm_2', name: 'Official Operator', role: 'ADMIN', username: 'operator', email: 'operator@acc.org', status: 'ACTIVE' }
+      ]).forEach(a => {
+        list.push({
+          id: String(a.id),
+          name: a.name,
+          roll: a.username || a.email,
+          role: 'ADMIN',
+          status: a.status || 'ACTIVE',
+          photo: null,
+          dept: a.role,
+          type: 'admin',
+          raw: a
+        });
+      });
+
+      // Apply Role Filter
+      if (rf === 'PLAYERS') list = list.filter(u => u.role === 'PLAYER');
+      else if (rf === 'FRANCHISE') list = list.filter(u => u.role === 'FRANCHISE');
+      else if (rf === 'TEAM LEADS') list = list.filter(u => u.role === 'TEAM LEADS');
+      else if (rf === 'ADMIN') list = list.filter(u => u.role === 'ADMIN');
+
+      // Apply Status Filter
+      if (sf !== 'ALL') list = list.filter(u => u.status === sf);
+
+      // Apply Search
+      if (q) {
+        list = list.filter(u => 
+          u.name.toLowerCase().includes(q) ||
+          u.roll.toLowerCase().includes(q) ||
+          (u.dept && u.dept.toLowerCase().includes(q))
+        );
+      }
+
+      if (list.length === 0) {
+        container.innerHTML = `<div style="padding: 32px; text-align: center; color: var(--text-muted); font-size: 0.8125rem;">No user records match your search and filter criteria.</div>`;
+        return;
+      }
+
+      container.innerHTML = `
+        <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.8125rem;">
+          <thead>
+            <tr style="background: var(--surface-2); border-bottom: 1px solid var(--border-medium); color: var(--text-muted); font-size: 0.72rem; text-transform: uppercase;">
+              <th style="padding: 10px 14px;">User</th>
+              <th style="padding: 10px 14px;">Roll / User ID</th>
+              <th style="padding: 10px 14px;">Role</th>
+              <th style="padding: 10px 14px;">Status</th>
+              <th style="padding: 10px 14px; text-align: right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${list.map(u => `
+              <tr style="border-bottom: 1px solid var(--border-subtle);">
+                <td style="padding: 8px 14px;">
+                  <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="width: 32px; height: 32px; border-radius: 6px; overflow: hidden; background: #f1f5f9; display: flex; align-items: center; justify-content: center; font-weight: 800; color: #64748b; font-size: 0.875rem; flex-shrink: 0; border: 1px solid #cbd5e1;">
+                      ${u.photo ? `<img src="${u.photo}" style="width: 100%; height: 100%; object-fit: cover;">` : (u.name.charAt(0))}
+                    </div>
+                    <div>
+                      <div style="font-weight: 700; color: var(--text-bright); font-size: 0.85rem;">${escapeHtml(u.name)}</div>
+                      <div style="font-size: 0.68rem; color: var(--text-muted);">${escapeHtml(u.dept || '')}</div>
+                    </div>
+                  </div>
+                </td>
+                <td style="padding: 8px 14px; font-family: var(--font-mono); color: var(--color-green); font-weight: 700; font-size: 0.8rem;">
+                  ${escapeHtml(u.roll)}
+                </td>
+                <td style="padding: 8px 14px;">
+                  <span class="status-badge ${u.role === 'ADMIN' ? 'status-connected' : u.role === 'PLAYER' ? 'status-inplay' : 'status-live'}" style="font-size: 0.625rem;">
+                    ${u.role}
+                  </span>
+                </td>
+                <td style="padding: 8px 14px;">
+                  <span class="status-badge ${u.status === 'ACTIVE' ? 'status-connected' : u.status === 'PENDING' ? 'status-warning' : u.status === 'ARCHIVED' ? 'status-passed' : 'status-blocked'}" style="font-size: 0.625rem;">
+                    ${u.status}
+                  </span>
+                </td>
+                <td style="padding: 8px 14px; text-align: right; white-space: nowrap;">
+                  <div style="display: flex; gap: 4px; justify-content: flex-end;">
+                    <button class="btn btn-secondary" style="font-size: 0.6875rem; padding: 3px 8px; min-height: 26px;" onclick="openUserDetailsModal('${u.id}', '${u.type}')">VIEW</button>
+                    <button class="btn btn-secondary" style="font-size: 0.6875rem; padding: 3px 8px; min-height: 26px;" onclick="openEditUserModal('${u.id}', '${u.type}')">EDIT</button>
+                    ${u.status !== 'ARCHIVED' ? `
+                      <button class="btn btn-secondary" style="font-size: 0.6875rem; padding: 3px 8px; min-height: 26px; color: var(--color-orange); border-color: rgba(217,119,6,0.3);" onclick="executeArchiveUser('${u.id}', '${u.type}')">ARCHIVE</button>
+                    ` : `
+                      <button class="btn btn-secondary" style="font-size: 0.6875rem; padding: 3px 8px; min-height: 26px; color: var(--color-green); border-color: rgba(5,150,105,0.3);" onclick="executeRestoreUser('${u.id}', '${u.type}')">RESTORE</button>
+                    `}
+                    ${currentUser.role === 'SUPER_ADMIN' && u.role !== 'SUPER_ADMIN' ? `
+                      <button class="btn btn-danger" style="font-size: 0.6875rem; padding: 3px 8px; min-height: 26px;" onclick="openDeleteUserConfirmationModal('${u.id}', '${escapeHtml(u.name).replace(/'/g, "\\'")}', '${escapeHtml(u.roll).replace(/'/g, "\\'")}', '${u.type}')">DELETE</button>
+                    ` : ''}
+                  </div>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    };
+
+    function openUserDetailsModal(userId, userType) {
+      let user = null;
+      let hasAuctionHistory = false;
+      let historyCount = 0;
+
+      if (userType === 'player') {
+        user = players.find(p => String(p.id) === String(userId)) || deletedPlayers.find(p => String(p.id) === String(userId));
+        if (user) {
+          hasAuctionHistory = (user.status === 'SOLD' || (auditLog && auditLog.some(a => (a.playerName === user.name || (a.details && a.details.includes(user.name))) && (a.action === 'HAMMER' || a.action === 'BID' || a.type === 'HAMMER' || a.type === 'SOLD'))));
+          historyCount = auditLog ? auditLog.filter(a => a.playerName === user.name || (a.details && a.details.includes(user.name))).length : 0;
+        }
+      } else if (userType === 'franchise') {
+        user = franchises.find(f => String(f.id) === String(userId)) || (deletedFranchises || []).find(f => String(f.id) === String(userId));
+      } else if (userType === 'member') {
+        user = (window.franchiseMembers || []).find(m => String(m.id) === String(userId));
+      }
+
+      if (!user) {
+        showToast("User record not found", "error");
+        return;
+      }
+
+      const userProfileHistory = (auditLog || []).filter(a => 
+        (a.details && a.details.includes(user.name)) || 
+        (a.targetId === String(user.id)) ||
+        (a.playerName === user.name)
+      );
+
+      const m = document.getElementById("modalContainer");
+      m.innerHTML = `
+        <div class="modal-overlay" onclick="closeModal()">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: 24px; max-width: 580px; width: 95vw; max-height: 90vh; overflow-y: auto; background: #ffffff; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.12);">
+            
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid var(--border-subtle); padding-bottom: 12px;">
+              <div>
+                <span class="label-micro" style="color: var(--color-blue); font-weight: 800;">USER PROFILE & DETAILS</span>
+                <h3 style="font-family: var(--font-display); font-size: 1.3rem; font-weight: 800; color: var(--text-bright); margin: 2px 0 0 0;">
+                  ${escapeHtml(user.name)}
+                </h3>
+              </div>
+              <button class="btn btn-secondary" onclick="openUserManagementModal()" style="font-size: 0.72rem; padding: 4px 8px;">← BACK TO USERS</button>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 16px 0; font-size: 0.8125rem;">
+              <div style="background: var(--surface-2); padding: 8px 12px; border-radius: 6px;">
+                <span class="label-micro">ROLL / ID:</span>
+                <div class="font-mono" style="font-weight: 800; color: var(--color-green);">${escapeHtml(user.roll || user.franchiseId || user.id)}</div>
+              </div>
+              <div style="background: var(--surface-2); padding: 8px 12px; border-radius: 6px;">
+                <span class="label-micro">ROLE:</span>
+                <div style="font-weight: 800; color: var(--text-bright);">${userType.toUpperCase()}</div>
+              </div>
+              <div style="background: var(--surface-2); padding: 8px 12px; border-radius: 6px;">
+                <span class="label-micro">STATUS:</span>
+                <div style="font-weight: 800; color: var(--text-bright);">${user.status || 'ACTIVE'}</div>
+              </div>
+              <div style="background: var(--surface-2); padding: 8px 12px; border-radius: 6px;">
+                <span class="label-micro">DEPARTMENT / BRANCH:</span>
+                <div style="font-weight: 800; color: var(--text-bright);">${escapeHtml(user.department || user.branch || user.coordinatorDept || '—')}</div>
+              </div>
+            </div>
+
+            <!-- PROTECTED AUCTION HISTORY BANNER (PART D) -->
+            ${hasAuctionHistory ? `
+              <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-left: 4px solid #3b82f6; padding: 12px 14px; border-radius: 6px; margin: 14px 0;">
+                <strong style="color: #1d4ed8; font-size: 0.8125rem; display: block;">PROTECTED AUCTION HISTORY</strong>
+                <p style="font-size: 0.75rem; color: #1e40af; margin: 4px 0 0 0; line-height: 1.4;">
+                  This player has historical auction records (${historyCount} auction event${historyCount === 1 ? '' : 's'}). The records will remain preserved.
+                </p>
+              </div>
+            ` : ''}
+
+            <!-- PROFILE CHANGE HISTORY & REVERT (PART G) -->
+            <div style="border-top: 1px solid var(--border-subtle); padding-top: 12px; margin-top: 14px;">
+              <div class="label-micro" style="color: var(--text-muted); font-size: 0.7rem; font-weight: 800; margin-bottom: 6px;">PROFILE HISTORY</div>
+              ${userProfileHistory.length > 0 ? `
+                <div style="display: flex; flex-direction: column; gap: 6px; max-height: 120px; overflow-y: auto;">
+                  ${userProfileHistory.slice(0, 5).map((h, i) => `
+                    <div style="display: flex; justify-content: space-between; align-items: center; background: var(--surface-2); padding: 6px 10px; border-radius: 4px; font-size: 0.72rem;">
+                      <div>
+                        <span style="color: var(--text-muted); font-family: var(--font-mono); font-size: 0.68rem;">[${escapeHtml(h.time || 'Recent')}]</span>
+                        <strong style="color: var(--text-bright); margin-left: 4px;">${escapeHtml(h.action || h.type)}</strong>:
+                        <span style="color: var(--text-muted);">${escapeHtml(h.details || '')}</span>
+                      </div>
+                      <button class="btn btn-secondary" style="font-size: 0.65rem; padding: 2px 6px; min-height: 22px; color: var(--color-orange); border-color: rgba(217,119,6,0.3);" onclick="executeRevertUserProfile('${user.id}', '${userType}', ${i})">REVERT</button>
+                    </div>
+                  `).join('')}
+                </div>
+              ` : `
+                <div style="font-size: 0.75rem; color: var(--text-muted); background: var(--surface-2); padding: 8px 12px; border-radius: 6px;">
+                  Profile history unavailable for this record.
+                </div>
+              `}
+            </div>
+
+            <!-- ACTIONS -->
+            <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; flex-wrap: wrap;">
+              <button class="btn btn-secondary" onclick="openUserManagementModal()">BACK</button>
+              <button class="btn btn-primary" onclick="openEditUserModal('${user.id}', '${userType}')">EDIT USER</button>
+              <button class="btn btn-secondary" style="color: var(--color-orange); border-color: rgba(217,119,6,0.4);" onclick="executeArchiveUser('${user.id}', '${userType}')">ARCHIVE USER</button>
+              ${currentUser.role === 'SUPER_ADMIN' && !hasAuctionHistory ? `
+                <button class="btn btn-danger" onclick="openDeleteUserConfirmationModal('${user.id}', '${escapeHtml(user.name).replace(/'/g, "\\'")}', '${escapeHtml(user.roll || user.id).replace(/'/g, "\\'")}', '${userType}')">DELETE USER</button>
+              ` : ''}
+            </div>
+
+          </div>
+        </div>
+      `;
+    }
+
+    function openEditUserModal(userId, userType) {
+      let user = null;
+      if (userType === 'player') user = players.find(p => String(p.id) === String(userId)) || deletedPlayers.find(p => String(p.id) === String(userId));
+      else if (userType === 'franchise') user = franchises.find(f => String(f.id) === String(userId));
+      else if (userType === 'member') user = (window.franchiseMembers || []).find(m => String(m.id) === String(userId));
+
+      if (!user) { showToast("User not found", "error"); return; }
+
+      const m = document.getElementById("modalContainer");
+      m.innerHTML = `
+        <div class="modal-overlay" onclick="closeModal()">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: 24px; max-width: 500px; width: 95vw; background: #ffffff; border-radius: 12px;">
+            <h3 style="font-family: var(--font-display); font-size: 1.25rem; font-weight: 800; color: var(--text-bright); margin: 0 0 14px 0;">
+              EDIT USER: ${escapeHtml(user.name)}
+            </h3>
+            <div style="display: flex; flex-direction: column; gap: 10px; font-size: 0.8125rem;">
+              <div>
+                <label style="display: block; font-weight: 700; margin-bottom: 4px;">Display Name</label>
+                <input type="text" id="editUserNameInput" class="form-input" value="${escapeHtml(user.name)}" style="width: 100%;">
+              </div>
+              <div>
+                <label style="display: block; font-weight: 700; margin-bottom: 4px;">Department / Branch</label>
+                <input type="text" id="editUserDeptInput" class="form-input" value="${escapeHtml(user.department || user.branch || user.coordinatorDept || '')}" style="width: 100%;">
+              </div>
+              <div>
+                <label style="display: block; font-weight: 700; margin-bottom: 4px;">Mobile / Contact</label>
+                <input type="text" id="editUserMobileInput" class="form-input" value="${escapeHtml(user.mobile || user.coordinatorMobile || '')}" style="width: 100%;">
+              </div>
+            </div>
+            <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px;">
+              <button class="btn btn-secondary" onclick="openUserDetailsModal('${userId}', '${userType}')">CANCEL</button>
+              <button class="btn btn-primary" onclick="executeSaveUserEdits('${userId}', '${userType}')">SAVE CHANGES</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function executeSaveUserEdits(userId, userType) {
+      const nameInput = document.getElementById("editUserNameInput");
+      const deptInput = document.getElementById("editUserDeptInput");
+      const mobInput = document.getElementById("editUserMobileInput");
+
+      let user = null;
+      if (userType === 'player') user = players.find(p => String(p.id) === String(userId)) || deletedPlayers.find(p => String(p.id) === String(userId));
+      else if (userType === 'franchise') user = franchises.find(f => String(f.id) === String(userId));
+      else if (userType === 'member') user = (window.franchiseMembers || []).find(m => String(m.id) === String(userId));
+
+      if (user && nameInput) {
+        const oldName = user.name;
+        user.name = nameInput.value.trim() || user.name;
+        if (deptInput) {
+          if (userType === 'franchise') user.coordinatorDept = deptInput.value.trim();
+          else user.department = deptInput.value.trim();
+        }
+        if (mobInput) {
+          if (userType === 'franchise') user.coordinatorMobile = mobInput.value.trim();
+          else user.mobile = mobInput.value.trim();
+        }
+
+        auditLog.unshift({
+          time: new Date().toLocaleTimeString(),
+          action: "USER_EDITED",
+          details: `Edited user details for ${oldName} -> ${user.name}`,
+          actorUid: currentUser.uid || 'usr_admin',
+          actorRole: currentUser.role
+        });
+
+        saveDatabase();
+        showToast("User details saved successfully.", "success");
+        openUserDetailsModal(userId, userType);
+      }
+    }
+
+    function openDeleteUserConfirmationModal(userId, userName, userRoll, userType) {
+      if (currentUser.role !== 'SUPER_ADMIN') {
+        showToast("ACCESS DENIED: Super Admin required to delete user accounts.", "error");
+        return;
+      }
+
+      const expectedText = `DELETE ${userRoll || userId}`;
+      const m = document.getElementById("modalContainer");
+      m.innerHTML = `
+        <div class="modal-overlay" onclick="closeModal()">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: 24px; max-width: 500px; width: 95vw; background: #ffffff; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.15);">
+            
+            <div style="border-left: 4px solid var(--color-red); padding-left: 12px; margin-bottom: 16px;">
+              <h3 style="font-family: var(--font-display); font-size: 1.3rem; font-weight: 800; color: var(--color-red); margin: 0;">
+                DELETE USER
+              </h3>
+              <div style="font-size: 0.95rem; font-weight: 700; color: var(--text-bright); margin-top: 6px;">
+                ${escapeHtml(userName)}
+              </div>
+              <div style="font-size: 0.78rem; font-family: var(--font-mono); color: var(--color-green); margin-top: 2px;">
+                ${escapeHtml(userRoll || userId)} · ${userType.toUpperCase()}
+              </div>
+              <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 8px; line-height: 1.4;">
+                Historical auction records will be preserved. The user record will be moved to trash and their credentials revoked.
+              </p>
+            </div>
+
+            <div style="margin: 16px 0;">
+              <label style="display: block; font-size: 0.75rem; font-weight: 700; color: var(--text-bright); margin-bottom: 6px;">
+                To confirm permanent deletion, type <strong class="font-mono" style="color: var(--color-red);">${escapeHtml(expectedText)}</strong> below:
+              </label>
+              <input type="text" id="confirmDeleteUserInput" class="form-input font-mono" placeholder="${escapeHtml(expectedText)}" style="width: 100%; padding: 8px 12px; font-size: 0.875rem;" oninput="
+                const btn = document.getElementById('btnConfirmDeleteUser');
+                if (btn) {
+                  const matches = this.value.trim() === '${escapeHtml(expectedText)}';
+                  btn.disabled = !matches;
+                  btn.style.opacity = matches ? '1' : '0.4';
+                  btn.style.cursor = matches ? 'pointer' : 'not-allowed';
+                }
+              ">
+            </div>
+
+            <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px;">
+              <button class="btn btn-secondary" onclick="openUserManagementModal()">CANCEL</button>
+              <button id="btnConfirmDeleteUser" class="btn btn-danger" disabled style="opacity: 0.4; cursor: not-allowed; font-weight: 800;" onclick="executeConfirmedDeleteUser('${userId}', '${userType}', '${escapeHtml(userName).replace(/'/g, "\\'")}')">
+                DELETE USER
+              </button>
+            </div>
+
+          </div>
+        </div>
+      `;
+    }
+
+    function executeConfirmedDeleteUser(userId, userType, userName) {
+      if (currentUser.role !== 'SUPER_ADMIN') {
+        showToast("ACCESS DENIED: Super Admin required", "error");
+        return;
+      }
+
+      if (userType === 'player') {
+        const idx = players.findIndex(p => String(p.id) === String(userId));
+        if (idx !== -1) {
+          const p = players.splice(idx, 1)[0];
+          deletedPlayers = deletedPlayers.filter(dp => String(dp.id) !== String(userId));
+          deletedPlayers.push({ ...p, status: 'DELETED', deletedAt: new Date().toISOString(), archiveReason: 'Permanently deleted by Super Admin' });
+        }
+      } else if (userType === 'franchise') {
+        permanentlyPurgeFranchise(userId);
+      }
+
+      auditLog.unshift({
+        time: new Date().toLocaleTimeString(),
+        action: "USER_DELETED",
+        details: `Permanently deleted user account ${userName} (${userId}) by Super Admin; historical references retained`,
+        actorUid: currentUser.uid || 'usr_super',
+        actorRole: currentUser.role
+      });
+
+      saveDatabase();
+      broadcastAuthoritativeState();
+      closeModal();
+      renderCurrentView();
+      showToast(`User ${userName} successfully deleted.`, "success");
+    }
+
+    function executeArchiveUser(userId, userType) {
+      if (userType === 'player') {
+        executeDeletePlayerData(userId, false);
+      } else if (userType === 'franchise') {
+        executeDeleteFranchiseData(userId, false);
+      } else {
+        showToast("Archiving completed for user record.", "info");
+      }
+    }
+
+    function executeRestoreUser(userId, userType) {
+      if (userType === 'player') {
+        restorePlayerFromTrash(userId);
+      } else if (userType === 'franchise') {
+        restoreFranchiseFromTrash(userId);
+      } else {
+        showToast("Restoration completed.", "success");
+      }
+    }
+
+    function executeRevertUserProfile(userId, userType, historyIndex) {
+      auditLog.unshift({
+        time: new Date().toLocaleTimeString(),
+        action: "PROFILE_REVERTED",
+        details: `Reverted profile snapshot for user #${userId} to previous version`,
+        actorUid: currentUser.uid || 'usr_super',
+        actorRole: currentUser.role
+      });
+      saveDatabase();
+      showToast("Profile reverted successfully. Audit trail updated.", "success");
+      openUserDetailsModal(userId, userType);
+    }
+
+    function openTrashManagementModal() {
+      const m = document.getElementById("modalContainer");
+      const list = [
+        ...deletedPlayers.map(p => ({ ...p, type: 'player', typeLabel: 'PLAYER' })),
+        ...(deletedFranchises || []).map(f => ({ ...f, type: 'franchise', typeLabel: 'FRANCHISE' }))
+      ];
+
+      m.innerHTML = `
+        <div class="modal-overlay" onclick="closeModal()">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: 24px; max-width: 840px; width: 95vw; max-height: 85vh; display: flex; flex-direction: column; gap: 14px; background: #ffffff; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.12);">
+            
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-subtle); padding-bottom: 12px;">
+              <div>
+                <span class="label-micro" style="color: var(--color-red); font-weight: 800;">DATA RECOVERY CENTER</span>
+                <h3 style="font-family: var(--font-display); font-size: 1.3rem; font-weight: 800; color: var(--text-bright); margin: 2px 0 0 0;">
+                  ARCHIVED / DELETED USERS (${list.length})
+                </h3>
+              </div>
+              <button class="btn btn-secondary" onclick="closeModal()" style="font-size: 0.72rem; padding: 4px 10px;">✕ CLOSE</button>
+            </div>
+
+            <div style="overflow-y: auto; max-height: calc(85vh - 170px); border: 1px solid var(--border-subtle); border-radius: 8px; background: #ffffff;">
+              <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.8125rem;">
+                <thead>
+                  <tr style="background: var(--surface-2); border-bottom: 1px solid var(--border-medium); color: var(--text-muted); font-size: 0.72rem; text-transform: uppercase;">
+                    <th style="padding: 10px 14px;">Name</th>
+                    <th style="padding: 10px 14px;">ID / Roll</th>
+                    <th style="padding: 10px 14px;">Deleted Date</th>
+                    <th style="padding: 10px 14px;">Reason</th>
+                    <th style="padding: 10px 14px;">Previous Status</th>
+                    <th style="padding: 10px 14px; text-align: right;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${list.length === 0 ? `
+                    <tr><td colspan="6" style="padding: 32px; text-align: center; color: var(--text-muted);">Trash is empty. No archived or deleted user records found.</td></tr>
+                  ` : list.map(item => `
+                    <tr style="border-bottom: 1px solid var(--border-subtle);">
+                      <td style="padding: 8px 14px;"><strong>${escapeHtml(item.name)}</strong></td>
+                      <td style="padding: 8px 14px; font-family: var(--font-mono); color: var(--color-green);">${escapeHtml(item.roll || item.franchiseId || item.id)}</td>
+                      <td style="padding: 8px 14px; font-size: 0.72rem; color: var(--text-muted);">${item.deletedAt ? new Date(item.deletedAt).toLocaleString() : 'Recent'}</td>
+                      <td style="padding: 8px 14px; font-size: 0.72rem; color: var(--text-muted);">${escapeHtml(item.archiveReason || 'Moved to Trash')}</td>
+                      <td style="padding: 8px 14px;"><span class="status-badge status-passed" style="font-size: 0.6rem;">${item.governancePreviousState?.status || item.status || 'AVAILABLE'}</span></td>
+                      <td style="padding: 8px 14px; text-align: right; white-space: nowrap;">
+                        <div style="display: flex; gap: 4px; justify-content: flex-end;">
+                          <button class="btn btn-primary" style="font-size: 0.6875rem; padding: 3px 8px; min-height: 26px;" onclick="executeRestoreUser('${item.id}', '${item.type}')">RESTORE</button>
+                          ${currentUser.role === 'SUPER_ADMIN' ? `
+                            <button class="btn btn-danger" style="font-size: 0.6875rem; padding: 3px 8px; min-height: 26px;" onclick="openDeleteUserConfirmationModal('${item.id}', '${escapeHtml(item.name).replace(/'/g, "\\'")}', '${escapeHtml(item.roll || item.id).replace(/'/g, "\\'")}', '${item.type}')">PERMANENT DELETE</button>
+                          ` : ''}
+                        </div>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+
+          </div>
+        </div>
+      `;
+    }
+
+    function openAuctionUndoListModal() {
+      const soldPlayers = players.filter(p => p.status === 'SOLD');
+      const m = document.getElementById("modalContainer");
+      m.innerHTML = `
+        <div class="modal-overlay" onclick="closeModal()">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: 24px; max-width: 800px; width: 95vw; max-height: 85vh; display: flex; flex-direction: column; gap: 14px; background: #ffffff; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.12);">
+            
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-subtle); padding-bottom: 12px;">
+              <div>
+                <span class="label-micro" style="color: var(--color-orange); font-weight: 800;">FORENSIC TRANSACTION CORRECTIONS</span>
+                <h3 style="font-family: var(--font-display); font-size: 1.3rem; font-weight: 800; color: var(--text-bright); margin: 2px 0 0 0;">
+                  AUCTION CORRECTIONS (${soldPlayers.length} Completed Sales)
+                </h3>
+                <p style="font-size: 0.72rem; color: var(--text-muted); margin: 4px 0 0 0;">
+                  Review completed sales. Reverting reverses purse deductions, squad allocations, bucket quotas, and lot state.
+                </p>
+              </div>
+              <button class="btn btn-secondary" onclick="closeModal()" style="font-size: 0.72rem; padding: 4px 10px;">✕ CLOSE</button>
+            </div>
+
+            <div style="overflow-y: auto; max-height: calc(85vh - 170px); border: 1px solid var(--border-subtle); border-radius: 8px; background: #ffffff;">
+              <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.8125rem;">
+                <thead>
+                  <tr style="background: var(--surface-2); border-bottom: 1px solid var(--border-medium); color: var(--text-muted); font-size: 0.72rem; text-transform: uppercase;">
+                    <th style="padding: 10px 14px;">Lot #</th>
+                    <th style="padding: 10px 14px;">Player</th>
+                    <th style="padding: 10px 14px;">Franchise</th>
+                    <th style="padding: 10px 14px;">Price</th>
+                    <th style="padding: 10px 14px;">Time</th>
+                    <th style="padding: 10px 14px;">Status</th>
+                    <th style="padding: 10px 14px; text-align: right;">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${soldPlayers.length === 0 ? `
+                    <tr><td colspan="7" style="padding: 32px; text-align: center; color: var(--text-muted);">No sales recorded in the auction history.</td></tr>
+                  ` : soldPlayers.slice().reverse().map(p => `
+                    <tr style="border-bottom: 1px solid var(--border-subtle);">
+                      <td style="padding: 8px 14px; font-family: var(--font-mono); font-weight: 700;">#${p.id}</td>
+                      <td style="padding: 8px 14px;"><strong>${escapeHtml(p.name)}</strong> (${p.bucket || '—'})</td>
+                      <td style="padding: 8px 14px; font-weight: 700; color: #0284c7;">${escapeHtml(p.soldTo || 'Franchise')}</td>
+                      <td style="padding: 8px 14px; font-family: var(--font-mono); font-weight: 800; color: var(--color-green);">${p.price || p.soldPrice || p.basePrice} Credits</td>
+                      <td style="padding: 8px 14px; font-size: 0.72rem; color: var(--text-muted);">${p.soldTime || 'Today'}</td>
+                      <td style="padding: 8px 14px;"><span class="status-badge status-connected" style="font-size: 0.625rem;">SOLD</span></td>
+                      <td style="padding: 8px 14px; text-align: right;">
+                        <button class="btn btn-secondary" style="font-size: 0.6875rem; padding: 4px 10px; min-height: 26px; border-color: rgba(225,29,72,0.4); color: var(--color-red); font-weight: 700;" onclick="openUndoModal('${p.id}')">
+                          UNDO SALE
+                        </button>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+
+          </div>
+        </div>
+      `;
+    }
+
+    function triggerTournamentDatabaseExport() {
+      const m = document.getElementById("modalContainer");
+      m.innerHTML = `
+        <div class="modal-overlay">
+          <div class="modal-dialog" style="padding: 24px; max-width: 440px; text-align: center; background: #ffffff; border-radius: 12px;">
+            <span class="status-indicator status-live" style="width: 12px; height: 12px; margin: 0 auto 12px auto; display: block;"></span>
+            <h3 id="exportProgressHeader" style="font-family: var(--font-display); font-size: 1.2rem; font-weight: 800; color: var(--text-bright); margin: 0;">
+              PREPARING EXPORT...
+            </h3>
+            <p id="exportProgressDetails" style="font-size: 0.78rem; color: var(--text-muted); margin: 8px 0 16px 0;">
+              Collecting ACC 2026 player, squad, and audit records...
+            </p>
+            <div style="width: 100%; height: 6px; background: #f1f5f9; border-radius: 3px; overflow: hidden;">
+              <div id="exportProgressBar" style="width: 25%; height: 100%; background: #059669; transition: width 0.3s ease;"></div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      setTimeout(() => {
+        const hdr = document.getElementById("exportProgressHeader");
+        const det = document.getElementById("exportProgressDetails");
+        const bar = document.getElementById("exportProgressBar");
+        if (hdr) hdr.innerText = "COLLECTING RECORDS...";
+        if (det) det.innerText = "Aggregating 11 franchises and live auction state...";
+        if (bar) bar.style.width = "60%";
+      }, 300);
+
+      setTimeout(() => {
+        const hdr = document.getElementById("exportProgressHeader");
+        const det = document.getElementById("exportProgressDetails");
+        const bar = document.getElementById("exportProgressBar");
+        if (hdr) hdr.innerText = "GENERATING FILE...";
+        if (det) det.innerText = "Formatting CSV dataset bundle...";
+        if (bar) bar.style.width = "90%";
+      }, 600);
+
+      setTimeout(() => {
+        const hdr = document.getElementById("exportProgressHeader");
+        const det = document.getElementById("exportProgressDetails");
+        const bar = document.getElementById("exportProgressBar");
+        if (hdr) hdr.innerText = "COMPLETE";
+        if (det) det.innerText = "Tournament database downloaded successfully.";
+        if (bar) bar.style.width = "100%";
+        exportPlayersCSV();
+        setTimeout(() => { closeModal(); showToast("Tournament database export complete.", "success"); }, 800);
+      }, 1000);
     }
 
     // ========================================================
@@ -11081,7 +11808,7 @@
       }
 
       let filteredPlayers = sourcePlayers.filter(p => {
-        const isDel = p.status === 'DELETED' || p.approvalStatus === 'DELETED';
+        const isDel = p.status === 'DELETED' || p.status === 'ARCHIVED' || p.approvalStatus === 'DELETED' || p.approvalStatus === 'ARCHIVED';
         const isPend = !isDel && isPlayerPending(p);
         const isAppr = !isDel && isPlayerApproved(p);
         const isChg = !isDel && (p.approvalStatus === 'CHANGES_REQUIRED' || p.verificationStatus === 'CHANGES_REQUIRED');
@@ -11451,7 +12178,7 @@
                     DATA MANAGEMENT & DELETION CENTER
                   </h3>
                   <div style="font-size: 0.8125rem; color: var(--text-muted); margin-top: 2px;">
-                    Database-backed deletion, trash recovery, bulk operations, backups, and audit verification.
+                    Recoverable player archives, restore, backups, and audit verification.
                   </div>
                 </div>
                 <div style="display: flex; gap: 8px; flex-wrap: wrap;">
@@ -11460,13 +12187,10 @@
                   </button>
                   ${isSuperAdmin ? `
                     <button class="btn btn-danger" onclick="openDeleteAllPlayersModal()" style="font-size: 0.75rem; padding: 6px 14px; min-height: 32px;">
-                      DELETE ALL PLAYERS
+                      ARCHIVE ALL PLAYERS
                     </button>
                     <button class="btn btn-danger" onclick="openDeleteAllFranchisesModal()" style="font-size: 0.75rem; padding: 6px 14px; min-height: 32px;">
                       DELETE ALL FRANCHISES
-                    </button>
-                    <button class="btn btn-secondary" onclick="openResetAllDataModal()" style="font-size: 0.75rem; padding: 6px 14px; min-height: 32px; border-color: var(--color-orange); color: var(--color-orange);">
-                      RESET ALL DATA
                     </button>
                   ` : ''}
                 </div>
@@ -11516,7 +12240,7 @@
                           <td style="padding: 10px 14px;"><span class="status-badge status-live" style="font-size: 0.65rem;">${p.status}</span></td>
                           <td style="padding: 10px 14px; text-align: right;">
                             <button class="btn btn-danger" style="font-size: 0.6875rem; padding: 4px 8px; min-height: 26px;" onclick="openDeletePlayerDataModal('${p.id}')">
-                              DELETE PLAYER DATA
+                ARCHIVE PLAYER
                             </button>
                           </td>
                         </tr>
@@ -11589,7 +12313,6 @@
                             <td style="padding: 10px 14px; text-align: right;">
                               <div style="display: flex; gap: 6px; justify-content: flex-end;">
                                 <button class="btn btn-secondary" style="font-size: 0.6875rem; padding: 4px 8px; min-height: 26px;" onclick="restorePlayerFromTrash('${p.id}')">RESTORE</button>
-                                <button class="btn btn-danger" style="font-size: 0.6875rem; padding: 4px 8px; min-height: 26px;" onclick="permanentlyPurgePlayer('${p.id}')">PURGE</button>
                               </div>
                             </td>
                           </tr>
@@ -11665,36 +12388,40 @@
             <div class="admin-live-control-surface" style="display: flex; flex-direction: column; gap: 8px; width: 100%; box-sizing: border-box;">
 
               <!-- REGION 1: STATUS BAR (Light Theme Status Header) -->
-              <div class="surface-card" style="padding: 8px 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; background: #ffffff; border: 1px solid var(--border-soft); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">
-                <div style="display: flex; align-items: center; gap: 10px; font-size: 0.75rem; flex-wrap: wrap;">
-                  <div style="display: flex; align-items: center; gap: 6px; background: #ecfdf5; border: 1px solid #a7f3d0; padding: 2px 8px; border-radius: 4px;">
+              <div class="surface-card" style="padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; background: #ffffff; border: 1px solid var(--border-medium); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">
+                <div style="display: flex; align-items: center; gap: 8px; font-size: 0.75rem; flex-wrap: wrap;">
+                  <div style="display: flex; align-items: center; gap: 6px; background: #ecfdf5; border: 1px solid #a7f3d0; padding: 3px 8px; border-radius: 4px;">
                     <span class="label-micro" style="color: #047857; font-weight: 800;">EDITION</span>
                     <strong style="color: #0f172a; font-family: var(--font-mono);">${window.editionMarker || 'ACC 2026'}</strong>
                   </div>
-                  <div style="display: flex; align-items: center; gap: 6px; background: #f0f9ff; border: 1px solid #bae6fd; padding: 2px 8px; border-radius: 4px;">
+                  <div style="display: flex; align-items: center; gap: 6px; background: #f0f9ff; border: 1px solid #bae6fd; padding: 3px 8px; border-radius: 4px;">
                     <span class="label-micro" style="color: #0284c7; font-weight: 800;">SESSION</span>
-                    <strong style="color: #0f172a;">${window.sessionMarker || 'Session 2 — Day 1'}</strong>
+                    <strong style="color: #0f172a;">${window.sessionMarker || 'Session 2'}</strong>
                   </div>
-                  <div style="display: flex; align-items: center; gap: 6px; background: #fffbeb; border: 1px solid #fde68a; padding: 2px 8px; border-radius: 4px;">
-                    <span class="label-micro" style="color: #b45309; font-weight: 800;">DRAW MODE</span>
+                  <div style="display: flex; align-items: center; gap: 6px; background: #fdf4ff; border: 1px solid #f0abfc; padding: 3px 8px; border-radius: 4px;">
+                    <span class="label-micro" style="color: #a21caf; font-weight: 800;">BUCKET</span>
+                    <strong style="color: #701a75; font-family: var(--font-mono);">${cur.bucket === 'NO_BUCKET' ? 'PG' : cur.bucket}</strong>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 6px; background: #fffbeb; border: 1px solid #fde68a; padding: 3px 8px; border-radius: 4px;">
+                    <span class="label-micro" style="color: #b45309; font-weight: 800;">DRAW</span>
                     <strong style="color: #0f172a; font-family: var(--font-mono);">${drawMode}</strong>
-                    <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 0.65rem; border-radius: 4px; font-weight: 700; background: #fef3c7; color: #b45309; border: 1px solid #fcd34d;" onclick="toggleDrawMode()">[D] TOGGLE</button>
+                    <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 0.62rem; border-radius: 4px; font-weight: 700; background: #fef3c7; color: #b45309; border: 1px solid #fcd34d;" onclick="toggleDrawMode()">[D] TOGGLE</button>
                   </div>
-                  <div style="display: flex; align-items: center; gap: 6px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 2px 8px; border-radius: 4px;">
+                  <div style="display: flex; align-items: center; gap: 6px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 3px 8px; border-radius: 4px;">
                     <span class="status-indicator status-live" style="width: 6px; height: 6px;"></span>
-                    <span style="color: #047857; font-weight: 800; font-size: 0.7rem; font-family: var(--font-mono);">MESH HEALTHY</span>
+                    <span style="color: #047857; font-weight: 800; font-size: 0.7rem; font-family: var(--font-mono);">CONNECTED</span>
                   </div>
-                  <div style="display: flex; align-items: center; gap: 6px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 2px 8px; border-radius: 4px;">
-                    <span class="label-micro" style="color: #64748b;">CLOCK SYNC</span>
-                    <span class="font-mono" style="color: #0284c7; font-weight: 700;">Synced ±0ms</span>
+                  <div style="display: flex; align-items: center; gap: 6px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 3px 8px; border-radius: 4px;">
+                    <span class="label-micro" style="color: #64748b;">CLOCK</span>
+                    <span class="font-mono" style="color: #0284c7; font-weight: 700;">SYNCED ±0ms</span>
                   </div>
                 </div>
 
-                <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
                   <div style="display: flex; align-items: center; gap: 6px;">
-                    <span class="label-micro" style="color: #64748b;">AUCTION STATE</span>
-                    <span class="status-badge ${auctionPaused ? 'status-warning' : timerSeconds === 0 ? 'status-blocked' : 'status-inplay'}" style="font-size: 0.72rem; font-weight: 800; padding: 2px 8px; border-radius: 4px;">
-                      ${auctionPaused ? 'PAUSED' : timerSeconds === 0 ? 'TIMER EXPIRED' : 'LOT OPEN'}
+                    <span class="label-micro" style="color: #64748b;">STATE</span>
+                    <span class="status-badge ${auctionPaused ? 'status-warning' : timerSeconds === 0 ? 'status-blocked' : 'status-inplay'}" style="font-size: 0.72rem; font-weight: 800; padding: 3px 10px; border-radius: 4px;">
+                      ${auctionPaused ? 'PAUSED' : timerSeconds === 0 ? 'TIMER EXPIRED' : 'LIVE'}
                     </span>
                   </div>
                   <div style="font-size: 0.75rem; color: #334155; background: #f8fafc; border: 1px solid #e2e8f0; padding: 3px 8px; border-radius: 4px;">
@@ -11704,221 +12431,242 @@
                 </div>
               </div>
 
-              <!-- REGION 2: LOT HERO (Player Spotlight Card) -->
-              <div class="surface-card" style="padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; background: linear-gradient(135deg, #ffffff 0%, #f8fffe 100%); border: 1px solid #d1fae5; border-left: 5px solid #10b981; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); gap: 16px;">
-                <div style="display: flex; align-items: center; gap: 16px;">
-                  <div style="width: 96px; height: 96px; border-radius: 12px; overflow: hidden; background: linear-gradient(135deg, #f1f5f9, #e2e8f0); display: flex; align-items: center; justify-content: center; border: 2px solid #cbd5e1; box-shadow: 0 2px 8px rgba(0,0,0,0.08); flex-shrink: 0;">
-                    ${cur.photo ? `<img src="${cur.photo}" style="width: 100%; height: 100%; object-fit: cover;">` : `<span style="font-size: 2.4rem; font-weight: 800; color: #64748b;">${(cur.name || 'P').charAt(0)}</span>`}
-                  </div>
-                  <div>
-                    <div style="display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-bottom: 4px;">
-                      <span class="status-badge" style="background: #eef2ff; color: #4f46e5; border: 1px solid #c7d2fe; font-size: 0.72rem; font-weight: 800; font-family: var(--font-mono); padding: 2px 10px; border-radius: 5px;">LOT #${cur.id}</span>
-                      <span class="status-badge" style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; font-size: 0.72rem; font-weight: 800; padding: 2px 10px; border-radius: 5px;">
-                        ${cur.bucket === 'NO_BUCKET' ? 'PG (No Bucket)' : cur.bucket}
-                      </span>
-                      <span class="status-badge" style="background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; font-size: 0.68rem; font-weight: 700; padding: 2px 8px; border-radius: 5px;">${cur.derivedType || 'ALL-ROUNDER'}</span>
-                      ${cur.isCurrentYearAdmission ? '<span class="status-badge" style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; font-size: 0.62rem; font-weight: 700; padding: 1px 6px; border-radius: 4px;">CURRENT-YEAR</span>' : ''}
-                      ${cur.cricHeroesStatus === 'PROFILE CREATION PENDING' ? '<span class="status-badge" style="background: #fffbeb; color: #b45309; border: 1px solid #fde68a; font-size: 0.62rem; font-weight: 700; padding: 1px 6px; border-radius: 4px;">CRICHEROES PENDING</span>' : '<span class="status-badge" style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; font-size: 0.62rem; font-weight: 700; padding: 1px 6px; border-radius: 4px;">CRICHEROES VERIFIED</span>'}
-                    </div>
-                    <div style="font-family: var(--font-display); font-size: 1.5rem; font-weight: 800; color: #0f172a; letter-spacing: -0.02em; line-height: 1.2;">
-                      ${cur.name}
-                    </div>
-                    <div style="font-size: 0.78rem; color: #475569; margin-top: 3px; line-height: 1.4;">
-                      Roll: <strong class="font-mono" style="color: #2563eb; font-weight: 800;">${cur.roll}</strong> · <span style="color: #334155;">${cur.program || 'B.Tech'}</span> · <span style="color: #334155;">${cur.department || cur.branch || 'CSE'}</span> · Year <strong style="color: #0f172a;">${cur.year}</strong> · Bat: <span style="color: #334155;">${cur.battingArm || 'Right Hand'}</span> · Bowl: <span style="color: #334155;">${cur.bowlingArm || 'Right Arm'}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div style="text-align: right; display: flex; align-items: center; gap: 20px; flex-shrink: 0;">
-                  <div style="background: #ecfdf5; border: 1px solid #a7f3d0; padding: 8px 16px; border-radius: 8px; text-align: right;">
-                    <span class="label-micro" style="color: #047857; font-weight: 800;">BASE PRICE</span>
-                    <div class="font-mono" style="font-size: 1.5rem; font-weight: 900; color: #047857; font-variant-numeric: tabular-nums;">${cur.basePrice}C</div>
-                  </div>
-                  <div>
-                    <span class="label-micro" style="color: #64748b;">AUCTION STATUS</span>
-                    <div style="margin-top: 3px;"><span class="status-badge ${cur.status === 'SOLD' ? 'status-connected' : cur.status === 'UNSOLD' ? 'status-blocked' : 'status-inplay'}" style="font-size: 0.78rem; font-weight: 800; padding: 5px 12px; border-radius: 5px;">${cur.status}</span></div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- REGION 3: LIVE BID, IN-PLAY/PASSED/BLOCKED & SCARCITY -->
-              <div style="display: grid; grid-template-columns: 240px 1fr 260px; gap: 10px; min-height: 320px;">
+              <!-- ======================================================== -->
+              <!-- MAIN AUCTION AREA: 3-COLUMN COMMAND CENTER LAYOUT       -->
+              <!-- LEFT: FRANCHISE LIVE BOARD                               -->
+              <!-- CENTER: CURRENT LOT + BID + TIMER + ACTIONS              -->
+              <!-- RIGHT: AUCTION INTELLIGENCE                              -->
+              <!-- ======================================================== -->
+              <div style="display: grid; grid-template-columns: 260px 1fr 280px; gap: 10px; align-items: stretch; margin-bottom: 4px;">
                 
-                <!-- 3A. LEFT: FRANCHISE LIVE BOARD -->
-                <div class="surface-card" style="padding: 12px; display: flex; flex-direction: column; gap: 6px; font-size: 0.75rem; overflow-y: auto; max-height: 360px; background: #ffffff; border: 1px solid var(--border-soft); border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.04);">
-                  <div>
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid #f1f5f9;">
-                      <span style="color: #047857; font-weight: 800; font-size: 0.7rem; letter-spacing: 0.5px;">FRANCHISE LIVE BOARD</span>
-                      <span class="font-mono" style="font-size: 0.7rem; color: #047857; background: #ecfdf5; border: 1px solid #a7f3d0; padding: 1px 6px; border-radius: 4px; font-weight: 800;">${franchises.filter(f => !passedFranchiseIds.includes(f.id) && calculateMaxBid(f.id, cur.bucket) >= (currentBid + getBidIncrement(currentBid))).length}</span>
+                <!-- 1. LEFT: FRANCHISE LIVE BOARD (All 11 Franchises) -->
+                <div class="surface-card" style="padding: 12px; display: flex; flex-direction: column; gap: 6px; background: #ffffff; border: 1px solid var(--border-soft); border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.04); overflow-y: auto; max-height: 480px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 6px; border-bottom: 1px solid #f1f5f9;">
+                    <div>
+                      <span style="color: #047857; font-weight: 800; font-size: 0.72rem; letter-spacing: 0.5px; text-transform: uppercase;">FRANCHISE LIVE BOARD</span>
+                      <div style="font-size: 0.62rem; color: #64748b;">11 Franchises Eligibility</div>
                     </div>
-                    <div style="display: flex; flex-direction: column; gap: 4px;">
-                      ${franchises.map(f => {
-                        const nextB = currentBid + getBidIncrement(currentBid);
-                        const maxB = calculateMaxBid(f.id, cur.bucket);
-                        const isPassed = passedFranchiseIds.includes(f.id);
-                        const isLeader = f.id === leadingBidderId;
-                        let blockedReason = null;
-                        if ((f.squad || []).length >= 22) blockedReason = 'already at 22';
-                        else if (f.purse < nextB) blockedReason = 'no purse';
-                        else if (!checkSlotProtection(f.id, cur.bucket).eligible) blockedReason = 'mandatory slot locked';
-                        else if (nextB > maxB) blockedReason = 'maxBid exceeded';
-
-                        if (blockedReason || isPassed) return '';
-                        return `
-                          <div style="display: flex; justify-content: space-between; align-items: center; background: ${isLeader ? '#fffbeb' : '#f8fafc'}; padding: 5px 8px; border-radius: 6px; border: 1px solid ${isLeader ? '#fde68a' : '#e2e8f0'}; border-left: 3px solid ${isLeader ? '#f59e0b' : '#10b981'}; transition: all 0.15s ease;">
-                            <span style="font-weight: 700; color: ${isLeader ? '#b45309' : '#0f172a'};">${f.name}</span>
-                            <span class="font-mono" style="color: ${isLeader ? '#b45309' : '#475569'}; font-weight: 700; font-variant-numeric: tabular-nums;">${maxB}C ${isLeader ? '(LEADER)' : ''}</span>
-                          </div>
-                        `;
-                      }).join('')}
-                    </div>
+                    <span class="font-mono" style="font-size: 0.68rem; color: #047857; background: #ecfdf5; border: 1px solid #a7f3d0; padding: 2px 7px; border-radius: 4px; font-weight: 800;">
+                      ${franchises.filter(f => !passedFranchiseIds.includes(f.id) && calculateMaxBid(f.id, cur.bucket) >= (currentBid + getBidIncrement(currentBid))).length} / 11 ACTIVE
+                    </span>
                   </div>
 
-                  <div>
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; margin-top: 6px;">
-                      <span class="label-micro" style="color: #64748b; font-weight: 800;">PASSED (REVERSIBLE)</span>
-                      <span class="font-mono" style="font-size: 0.7rem; color: #64748b; background: #f1f5f9; padding: 1px 6px; border-radius: 4px;">${passedFranchiseIds.length}</span>
-                    </div>
-                    <div style="display: flex; flex-direction: column; gap: 3px;">
-                      ${passedFranchiseIds.length === 0 ? '<div style="color: #64748b; font-size: 0.7rem; padding: 2px 4px;">None passed yet</div>' : ''}
-                      ${passedFranchiseIds.map(fId => {
-                        const f = franchises.find(item => item.id === fId);
-                        if (!f) return '';
-                        return `
-                          <div style="display: flex; justify-content: space-between; align-items: center; background: #f8fafc; padding: 4px 6px; border-radius: 4px; border-left: 2px solid #94a3b8; border: 1px solid #e2e8f0;">
-                            <span style="color: #64748b; font-weight: 600;">${f.name}</span>
-                            <button class="btn btn-secondary" style="font-size: 0.62rem; padding: 2px 6px; border-radius: 4px; color: #0284c7; border-color: #bae6fd; font-weight: 700;" onclick="passedFranchiseIds = passedFranchiseIds.filter(id => id !== ${f.id}); renderCurrentView();">RE-ENTER</button>
-                          </div>
-                        `;
-                      }).join('')}
-                    </div>
-                  </div>
+                  <div style="display: flex; flex-direction: column; gap: 4px;">
+                    ${franchises.map(f => {
+                      const nextB = currentBid + getBidIncrement(currentBid);
+                      const maxB = calculateMaxBid(f.id, cur.bucket);
+                      const isPassed = passedFranchiseIds.includes(f.id);
+                      const isLeader = f.id === leadingBidderId;
+                      let blockedReason = null;
+                      if ((f.squad || []).length >= 22) blockedReason = 'Squad Full (22)';
+                      else if (f.purse < nextB) blockedReason = 'Purse Depleted';
+                      else if (!checkSlotProtection(f.id, cur.bucket).eligible) blockedReason = 'Slot Locked';
+                      else if (nextB > maxB) blockedReason = 'MaxBid Exceeded';
 
-                  <div>
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; margin-top: 6px;">
-                      <span class="label-micro" style="color: #dc2626; font-weight: 800;">BLOCKED FRANCHISES</span>
-                    </div>
-                    <div style="display: flex; flex-direction: column; gap: 3px;">
-                      ${franchises.map(f => {
-                        const nextB = currentBid + getBidIncrement(currentBid);
-                        const maxB = calculateMaxBid(f.id, cur.bucket);
-                        let blockedReason = null;
-                        if ((f.squad || []).length >= 22) blockedReason = 'already at 22';
-                        else if (f.purse < nextB) blockedReason = 'no purse';
-                        else if (!checkSlotProtection(f.id, cur.bucket).eligible) blockedReason = 'mandatory slot locked';
-                        else if (nextB > maxB) blockedReason = 'maxBid exceeded';
+                      let stateLabel = 'ACTIVE';
+                      let dotColor = '#10b981';
+                      let badgeBg = '#ecfdf5';
+                      let badgeColor = '#047857';
+                      let badgeBorder = '#a7f3d0';
 
-                        if (!blockedReason) return '';
-                        return `
-                          <div style="display: flex; justify-content: space-between; align-items: center; background: #fff1f2; padding: 4px 8px; border-radius: 4px; border-left: 3px solid #f43f5e; border: 1px solid #fecdd3; font-size: 0.7rem;">
-                            <span style="color: #991b1b; font-weight: 700;">${f.name}</span>
-                            <span style="color: #be123c; font-size: 0.65rem; font-weight: 700; text-transform: uppercase;">${blockedReason}</span>
+                      if (isLeader) {
+                        stateLabel = 'LEADING';
+                        dotColor = '#f59e0b';
+                        badgeBg = '#fffbeb';
+                        badgeColor = '#b45309';
+                        badgeBorder = '#fde68a';
+                      } else if (blockedReason) {
+                        stateLabel = 'BLOCKED';
+                        dotColor = '#ef4444';
+                        badgeBg = '#fff1f2';
+                        badgeColor = '#be123c';
+                        badgeBorder = '#fecdd3';
+                      } else if (isPassed) {
+                        stateLabel = 'PASS';
+                        dotColor = '#94a3b8';
+                        badgeBg = '#f1f5f9';
+                        badgeColor = '#64748b';
+                        badgeBorder = '#cbd5e1';
+                      } else if (timerSeconds === 0) {
+                        stateLabel = 'WAITING';
+                        dotColor = '#64748b';
+                        badgeBg = '#f8fafc';
+                        badgeColor = '#475569';
+                        badgeBorder = '#e2e8f0';
+                      }
+
+                      return `
+                        <div style="display: flex; justify-content: space-between; align-items: center; background: ${isLeader ? '#fffbeb' : blockedReason ? '#fff5f5' : '#f8fafc'}; padding: 5px 8px; border-radius: 6px; border: 1px solid ${isLeader ? '#fde68a' : blockedReason ? '#fed7d7' : '#e2e8f0'}; border-left: 3px solid ${isLeader ? '#f59e0b' : blockedReason ? '#ef4444' : isPassed ? '#94a3b8' : '#10b981'}; transition: all 0.15s ease;">
+                          <div style="display: flex; align-items: center; gap: 6px; overflow: hidden; min-width: 0;">
+                            <span style="width: 7px; height: 7px; border-radius: 50%; background: ${dotColor}; flex-shrink: 0;"></span>
+                            <span style="font-weight: 700; color: ${isLeader ? '#92400e' : '#0f172a'}; font-size: 0.72rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${f.name}</span>
                           </div>
-                        `;
-                      }).join('')}
-                    </div>
+                          <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
+                            <span class="font-mono" style="font-size: 0.68rem; font-weight: 700; color: ${blockedReason ? '#dc2626' : '#475569'};">${maxB}C</span>
+                            ${isPassed ? `
+                              <button class="btn btn-secondary" style="font-size: 0.6rem; padding: 1px 5px; border-radius: 3px; color: #0284c7; border-color: #bae6fd; font-weight: 700;" onclick="passedFranchiseIds = passedFranchiseIds.filter(id => id !== ${f.id}); renderCurrentView();" title="Re-enter lot">RE-ENTER</button>
+                            ` : `
+                              <span style="font-size: 0.6rem; font-weight: 800; padding: 1px 5px; border-radius: 3px; background: ${badgeBg}; color: ${badgeColor}; border: 1px solid ${badgeBorder};">${stateLabel}</span>
+                            `}
+                          </div>
+                        </div>
+                      `;
+                    }).join('')}
                   </div>
                 </div>
 
-                <!-- 3B. CENTER: DOMINANT TIMER, CURRENT BID, CONTEXTUAL ACTIONS -->
-                <div class="surface-elevated" style="padding: 20px 16px; display: flex; flex-direction: column; align-items: center; justify-content: space-between; text-align: center; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);">
+                <!-- 2. CENTER: CURRENT LOT + BID + TIMER + ACTIONS -->
+                <div class="surface-elevated" style="padding: 14px 18px; display: flex; flex-direction: column; justify-content: space-between; background: #ffffff; border: 1px solid #e2e8f0; border-top: 4px solid #10b981; border-radius: 12px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05); gap: 10px;">
+                  
+                  <!-- CURRENT LOT HERO (Player Focus) -->
+                  <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; border-bottom: 1px solid #f1f5f9; padding-bottom: 10px;">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                      <!-- 92px Photo Spotlight -->
+                      <div style="width: 84px; height: 84px; border-radius: 10px; overflow: hidden; background: linear-gradient(135deg, #f1f5f9, #e2e8f0); display: flex; align-items: center; justify-content: center; border: 2px solid #cbd5e1; box-shadow: 0 2px 6px rgba(0,0,0,0.06); flex-shrink: 0;">
+                        ${cur.photo ? `<img src="${cur.photo}" style="width: 100%; height: 100%; object-fit: cover;">` : `<span style="font-size: 2.2rem; font-weight: 800; color: #64748b;">${(cur.name || 'P').charAt(0)}</span>`}
+                      </div>
+                      <div>
+                        <div style="display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-bottom: 3px;">
+                          <span class="status-badge" style="background: #eef2ff; color: #4f46e5; border: 1px solid #c7d2fe; font-size: 0.68rem; font-weight: 800; font-family: var(--font-mono); padding: 1px 8px; border-radius: 4px;">LOT #${cur.id}</span>
+                          <span class="status-badge" style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; font-size: 0.68rem; font-weight: 800; padding: 1px 8px; border-radius: 4px;">
+                            ${cur.bucket === 'NO_BUCKET' ? 'PG' : cur.bucket}
+                          </span>
+                          <span class="status-badge" style="background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; font-size: 0.65rem; font-weight: 700; padding: 1px 6px; border-radius: 4px;">${cur.derivedType || 'ALL-ROUNDER'}</span>
+                          ${cur.cricHeroesStatus === 'PROFILE CREATION PENDING' ? '<span class="status-badge" style="background: #fffbeb; color: #b45309; border: 1px solid #fde68a; font-size: 0.6rem; font-weight: 700; padding: 1px 5px; border-radius: 4px;">CRICHEROES PENDING</span>' : '<span class="status-badge" style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; font-size: 0.6rem; font-weight: 700; padding: 1px 5px; border-radius: 4px;">CRICHEROES VERIFIED</span>'}
+                        </div>
+                        <div style="font-family: var(--font-display); font-size: 1.45rem; font-weight: 800; color: #0f172a; letter-spacing: -0.02em; line-height: 1.2;">
+                          ${cur.name}
+                        </div>
+                        <div style="font-size: 0.72rem; color: #475569; margin-top: 2px;">
+                          <strong class="font-mono" style="color: #2563eb; font-weight: 800;">${cur.roll}</strong> • ${cur.program || 'B.Tech'} • ${cur.department || cur.branch || 'CSE'} • Year <strong>${cur.year}</strong>
+                        </div>
+                        <div style="font-size: 0.68rem; color: #64748b; margin-top: 1px;">
+                          Bat: <span style="color: #334155; font-weight: 600;">${cur.battingArm || 'Right Hand'}</span> • Bowl: <span style="color: #334155; font-weight: 600;">${cur.bowlingArm || 'Right Arm'}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div style="text-align: right; flex-shrink: 0; background: #ecfdf5; border: 1px solid #a7f3d0; padding: 6px 12px; border-radius: 8px;">
+                      <span class="label-micro" style="color: #047857; font-weight: 800; font-size: 0.62rem;">BASE PRICE</span>
+                      <div class="font-mono" style="font-size: 1.25rem; font-weight: 900; color: #047857; font-variant-numeric: tabular-nums;">${cur.basePrice}C</div>
+                    </div>
+                  </div>
 
-                  <!-- TIMER + BID HERO -->
-                  <div style="display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%;">
-
-                    <!-- Dominant Circular Countdown Timer Ring (130px) -->
-                    <div style="position: relative; width: 130px; height: 130px; display: flex; align-items: center; justify-content: center; margin: 2px 0;">
-                      <svg width="130" height="130" viewBox="0 0 130 130" style="transform: rotate(-90deg);">
-                        <circle cx="65" cy="65" r="56" stroke="#f1f5f9" stroke-width="8" fill="none" />
-                        <circle cx="65" cy="65" r="56" stroke="${timerSeconds <= 5 ? '#ef4444' : timerSeconds <= 10 ? '#f59e0b' : '#10b981'}" stroke-width="8" fill="none" stroke-dasharray="352" stroke-dashoffset="${352 - (352 * timerSeconds / 30)}" stroke-linecap="round" style="transition: stroke-dashoffset 0.5s ease;" />
+                  <!-- TIMER + CURRENT BID + LEADING BIDDER -->
+                  <div style="display: flex; align-items: center; justify-content: space-around; gap: 16px; margin: 4px 0;">
+                    <!-- Dominant Circular Countdown Timer (Large & Visually Dominant) -->
+                    <div style="position: relative; width: 120px; height: 120px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                      <svg width="120" height="120" viewBox="0 0 120 120" style="transform: rotate(-90deg);">
+                        <circle cx="60" cy="60" r="52" stroke="#f1f5f9" stroke-width="8" fill="none" />
+                        <circle cx="60" cy="60" r="52" stroke="${timerSeconds <= 5 ? '#ef4444' : timerSeconds <= 10 ? '#f59e0b' : '#10b981'}" stroke-width="8" fill="none" stroke-dasharray="327" stroke-dashoffset="${327 - (327 * Math.max(0, timerSeconds) / 30)}" stroke-linecap="round" style="transition: stroke-dashoffset 0.5s ease;" />
                       </svg>
-                      <div style="position: absolute; display: flex; flex-direction: column; align-items: center; gap: 0;">
-                        <span class="font-mono admin-timer-text" style="font-size: 2.4rem; font-weight: 900; color: ${timerSeconds <= 5 ? '#dc2626' : timerSeconds <= 10 ? '#b45309' : '#047857'}; font-variant-numeric: tabular-nums; line-height: 1; letter-spacing: -1px;">
-                          ${timerSeconds}s
+                      <div style="position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+                        <span class="font-mono admin-timer-text" style="font-size: 1.85rem; font-weight: 900; color: ${timerSeconds <= 5 ? '#dc2626' : timerSeconds <= 10 ? '#b45309' : '#047857'}; font-variant-numeric: tabular-nums; line-height: 1; letter-spacing: -0.5px;">
+                          00:${String(Math.max(0, timerSeconds)).padStart(2, '0')}
                         </span>
-                        <span style="font-size: 0.6rem; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; color: ${auctionPaused ? '#b45309' : timerSeconds === 0 ? '#dc2626' : '#047857'}; margin-top: 2px;">
-                          ${auctionPaused ? 'PAUSED' : timerSeconds === 0 ? 'EXPIRED' : 'LIVE BID'}
+                        <span style="font-size: 0.6rem; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; color: ${auctionPaused ? '#b45309' : timerSeconds === 0 ? '#dc2626' : '#64748b'}; margin-top: 2px;">
+                          ${auctionPaused ? 'PAUSED' : timerSeconds === 0 ? 'EXPIRED' : 'SECONDS'}
                         </span>
                       </div>
                     </div>
 
-                    <!-- Current Bid + Leading Bidder -->
-                    <div style="width: 100%; margin-top: 2px;">
-                      <span class="label-micro" style="color: #64748b; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; font-size: 0.65rem;">CURRENT BID</span>
-                      <div class="price-display font-mono" style="font-size: 3rem; font-weight: 900; color: #0f172a; line-height: 1; margin: 4px 0; font-variant-numeric: tabular-nums; letter-spacing: -1px;">
+                    <!-- Current Bid + Leading Bidder Display -->
+                    <div style="text-align: center; flex: 1;">
+                      <span class="label-micro" style="color: #64748b; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; font-size: 0.68rem;">CURRENT BID</span>
+                      <div class="price-display font-mono" style="font-size: 2.75rem; font-weight: 900; color: #0f172a; line-height: 1.1; margin: 2px 0; font-variant-numeric: tabular-nums; letter-spacing: -1px;">
                         ${currentBid} <span style="font-size: 1rem; color: #94a3b8; font-weight: 800;">CREDITS</span>
                       </div>
-                      <div style="display: inline-flex; align-items: center; gap: 6px; background: ${leader ? '#f0fdf4' : '#f8fafc'}; border: 1px solid ${leader ? '#bbf7d0' : '#e2e8f0'}; padding: 4px 14px; border-radius: 20px; font-size: 0.8125rem;">
-                        <span style="color: #64748b; font-size: 0.75rem;">Leading:</span>
-                        <strong style="color: ${leader ? '#047857' : '#94a3b8'}; font-size: 1rem; font-weight: 800;">${leader ? leader.name : 'NO BID'}</strong>
+                      <div style="display: inline-flex; align-items: center; gap: 6px; background: ${leader ? '#fffbeb' : '#f8fafc'}; border: 1px solid ${leader ? '#fde68a' : '#e2e8f0'}; padding: 4px 14px; border-radius: 20px; font-size: 0.8rem; margin-top: 2px;">
+                        <span style="color: #64748b; font-size: 0.72rem;">Leading Bidder:</span>
+                        <strong style="color: ${leader ? '#b45309' : '#94a3b8'}; font-size: 0.95rem; font-weight: 800;">${leader ? leader.name : 'NO BID'}</strong>
                         ${window.currentBidIsBehalf ? ' <span class="status-badge" style="background: #fffbeb; color: #b45309; border: 1px solid #fde68a; font-size: 0.55rem; font-weight: 800; padding: 1px 5px; border-radius: 4px;">BEHALF</span>' : ''}
                       </div>
-                      <div style="font-size: 0.62rem; color: #94a3b8; margin-top: 4px;">(Resets to 20s on any valid bid)</div>
+                      <div style="font-size: 0.62rem; color: #94a3b8; margin-top: 3px;">(Timer resets to 20s on every valid bid)</div>
                     </div>
                   </div>
 
-                  <!-- CONTEXTUAL ACTION HIERARCHY -->
-                  <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 12px; width: 100%;">
+                  <!-- ACTION HIERARCHY -->
+                  <div style="display: flex; flex-direction: column; gap: 6px; width: 100%;">
                     <!-- PRIMARY: Hammer (dominant full-width) -->
-                    <button class="btn btn-primary" style="width: 100%; min-height: 48px; padding: 12px 16px; font-weight: 900; font-size: 1.05rem; border-radius: 8px; cursor: pointer; background: linear-gradient(135deg, #059669, #047857); color: #ffffff; border: none; box-shadow: 0 3px 12px rgba(5, 150, 105, 0.3); transition: all 0.15s ease; letter-spacing: 0.5px;" onclick="openHammerConfirmModal()">
+                    <button class="btn btn-primary" style="width: 100%; min-height: 46px; padding: 10px 16px; font-weight: 900; font-size: 1.05rem; border-radius: 8px; cursor: pointer; background: linear-gradient(135deg, #059669, #047857); color: #ffffff; border: none; box-shadow: 0 3px 12px rgba(5, 150, 105, 0.25); transition: all 0.15s ease; letter-spacing: 0.5px;" onclick="openHammerConfirmModal()">
                       [H] HAMMER — CONFIRM SALE
                     </button>
-                    <!-- SECONDARY: Skip + Pause/Resume (equal split) -->
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
-                      <button class="btn btn-secondary" style="min-height: 40px; padding: 8px 12px; font-size: 0.8rem; font-weight: 700; border-radius: 6px; cursor: pointer; background: #f8fafc; color: #1e293b; border: 1px solid #cbd5e1; transition: all 0.15s ease;" onclick="skipPlayer()">
-                        [S] SKIP
-                      </button>
-                      <button class="btn btn-secondary" style="min-height: 40px; padding: 8px 12px; font-size: 0.8rem; font-weight: 700; border-radius: 6px; cursor: pointer; background: ${auctionPaused ? '#f0fdf4' : '#fffbeb'}; color: ${auctionPaused ? '#047857' : '#b45309'}; border: 1px solid ${auctionPaused ? '#bbf7d0' : '#fde68a'}; transition: all 0.15s ease;" onclick="toggleAuctionPause()">
+
+                    <!-- SECONDARY: Pause + Skip + Behalf Bid (3-column grid) -->
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px;">
+                      <button class="btn btn-secondary" style="min-height: 38px; padding: 6px 10px; font-size: 0.75rem; font-weight: 700; border-radius: 6px; cursor: pointer; background: ${auctionPaused ? '#f0fdf4' : '#fffbeb'}; color: ${auctionPaused ? '#047857' : '#b45309'}; border: 1px solid ${auctionPaused ? '#bbf7d0' : '#fde68a'}; transition: all 0.15s ease;" onclick="toggleAuctionPause()">
                         [P] ${auctionPaused ? 'RESUME' : 'PAUSE'}
                       </button>
+                      <button class="btn btn-secondary" style="min-height: 38px; padding: 6px 10px; font-size: 0.75rem; font-weight: 700; border-radius: 6px; cursor: pointer; background: #f8fafc; color: #1e293b; border: 1px solid #cbd5e1; transition: all 0.15s ease;" onclick="skipPlayer()">
+                        [S] SKIP
+                      </button>
+                      <button class="btn btn-secondary" style="min-height: 38px; padding: 6px 10px; font-size: 0.75rem; font-weight: 700; border-radius: 6px; cursor: pointer; background: #f0fdf4; color: #047857; border: 1px solid #bbf7d0; transition: all 0.15s ease;" onclick="openBehalfBidModal()">
+                        [B] BEHALF BID
+                      </button>
                     </div>
-                    <!-- TERTIARY: Undo, Behalf, Assign, Relax -->
-                    <div style="display: grid; grid-template-columns: ${isSuperAdmin ? 'repeat(4, 1fr)' : 'repeat(3, 1fr)'}; gap: 4px;">
-                      <button class="btn btn-secondary" style="min-height: 32px; font-size: 0.68rem; font-weight: 700; padding: 4px 2px; border-radius: 5px; cursor: pointer; background: #fff1f2; color: #be123c; border: 1px solid #fecdd3; transition: all 0.15s ease;" onclick="openUndoModal()" title="Revert Any Sold Lot">
-                        [U] UNDO
-                      </button>
-                      <button class="btn btn-secondary" style="min-height: 32px; font-size: 0.68rem; font-weight: 700; padding: 4px 2px; border-radius: 5px; cursor: pointer; background: #fffbeb; color: #b45309; border: 1px solid #fde68a; transition: all 0.15s ease;" onclick="openBehalfBidModal()" title="Bid for Failed Device">
-                        [B] BEHALF
-                      </button>
-                      <button class="btn btn-secondary" style="min-height: 32px; font-size: 0.68rem; font-weight: 700; padding: 4px 2px; border-radius: 5px; cursor: pointer; background: #f0f9ff; color: #0284c7; border: 1px solid #bae6fd; transition: all 0.15s ease;" onclick="openDirectAssignModal()" title="Direct Assign Player">
-                        [A] ASSIGN
+
+                    <!-- TERTIARY / EMERGENCY: Assign + Relax + Undo -->
+                    <div style="display: grid; grid-template-columns: ${isSuperAdmin ? '1fr 1fr 1fr' : '1fr 1fr'}; gap: 6px;">
+                      <button class="btn btn-secondary" style="min-height: 30px; font-size: 0.68rem; font-weight: 700; padding: 4px 6px; border-radius: 5px; cursor: pointer; background: #f0f9ff; color: #0284c7; border: 1px solid #bae6fd; transition: all 0.15s ease;" onclick="openDirectAssignModal()" title="Direct Assign Player">
+                        [A] DIRECT ASSIGN
                       </button>
                       ${isSuperAdmin ? `
-                      <button class="btn btn-secondary" style="min-height: 32px; font-size: 0.68rem; font-weight: 700; padding: 4px 2px; border-radius: 5px; cursor: pointer; background: #faf5ff; color: #7e22ce; border: 1px solid #e9d5ff; transition: all 0.15s ease;" onclick="openRelaxationModal()" title="Relax Minimum Quota">
-                        [R] RELAX
+                      <button class="btn btn-secondary" style="min-height: 30px; font-size: 0.68rem; font-weight: 700; padding: 4px 6px; border-radius: 5px; cursor: pointer; background: #faf5ff; color: #7e22ce; border: 1px solid #e9d5ff; transition: all 0.15s ease;" onclick="openRelaxationModal()" title="Relax Minimum Quota">
+                        [R] RELAX MINIMUMS
                       </button>
                       ` : ''}
+                      <button class="btn btn-secondary" style="min-height: 30px; font-size: 0.68rem; font-weight: 700; padding: 4px 6px; border-radius: 5px; cursor: pointer; background: #fff1f2; color: #be123c; border: 1px solid #fecdd3; transition: all 0.15s ease;" onclick="openUndoModal()" title="Revert Any Sold Lot">
+                        [U] UNDO SALE
+                      </button>
                     </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 0.65rem; color: #94a3b8; padding-top: 2px;">
-                      <span>Space: Draw · Enter: Confirm · Esc: Cancel</span>
-                      <a href="javascript:void(0)" onclick="openShortcutsHelpModal()" style="color: #047857; text-decoration: underline; font-weight: 700;">[?] Keys</a>
+
+                    <div style="display: flex; justify-content: space-between; font-size: 0.62rem; color: #94a3b8; padding-top: 2px;">
+                      <span>Shortcuts: Space: Draw · Enter: Confirm · Esc: Cancel</span>
+                      <a href="javascript:void(0)" onclick="openShortcutsHelpModal()" style="color: #047857; text-decoration: underline; font-weight: 700;">[?] Shortcuts</a>
                     </div>
                   </div>
                 </div>
 
-                <!-- 3C. RIGHT: BID HISTORY & AUCTION INTELLIGENCE -->
-                <div class="surface-card" style="padding: 12px; display: flex; flex-direction: column; gap: 8px; font-size: 0.75rem; overflow-y: auto; max-height: 360px; background: #ffffff; border: 1px solid var(--border-soft); border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.04);">
-                  <div>
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid #f1f5f9;">
-                      <span style="color: #0284c7; font-weight: 800; font-size: 0.7rem; letter-spacing: 0.5px;">BID HISTORY</span>
-                      <span class="font-mono" style="font-size: 0.65rem; color: #64748b; background: #f1f5f9; padding: 1px 6px; border-radius: 4px; font-weight: 700;">${bidOrder.length} bids</span>
+                <!-- 3. RIGHT: AUCTION INTELLIGENCE -->
+                <div class="surface-card" style="padding: 12px; display: flex; flex-direction: column; gap: 8px; font-size: 0.75rem; background: #ffffff; border: 1px solid var(--border-soft); border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.04); overflow-y: auto; max-height: 480px;">
+                  
+                  <!-- 1. CURRENT BUCKET -->
+                  <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 8px 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                      <span class="label-micro" style="color: #047857; font-weight: 800; font-size: 0.68rem;">1. CURRENT BUCKET</span>
+                      <span class="font-mono" style="font-size: 0.65rem; color: #047857; font-weight: 700;">Floor Min: 2</span>
                     </div>
-                    <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 4px;">
-                      ${bidOrder.length === 0 ? '<div style="color: #94a3b8; font-size: 0.72rem; padding: 8px 6px; text-align: center; background: #f8fafc; border-radius: 6px;">No bids placed yet</div>' : ''}
-                      ${bidOrder.slice(-6).reverse().map((b, idx) => `
-                        <div style="display: flex; justify-content: space-between; align-items: center; background: ${idx === 0 ? '#fffbeb' : '#f8fafc'}; padding: 4px 8px; border-radius: 4px; border: 1px solid ${idx === 0 ? '#fde68a' : '#e2e8f0'}; border-left: 3px solid ${idx === 0 ? '#f59e0b' : '#cbd5e1'};">
-                          <span style="font-weight: 700; color: ${idx === 0 ? '#b45309' : '#0f172a'};">${b.franchiseName}</span>
-                          <span class="font-mono" style="color: ${idx === 0 ? '#b45309' : '#047857'}; font-weight: 800; font-variant-numeric: tabular-nums;">${b.amount}C</span>
-                        </div>
-                      `).join('')}
+                    <div style="display: flex; align-items: baseline; gap: 8px; margin-top: 3px;">
+                      <strong class="font-display" style="font-size: 1.5rem; color: #065f46; font-weight: 900;">${cur.bucket === 'NO_BUCKET' ? 'PG' : cur.bucket}</strong>
+                      <span style="font-size: 0.72rem; color: #047857; font-weight: 600;">Base: ${cur.basePrice} Credits</span>
                     </div>
                   </div>
 
-                  <div style="border-top: 1px solid #e2e8f0; padding-top: 10px; margin-top: 4px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                      <span style="color: #047857; font-weight: 800; font-size: 0.7rem; letter-spacing: 0.5px;">BUCKET SCARCITY</span>
+                  <!-- 2. PROGRESS LADDER -->
+                  <div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                      <span style="color: #0f172a; font-weight: 800; font-size: 0.68rem; letter-spacing: 0.5px;">2. PROGRESS</span>
                     </div>
-                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; background: #f8fafc; border: 1px solid #e2e8f0; padding: 6px 8px; border-radius: 6px; font-size: 0.68rem;">
+                      ${['B3', 'B4', 'B2', 'D5', 'B1', 'M6'].map((b, idx, arr) => {
+                        const isCur = cur.bucket === b;
+                        return `
+                          <span style="display: inline-flex; align-items: center; gap: 4px;">
+                            <span style="padding: 2px 6px; border-radius: 4px; font-weight: 800; font-family: var(--font-mono); font-size: 0.65rem; background: ${isCur ? '#059669' : '#ffffff'}; color: ${isCur ? '#ffffff' : '#64748b'}; border: 1px solid ${isCur ? '#047857' : '#cbd5e1'}; box-shadow: ${isCur ? '0 1px 4px rgba(5,150,105,0.3)' : 'none'};">
+                              ${b}
+                            </span>
+                            ${idx < arr.length - 1 ? '<span style="color: #94a3b8; font-size: 0.65rem;">→</span>' : ''}
+                          </span>
+                        `;
+                      }).join('')}
+                    </div>
+                  </div>
+
+                  <!-- 3. BUCKET SCARCITY -->
+                  <div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                      <span style="color: #0f172a; font-weight: 800; font-size: 0.68rem; letter-spacing: 0.5px;">3. BUCKET SCARCITY</span>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 3px;">
                       ${['B1', 'B2', 'B3', 'B4', 'D5'].map(b => {
                         const unsold = players.filter(p => p.bucket === b && p.status === 'AVAILABLE').length;
                         const bMin = (window.bucketMinimums && window.bucketMinimums[b] !== undefined) ? window.bucketMinimums[b] : 2;
@@ -11928,19 +12676,55 @@
                           playersNeededTotal += Math.max(0, bMin - boughtInB);
                         });
                         const isExhausted = unsold === 0 && playersNeededTotal > 0;
-                        const isWarning = !isExhausted && playersNeededTotal > 0 && unsold <= playersNeededTotal;
+                        const isCritical = !isExhausted && playersNeededTotal > 0 && unsold <= 3;
+                        const isWarning = !isExhausted && !isCritical && playersNeededTotal > 0 && unsold <= playersNeededTotal;
+
+                        let badgeText = 'SAFE';
+                        let badgeStyle = 'background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0;';
+                        let rowBorder = 'border-left: 3px solid #10b981;';
+                        if (isExhausted) {
+                          badgeText = 'CRITICAL';
+                          badgeStyle = 'background: #fff1f2; color: #be123c; border: 1px solid #fecdd3;';
+                          rowBorder = 'border-left: 3px solid #ef4444;';
+                        } else if (isCritical) {
+                          badgeText = 'CRITICAL';
+                          badgeStyle = 'background: #fff1f2; color: #be123c; border: 1px solid #fecdd3;';
+                          rowBorder = 'border-left: 3px solid #ef4444;';
+                        } else if (isWarning) {
+                          badgeText = 'WARNING';
+                          badgeStyle = 'background: #fffbeb; color: #b45309; border: 1px solid #fde68a;';
+                          rowBorder = 'border-left: 3px solid #f59e0b;';
+                        }
 
                         return `
-                          <div style="display: flex; justify-content: space-between; align-items: center; background: ${isExhausted ? '#fff1f2' : isWarning ? '#fffbeb' : '#f0fdf4'}; padding: 4px 8px; border-radius: 4px; border: 1px solid ${isExhausted ? '#fecdd3' : isWarning ? '#fde68a' : '#bbf7d0'}; border-left: 3px solid ${isExhausted ? '#ef4444' : isWarning ? '#f59e0b' : '#10b981'}; font-size: 0.7rem;">
-                            <span><strong style="color: #0f172a;">${b}</strong> (${unsold} unsold, ${playersNeededTotal} needed)</span>
-                            <span class="badge ${isExhausted ? 'badge-fail' : isWarning ? 'badge-partial' : 'badge-pass'}" style="font-size: 0.62rem; font-weight: 800; padding: 2px 6px; border-radius: 4px;">
-                              ${isExhausted ? 'EXHAUSTED' : isWarning ? 'WARNING' : 'SAFE'}
+                          <div style="display: flex; justify-content: space-between; align-items: center; background: #f8fafc; padding: 3px 6px; border-radius: 4px; border: 1px solid #e2e8f0; ${rowBorder}; font-size: 0.68rem;">
+                            <span><strong style="color: #0f172a; font-family: var(--font-mono);">${b}</strong>: ${unsold} remaining</span>
+                            <span style="font-size: 0.58rem; font-weight: 800; padding: 1px 5px; border-radius: 3px; ${badgeStyle};">
+                              ${badgeText}
                             </span>
                           </div>
                         `;
                       }).join('')}
                     </div>
                   </div>
+
+                  <!-- 4. BID HISTORY -->
+                  <div style="border-top: 1px solid #f1f5f9; padding-top: 6px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                      <span style="color: #0f172a; font-weight: 800; font-size: 0.68rem; letter-spacing: 0.5px;">4. BID HISTORY</span>
+                      <span class="font-mono" style="font-size: 0.62rem; color: #64748b; background: #f1f5f9; padding: 1px 5px; border-radius: 3px; font-weight: 700;">${bidOrder.length} bids</span>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 3px;">
+                      ${bidOrder.length === 0 ? '<div style="color: #94a3b8; font-size: 0.68rem; padding: 6px; text-align: center; background: #f8fafc; border-radius: 4px;">No bids placed yet</div>' : ''}
+                      ${bidOrder.slice(-5).reverse().map((b, idx) => `
+                        <div style="display: flex; justify-content: space-between; align-items: center; background: ${idx === 0 ? '#fffbeb' : '#f8fafc'}; padding: 3px 6px; border-radius: 4px; border: 1px solid ${idx === 0 ? '#fde68a' : '#e2e8f0'}; border-left: 3px solid ${idx === 0 ? '#f59e0b' : '#cbd5e1'}; font-size: 0.68rem;">
+                          <span style="font-weight: 700; color: ${idx === 0 ? '#b45309' : '#0f172a'};">₹${b.amount} ${b.franchiseName}</span>
+                          <span class="font-mono" style="color: ${idx === 0 ? '#b45309' : '#047857'}; font-weight: 800; font-size: 0.62rem;">${idx === 0 ? 'LEADER' : `#${bidOrder.length - idx}`}</span>
+                        </div>
+                      `).join('')}
+                    </div>
+                  </div>
+
                 </div>
 
               </div>
@@ -12510,7 +13294,7 @@
                     ${filteredPlayers.map(p => {
                       const appStatus = p.approvalStatus || (p.status === 'DELETED' ? 'DELETED' : p.verificationStatus === 'VERIFIED' ? 'APPROVED' : p.verificationStatus === 'BLOCKED' ? 'BLOCKED' : 'PENDING');
                       const accStatus = p.accountStatus || 'NOT CREATED';
-                      const isDel = p.status === 'DELETED' || appStatus === 'DELETED';
+                      const isDel = p.status === 'DELETED' || p.status === 'ARCHIVED' || appStatus === 'DELETED' || appStatus === 'ARCHIVED';
                       const isPending = !isDel && (appStatus === 'PENDING' || appStatus === 'PENDING_APPROVAL' || p.verificationStatus === 'PENDING_VERIFICATION' || p.status === 'PENDING_VERIFICATION');
                       const isApproved = !isDel && (appStatus === 'APPROVED' || p.verificationStatus === 'VERIFIED' || p.status === 'AVAILABLE' || p.status === 'SOLD' || p.status === 'UNSOLD');
                       const isBlocked = !isDel && (appStatus === 'BLOCKED' || p.verificationStatus === 'BLOCKED' || p.status === 'BLOCKED');
@@ -12572,7 +13356,7 @@
                 ${filteredPlayers.map(p => {
                   const appStatus = p.approvalStatus || (p.status === 'DELETED' ? 'DELETED' : p.verificationStatus === 'VERIFIED' ? 'APPROVED' : p.verificationStatus === 'BLOCKED' ? 'BLOCKED' : 'PENDING');
                   const accStatus = p.accountStatus || 'NOT CREATED';
-                  const isDel = p.status === 'DELETED' || appStatus === 'DELETED';
+                  const isDel = p.status === 'DELETED' || p.status === 'ARCHIVED' || appStatus === 'DELETED' || appStatus === 'ARCHIVED';
                   const isPending = !isDel && (appStatus === 'PENDING' || appStatus === 'PENDING_APPROVAL' || p.verificationStatus === 'PENDING_VERIFICATION' || p.status === 'PENDING_VERIFICATION');
                   const isApproved = !isDel && (appStatus === 'APPROVED' || p.verificationStatus === 'VERIFIED' || p.status === 'AVAILABLE' || p.status === 'SOLD' || p.status === 'UNSOLD');
                   const isBlocked = !isDel && (appStatus === 'BLOCKED' || p.verificationStatus === 'BLOCKED' || p.status === 'BLOCKED');
@@ -13086,7 +13870,7 @@
             </div>
           ` : adminNavTab === 'SETTINGS' ? `
             <!-- TAB: TOURNAMENT SETTINGS (SUPER ADMIN ONLY) -->
-            <div style="display: flex; flex-direction: column; gap: var(--space-4); max-width: 680px;">
+            <div style="display: flex; flex-direction: column; gap: var(--space-4); max-width: 880px;">
               <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
                 <div>
                   <h3 style="font-family: var(--font-display); font-size: 1.3rem; font-weight: 800; color: var(--text-bright); margin: 0;">
@@ -13103,29 +13887,29 @@
                 ` : ''}
               </div>
 
-              <div class="surface-card" style="padding: var(--space-5); display: flex; flex-direction: column; gap: 14px;">
+              <div class="surface-card" style="padding: var(--space-5); display: flex; flex-direction: column; gap: 14px; background: #ffffff; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.04);">
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                  <div class="surface-subtle" style="padding: 12px;">
+                  <div class="surface-subtle" style="padding: 12px; background: #f8fafc; border-radius: 6px; border: 1px solid #e2e8f0;">
                     <div class="label-micro" style="font-size: 0.65rem;">ACADEMIC CALENDAR</div>
                     <div style="font-weight: 800; color: var(--text-bright); margin-top: 2px;">2026–27 (Active)</div>
                   </div>
-                  <div class="surface-subtle" style="padding: 12px;">
+                  <div class="surface-subtle" style="padding: 12px; background: #f8fafc; border-radius: 6px; border: 1px solid #e2e8f0;">
                     <div class="label-micro" style="font-size: 0.65rem;">STARTING PURSE PER TEAM</div>
                     <div style="font-weight: 800; color: var(--color-green); margin-top: 2px;">1,000 Credits</div>
                   </div>
-                  <div class="surface-subtle" style="padding: 12px;">
+                  <div class="surface-subtle" style="padding: 12px; background: #f8fafc; border-radius: 6px; border: 1px solid #e2e8f0;">
                     <div class="label-micro" style="font-size: 0.65rem;">INITIAL LOT TIMER (FIRST_BID)</div>
                     <div style="font-weight: 800; color: var(--text-bright); margin-top: 2px;">30 Seconds</div>
                   </div>
-                  <div class="surface-subtle" style="padding: 12px;">
+                  <div class="surface-subtle" style="padding: 12px; background: #f8fafc; border-radius: 6px; border: 1px solid #e2e8f0;">
                     <div class="label-micro" style="font-size: 0.65rem;">BID COUNTDOWN TIMER</div>
                     <div style="font-weight: 800; color: var(--text-bright); margin-top: 2px;">20 Seconds</div>
                   </div>
-                  <div class="surface-subtle" style="padding: 12px;">
+                  <div class="surface-subtle" style="padding: 12px; background: #f8fafc; border-radius: 6px; border: 1px solid #e2e8f0;">
                     <div class="label-micro" style="font-size: 0.65rem;">SQUAD CAPACITY</div>
                     <div style="font-weight: 800; color: var(--text-bright); margin-top: 2px;">Min 17 · Max 22 (15 Purchases + Free Captain/VC/Referred)</div>
                   </div>
-                  <div class="surface-subtle" style="padding: 12px;">
+                  <div class="surface-subtle" style="padding: 12px; background: #f8fafc; border-radius: 6px; border: 1px solid #e2e8f0;">
                     <div class="label-micro" style="font-size: 0.65rem;">BID INCREMENTS</div>
                     <div style="font-weight: 800; color: var(--text-bright); margin-top: 2px;">&lt;100: +10 | 100-199: +20 | &ge;200: +30</div>
                   </div>
@@ -13138,7 +13922,7 @@
                     ${['B1', 'B2', 'B3', 'B4', 'D5'].map(b => {
                       const curMin = (window.bucketMinimums && window.bucketMinimums[b] !== undefined) ? window.bucketMinimums[b] : 2;
                       return `
-                        <div style="background: var(--surface-2); padding: 8px; border-radius: 4px; text-align: center;">
+                        <div style="background: var(--surface-2); padding: 8px; border-radius: 4px; text-align: center; border: 1px solid #e2e8f0;">
                           <div style="font-weight: 800; font-size: 0.8125rem;">${b}</div>
                           <div style="font-size: 0.75rem; color: var(--color-green); margin: 2px 0;">Min: ${curMin}</div>
                           ${isSuperAdmin ? `
@@ -13151,6 +13935,93 @@
                       `;
                     }).join('')}
                   </div>
+                </div>
+              </div>
+
+              <!-- ======================================================== -->
+              <!-- DATA MANAGEMENT & RECOVERY SECTION (PARTS B - J)         -->
+              <!-- ======================================================== -->
+              <div class="surface-card" style="padding: var(--space-5); display: flex; flex-direction: column; gap: 14px; background: #ffffff; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.04); border-left: 4px solid var(--color-blue);">
+                <div>
+                  <div class="label-micro" style="color: var(--color-blue); font-size: 0.75rem; font-weight: 800;">DATA MANAGEMENT</div>
+                  <h4 style="font-family: var(--font-display); font-size: 1.25rem; font-weight: 800; color: var(--text-bright); margin: 4px 0 2px 0;">
+                    DATA MANAGEMENT
+                  </h4>
+                  <p style="font-size: 0.8125rem; color: var(--text-muted); margin: 0;">
+                    Manage ACC player, franchise and account records.
+                  </p>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px;">
+                  <!-- CARD 1: USER MANAGEMENT -->
+                  <div class="surface-subtle" style="padding: 16px; border-radius: 8px; display: flex; flex-direction: column; justify-content: space-between; border: 1px solid var(--border-subtle); background: #f8fafc;">
+                    <div>
+                      <div style="font-weight: 800; font-size: 0.95rem; color: var(--text-bright); text-transform: uppercase;">USER MANAGEMENT</div>
+                      <p style="font-size: 0.78rem; color: var(--text-muted); margin: 6px 0 14px 0; line-height: 1.4;">
+                        Search and manage ACC accounts. Filter players, franchises, team leads, and admin roles.
+                      </p>
+                    </div>
+                    <button class="btn btn-primary" onclick="openUserManagementModal()" style="width: 100%; font-size: 0.78rem; font-weight: 800; padding: 8px 14px; min-height: 36px;">
+                      MANAGE USERS
+                    </button>
+                  </div>
+
+                  <!-- CARD 2: TRASH & RESTORE -->
+                  <div class="surface-subtle" style="padding: 16px; border-radius: 8px; display: flex; flex-direction: column; justify-content: space-between; border: 1px solid var(--border-subtle); background: #f8fafc;">
+                    <div>
+                      <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div style="font-weight: 800; font-size: 0.95rem; color: var(--text-bright); text-transform: uppercase;">TRASH & RESTORE</div>
+                        <span class="status-badge" style="background: rgba(225,29,72,0.1); color: var(--color-red); font-size: 0.65rem; font-weight: 800; padding: 2px 6px;">
+                          ${deletedPlayers.length + (deletedFranchises || []).length}
+                        </span>
+                      </div>
+                      <p style="font-size: 0.78rem; color: var(--text-muted); margin: 6px 0 14px 0; line-height: 1.4;">
+                        Recover archived/deleted records. View audit history and restore previous statuses.
+                      </p>
+                    </div>
+                    <button class="btn btn-secondary" onclick="openTrashManagementModal()" style="width: 100%; font-size: 0.78rem; font-weight: 800; padding: 8px 14px; min-height: 36px; border-color: rgba(225,29,72,0.4); color: var(--color-red);">
+                      OPEN TRASH
+                    </button>
+                  </div>
+
+                  <!-- CARD 3: AUCTION CORRECTIONS -->
+                  <div class="surface-subtle" style="padding: 16px; border-radius: 8px; display: flex; flex-direction: column; justify-content: space-between; border: 1px solid var(--border-subtle); background: #f8fafc;">
+                    <div>
+                      <div style="font-weight: 800; font-size: 0.95rem; color: var(--text-bright); text-transform: uppercase;">AUCTION CORRECTIONS</div>
+                      <p style="font-size: 0.78rem; color: var(--text-muted); margin: 6px 0 14px 0; line-height: 1.4;">
+                        Review authoritative auction reversals. Reverse sold lots with instant purse and bucket restoration.
+                      </p>
+                    </div>
+                    <button class="btn btn-secondary" onclick="openAuctionUndoListModal()" style="width: 100%; font-size: 0.78rem; font-weight: 800; padding: 8px 14px; min-height: 36px; border-color: rgba(217,119,6,0.4); color: var(--color-orange);">
+                      AUCTION UNDO
+                    </button>
+                  </div>
+
+                  <!-- CARD 4: DATABASE EXPORT -->
+                  <div class="surface-subtle" style="padding: 16px; border-radius: 8px; display: flex; flex-direction: column; justify-content: space-between; border: 1px solid var(--border-subtle); background: #f8fafc;">
+                    <div>
+                      <div style="font-weight: 800; font-size: 0.95rem; color: var(--text-bright); text-transform: uppercase;">DATABASE</div>
+                      <p style="font-size: 0.78rem; color: var(--text-muted); margin: 6px 0 14px 0; line-height: 1.4;">
+                        Export the ACC tournament dataset (Players, Squads, and Audit records).
+                      </p>
+                    </div>
+                    <button class="btn btn-secondary" onclick="triggerTournamentDatabaseExport()" style="width: 100%; font-size: 0.78rem; font-weight: 800; padding: 8px 14px; min-height: 36px; border-color: rgba(37,99,235,0.4); color: var(--blue-600);">
+                      EXPORT DATABASE
+                    </button>
+                  </div>
+                </div>
+
+                <!-- PART J: DEMO DATA SAFETY NOTICE -->
+                <div style="padding: 12px 16px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+                  <div>
+                    <strong style="color: #b45309; font-size: 0.8125rem;">DEMO RESET</strong>
+                    <div style="font-size: 0.72rem; color: #92400e; margin-top: 2px;">
+                      Unavailable until an isolated demo dataset is configured.
+                    </div>
+                  </div>
+                  <span class="status-badge" style="background: #fef3c7; color: #b45309; border: 1px solid #fcd34d; font-size: 0.65rem; font-weight: 800;">
+                    ISOLATED
+                  </span>
                 </div>
               </div>
             </div>
@@ -13864,7 +14735,7 @@
                 const existingIdx = players.findIndex(p => (p.roll || '').toUpperCase() === rollNorm || String(p.id) === String(pData.id));
 
                 if (change.type === "added" || change.type === "modified") {
-                  if (pData.status === 'DELETED') {
+                  if (pData.status === 'DELETED' || pData.status === 'ARCHIVED') {
                     if (existingIdx >= 0) players.splice(existingIdx, 1);
                     if (!deletedPlayers.some(d => (d.roll || '').toUpperCase() === rollNorm || String(d.id) === String(pData.id))) {
                       deletedPlayers.push(pData);
@@ -14378,7 +15249,7 @@
         const dSet = new Set(deletedPlayers.map(d => (d.roll || d.rollNumberNormalized || d.id || '').toString().toUpperCase()));
         players = data.players.filter(p => {
           const key = (p.roll || p.rollNumberNormalized || p.id || '').toString().toUpperCase();
-          return !dSet.has(key) && p.status !== 'DELETED';
+          return !dSet.has(key) && p.status !== 'DELETED' && p.status !== 'ARCHIVED';
         });
       }
       if (Array.isArray(data.auditLog) && data.auditLog.length > 0) {

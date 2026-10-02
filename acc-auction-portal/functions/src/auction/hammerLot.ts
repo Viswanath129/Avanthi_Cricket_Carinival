@@ -1,6 +1,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { db, verifyCaller } from '../utils/auth';
 import * as admin from 'firebase-admin';
+import { writeAuditEvent } from '../utils/audit';
 
 export const hammerLot = onCall({ maxInstances: 5 }, async (request) => {
   // Super Admin or Operator can hammer
@@ -70,19 +71,10 @@ export const hammerLot = onCall({ maxInstances: 5 }, async (request) => {
     }
     
     // Write audit log
-    const auditRef = db.collection('auditLogs').doc();
-    txn.set(auditRef, {
+    writeAuditEvent({ actor: caller, action: 'HAMMER', targetType: 'LOT', targetId: lotId,
       editionId: lot.editionId,
-      actorUid: caller.uid,
-      actorRole: caller.role,
-      action: hasHighestBidder ? 'HAMMER_SOLD' : 'HAMMER_UNSOLD',
-      entityType: 'LOT',
-      entityId: lotId,
-      beforeState: { status: 'LIVE', currentPrice: lot.currentPrice, highestBidder: lot.highestBidderFranchiseId },
-      afterState: { status: newStatus },
-      reason: null,
-      timestamp: admin.firestore.FieldValue.serverTimestamp(),
-    });
+      before: { status: 'LIVE', currentPrice: lot.currentPrice, highestBidder: lot.highestBidderFranchiseId },
+      after: { status: newStatus }, metadata: { outcome: hasHighestBidder ? 'SOLD' : 'UNSOLD' }, transaction: txn });
     
     return {
       status: newStatus,

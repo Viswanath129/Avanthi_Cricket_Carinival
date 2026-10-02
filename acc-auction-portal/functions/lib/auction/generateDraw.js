@@ -37,6 +37,7 @@ exports.generateDraw = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const auth_1 = require("../utils/auth");
 const admin = __importStar(require("firebase-admin"));
+const audit_1 = require("../utils/audit");
 const AUCTION_ORDER = ['B3', 'B4', 'B2', 'D5', 'B1', 'M6'];
 exports.generateDraw = (0, https_1.onCall)({ maxInstances: 2 }, async (request) => {
     const caller = await (0, auth_1.verifyCaller)(request.auth?.uid, ['SUPER_ADMIN']);
@@ -104,18 +105,8 @@ exports.generateDraw = (0, https_1.onCall)({ maxInstances: 2 }, async (request) 
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
     // Audit
-    await auth_1.db.collection('auditLogs').add({
-        editionId,
-        actorUid: caller.uid,
-        actorRole: caller.role,
-        action: 'GENERATE_DRAW',
-        entityType: 'AUCTION',
-        entityId: editionId,
-        beforeState: null,
-        afterState: { totalLots: globalSequence, round: roundNum },
-        reason: null,
-        timestamp: admin.firestore.FieldValue.serverTimestamp(),
-    });
+    await (0, audit_1.writeAuditEvent)({ actor: caller, action: 'GENERATE_DRAW', targetType: 'AUCTION', targetId: editionId,
+        editionId, after: { totalLots: globalSequence, round: roundNum } });
     return { success: true, totalLots: globalSequence, round: roundNum };
 });
 //# sourceMappingURL=generateDraw.js.map

@@ -37,6 +37,7 @@ exports.approveFranchise = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const auth_1 = require("../utils/auth");
 const admin = __importStar(require("firebase-admin"));
+const audit_1 = require("../utils/audit");
 exports.approveFranchise = (0, https_1.onCall)(async (request) => {
     const caller = await (0, auth_1.verifyCaller)(request.auth?.uid, ['SUPER_ADMIN']);
     const { franchiseId } = request.data;
@@ -59,18 +60,8 @@ exports.approveFranchise = (0, https_1.onCall)(async (request) => {
         },
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
-    await auth_1.db.collection('auditLogs').add({
-        editionId: franchise.editionId,
-        actorUid: caller.uid,
-        actorRole: caller.role,
-        action: 'APPROVE_FRANCHISE',
-        entityType: 'FRANCHISE',
-        entityId: franchiseId,
-        beforeState: { status: franchise.status },
-        afterState: { status: 'APPROVED', purseInitial: 1000 },
-        reason: null,
-        timestamp: admin.firestore.FieldValue.serverTimestamp(),
-    });
+    await (0, audit_1.writeAuditEvent)({ actor: caller, action: 'APPROVE_FRANCHISE', targetType: 'FRANCHISE', targetId: franchiseId,
+        editionId: franchise.editionId, before: { status: franchise.status }, after: { status: 'APPROVED', purseInitial: 1000 } });
     return { success: true, franchiseId };
 });
 //# sourceMappingURL=approveFranchise.js.map

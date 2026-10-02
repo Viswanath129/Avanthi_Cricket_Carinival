@@ -1,6 +1,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { db, verifyCaller } from '../utils/auth';
 import * as admin from 'firebase-admin';
+import { writeAuditEvent } from '../utils/audit';
 
 export const overrideBucket = onCall(async (request) => {
   const caller = await verifyCaller(request.auth?.uid, ['SUPER_ADMIN']);
@@ -28,18 +29,9 @@ export const overrideBucket = onCall(async (request) => {
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   });
   
-  await db.collection('auditLogs').add({
-    editionId: player.editionId,
-    actorUid: caller.uid,
-    actorRole: caller.role,
-    action: 'OVERRIDE_BUCKET',
-    entityType: 'PLAYER',
-    entityId: playerId,
-    beforeState,
-    afterState: { bucket: newBucket, studyYear: newStudyYear, manualOverride: true, overrideReason: reason },
-    reason,
-    timestamp: admin.firestore.FieldValue.serverTimestamp(),
-  });
+  await writeAuditEvent({ actor: caller, action: 'OVERRIDE_BUCKET', targetType: 'PLAYER', targetId: playerId,
+    editionId: player.editionId, before: beforeState,
+    after: { bucket: newBucket, studyYear: newStudyYear, manualOverride: true, overrideReason: reason }, reason });
   
   return { success: true, playerId, newBucket };
 });

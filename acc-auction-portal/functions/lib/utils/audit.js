@@ -33,28 +33,36 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.approvePlayer = void 0;
-const https_1 = require("firebase-functions/v2/https");
-const auth_1 = require("../utils/auth");
+exports.writeAuditEvent = writeAuditEvent;
 const admin = __importStar(require("firebase-admin"));
-const audit_1 = require("../utils/audit");
-exports.approvePlayer = (0, https_1.onCall)(async (request) => {
-    const caller = await (0, auth_1.verifyCaller)(request.auth?.uid, ['SUPER_ADMIN']);
-    const { playerId, action: approvalAction } = request.data;
-    if (!playerId)
-        throw new https_1.HttpsError('invalid-argument', 'playerId is required.');
-    const playerRef = auth_1.db.collection('players').doc(playerId);
-    const playerSnap = await playerRef.get();
-    if (!playerSnap.exists)
-        throw new https_1.HttpsError('not-found', 'Player not found.');
-    const player = playerSnap.data();
-    const newStatus = approvalAction === 'APPROVE' ? 'APPROVED' : 'REJECTED';
-    await playerRef.update({
-        'registration.status': newStatus,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-    await (0, audit_1.writeAuditEvent)({ actor: caller, action: `PLAYER_${approvalAction}`, targetType: 'PLAYER', targetId: playerId,
-        editionId: player.editionId, before: { status: player.registration?.status }, after: { status: newStatus } });
-    return { success: true, playerId, status: newStatus };
-});
-//# sourceMappingURL=approvePlayer.js.map
+const auth_1 = require("./auth");
+/** The only server-side audit writer. Legacy fields remain as read-compatible aliases. */
+async function writeAuditEvent(input) {
+    const ref = input.requestId
+        ? auth_1.db.collection('auditLogs').doc(input.requestId)
+        : auth_1.db.collection('auditLogs').doc();
+    const data = {
+        actorUid: input.actor.uid,
+        actorRole: input.actor.role,
+        action: input.action,
+        targetType: input.targetType,
+        targetId: input.targetId,
+        entityType: input.targetType,
+        entityId: input.targetId,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        result: input.result || 'SUCCESS',
+        editionId: input.editionId || null,
+        metadata: input.metadata || {},
+        before: input.before ?? null,
+        after: input.after ?? null,
+        beforeState: input.before ?? null,
+        afterState: input.after ?? null,
+        reason: input.reason || null,
+        requestId: input.requestId || null,
+    };
+    if (input.transaction)
+        input.transaction.create(ref, data);
+    else
+        await ref.create(data);
+}
+//# sourceMappingURL=audit.js.map

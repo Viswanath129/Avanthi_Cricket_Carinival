@@ -2,6 +2,7 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { db, verifyCaller, resolveFranchiseId } from '../utils/auth';
 import { calculateNextBid, calculateMaxBid, checkBucketEligibility } from '../utils/bidLogic';
 import * as admin from 'firebase-admin';
+import { writeAuditEvent } from '../utils/audit';
 
 export const placeBid = onCall({ maxInstances: 10 }, async (request) => {
   // 1. Authenticate
@@ -131,6 +132,10 @@ export const placeBid = onCall({ maxInstances: 10 }, async (request) => {
       clientActionId,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
+
+    writeAuditEvent({ actor: caller, action: caller.role === 'ADMIN' || caller.role === 'SUPER_ADMIN' ? 'BID_ON_BEHALF' : 'BID_PLACED',
+      targetType: 'LOT', targetId: lotId, editionId: lot.editionId,
+      metadata: { bidId: bidRef.id, franchiseId, amount: nextBid }, transaction: txn });
     
     // Update lot
     const newTimerDeadline = admin.firestore.Timestamp.fromMillis(Date.now() + 20000); // 20 sec

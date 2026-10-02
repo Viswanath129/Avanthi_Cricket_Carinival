@@ -37,6 +37,7 @@ exports.undoSale = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const auth_1 = require("../utils/auth");
 const admin = __importStar(require("firebase-admin"));
+const audit_1 = require("../utils/audit");
 exports.undoSale = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => {
     const caller = await (0, auth_1.verifyCaller)(request.auth?.uid, ['SUPER_ADMIN']);
     const { acquisitionId, reason } = request.data;
@@ -100,19 +101,9 @@ exports.undoSale = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => {
             });
         }
         // Audit log
-        const auditRef = auth_1.db.collection('auditLogs').doc();
-        txn.set(auditRef, {
-            editionId: acq.editionId,
-            actorUid: caller.uid,
-            actorRole: caller.role,
-            action: 'AUCTION_UNDO',
-            entityType: 'ACQUISITION',
-            entityId: acquisitionId,
-            beforeState: { status: 'ACTIVE', price: acq.price, franchiseId: acq.franchiseId, playerId: acq.playerId },
-            afterState: { status: 'UNDONE', undoReason: reason.trim() },
-            reason: reason.trim(),
-            timestamp: admin.firestore.FieldValue.serverTimestamp(),
-        });
+        (0, audit_1.writeAuditEvent)({ actor: caller, action: 'AUCTION_UNDO', targetType: 'ACQUISITION', targetId: acquisitionId,
+            editionId: acq.editionId, before: { status: 'ACTIVE', price: acq.price, franchiseId: acq.franchiseId, playerId: acq.playerId },
+            after: { status: 'UNDONE', undoReason: reason.trim() }, reason: reason.trim(), transaction: txn });
         return {
             success: true,
             playerId: acq.playerId,

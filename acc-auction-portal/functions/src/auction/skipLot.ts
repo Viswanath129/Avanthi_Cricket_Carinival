@@ -1,6 +1,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { db, verifyCaller } from '../utils/auth';
 import * as admin from 'firebase-admin';
+import { writeAuditEvent } from '../utils/audit';
 
 export const skipLot = onCall({ maxInstances: 5 }, async (request) => {
   const caller = await verifyCaller(request.auth?.uid, ['SUPER_ADMIN', 'ADMIN']);
@@ -23,19 +24,8 @@ export const skipLot = onCall({ maxInstances: 5 }, async (request) => {
       version: admin.firestore.FieldValue.increment(1),
     });
     
-    const auditRef = db.collection('auditLogs').doc();
-    txn.set(auditRef, {
-      editionId: lot.editionId,
-      actorUid: caller.uid,
-      actorRole: caller.role,
-      action: 'SKIP_LOT',
-      entityType: 'LOT',
-      entityId: lotId,
-      beforeState: { status: lot.status },
-      afterState: { status: 'SKIPPED' },
-      reason: null,
-      timestamp: admin.firestore.FieldValue.serverTimestamp(),
-    });
+    writeAuditEvent({ actor: caller, action: 'SKIP', targetType: 'LOT', targetId: lotId, editionId: lot.editionId,
+      before: { status: lot.status }, after: { status: 'SKIPPED' }, transaction: txn });
     
     return { success: true, lotId };
   });

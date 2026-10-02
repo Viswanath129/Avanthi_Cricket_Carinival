@@ -134,24 +134,27 @@ assert.strictEqual(afterUnblock.publicVisibility, true);
 assert.strictEqual(vm.runInContext("isPlayerPubliclyVisible(players.find(p => p.id === 777))", ctx), true);
 console.log("[PASS] Admin UNBLOCK: status=AVAILABLE, publicVisibility=true, restored to public");
 
-// D. Delete
+// D. Archive: retain the canonical player identity and keep history references resolvable
+elementsMap["deleteConfirmTypedInput"] = { value: "ARCHIVE" };
 vm.runInContext("executeDeletePlayer(777);", ctx);
 let afterDelete = vm.runInContext("players.find(p => p.id === 777)", ctx);
 assert.strictEqual(afterDelete, undefined, "Deleted player removed from players array");
 let inDeleted = vm.runInContext("deletedPlayers.find(p => p.id === 777)", ctx);
 assert.notStrictEqual(inDeleted, undefined, "Deleted player recorded in deletedPlayers");
-assert.strictEqual(inDeleted.status, "DELETED");
+assert.strictEqual(inDeleted.status, "ARCHIVED");
 assert.strictEqual(inDeleted.publicVisibility, false);
-console.log("[PASS] Admin DELETE: removed from players, archived in deletedPlayers with status=DELETED");
+assert.strictEqual(inDeleted.roll, "26811A0577", "Canonical roll remains available to historical references");
+console.log("[PASS] Admin ARCHIVE: profile retained in recoverable archive with canonical identity");
 
 // E. Restore
 vm.runInContext("adminRestorePlayerGovernance(777);", ctx);
 let afterRestore = vm.runInContext("players.find(p => p.id === 777)", ctx);
 assert.notStrictEqual(afterRestore, undefined, "Restored player returned to players array");
-assert.strictEqual(afterRestore.approvalStatus, "PENDING_APPROVAL");
-assert.strictEqual(afterRestore.publicVisibility, false);
-assert.strictEqual(vm.runInContext("isPlayerPubliclyVisible(players.find(p => p.id === 777))", ctx), false);
-console.log("[PASS] Admin RESTORE: restored to players array with PENDING_APPROVAL and publicVisibility=false");
+assert.strictEqual(afterRestore.approvalStatus, "APPROVED");
+assert.strictEqual(afterRestore.status, "AVAILABLE");
+assert.strictEqual(afterRestore.publicVisibility, true);
+assert.strictEqual(vm.runInContext("isPlayerPubliclyVisible(players.find(p => p.id === 777))", ctx), true);
+console.log("[PASS] Admin RESTORE: same canonical player and prior valid state restored");
 
 console.log("\n--- TEST 3: NO RESURRECTION OF DELETED PLAYERS IN STATE MERGE ---");
 vm.runInContext(`

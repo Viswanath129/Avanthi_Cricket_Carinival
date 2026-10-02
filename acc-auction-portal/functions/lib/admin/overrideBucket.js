@@ -37,6 +37,7 @@ exports.overrideBucket = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const auth_1 = require("../utils/auth");
 const admin = __importStar(require("firebase-admin"));
+const audit_1 = require("../utils/audit");
 exports.overrideBucket = (0, https_1.onCall)(async (request) => {
     const caller = await (0, auth_1.verifyCaller)(request.auth?.uid, ['SUPER_ADMIN']);
     const { playerId, newBucket, newStudyYear, reason } = request.data;
@@ -61,18 +62,9 @@ exports.overrideBucket = (0, https_1.onCall)(async (request) => {
         'academic.overrideReason': reason,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
-    await auth_1.db.collection('auditLogs').add({
-        editionId: player.editionId,
-        actorUid: caller.uid,
-        actorRole: caller.role,
-        action: 'OVERRIDE_BUCKET',
-        entityType: 'PLAYER',
-        entityId: playerId,
-        beforeState,
-        afterState: { bucket: newBucket, studyYear: newStudyYear, manualOverride: true, overrideReason: reason },
-        reason,
-        timestamp: admin.firestore.FieldValue.serverTimestamp(),
-    });
+    await (0, audit_1.writeAuditEvent)({ actor: caller, action: 'OVERRIDE_BUCKET', targetType: 'PLAYER', targetId: playerId,
+        editionId: player.editionId, before: beforeState,
+        after: { bucket: newBucket, studyYear: newStudyYear, manualOverride: true, overrideReason: reason }, reason });
     return { success: true, playerId, newBucket };
 });
 //# sourceMappingURL=overrideBucket.js.map

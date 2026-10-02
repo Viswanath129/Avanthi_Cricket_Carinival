@@ -100,7 +100,8 @@ service cloud.firestore {
           request.resource.data.auctionEligible == resource.data.auctionEligible
         )
       );
-      allow delete: if isSuperAdmin();
+      // Player purges must use the server callable that checks protected history.
+      allow delete: if false;
     }
 
     // ── Player Unique Keys (uniqueness enforcement) ───────────────────

@@ -1,6 +1,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { db, verifyCaller } from '../utils/auth';
 import * as admin from 'firebase-admin';
+import { writeAuditEvent } from '../utils/audit';
 
 const AUCTION_ORDER = ['B3', 'B4', 'B2', 'D5', 'B1', 'M6'];
 
@@ -79,18 +80,8 @@ export const generateDraw = onCall({ maxInstances: 2 }, async (request) => {
   }, { merge: true });
   
   // Audit
-  await db.collection('auditLogs').add({
-    editionId,
-    actorUid: caller.uid,
-    actorRole: caller.role,
-    action: 'GENERATE_DRAW',
-    entityType: 'AUCTION',
-    entityId: editionId,
-    beforeState: null,
-    afterState: { totalLots: globalSequence, round: roundNum },
-    reason: null,
-    timestamp: admin.firestore.FieldValue.serverTimestamp(),
-  });
+  await writeAuditEvent({ actor: caller, action: 'GENERATE_DRAW', targetType: 'AUCTION', targetId: editionId,
+    editionId, after: { totalLots: globalSequence, round: roundNum } });
   
   return { success: true, totalLots: globalSequence, round: roundNum };
 });

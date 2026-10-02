@@ -38,6 +38,7 @@ const https_1 = require("firebase-functions/v2/https");
 const auth_1 = require("../utils/auth");
 const bidLogic_1 = require("../utils/bidLogic");
 const admin = __importStar(require("firebase-admin"));
+const audit_1 = require("../utils/audit");
 exports.placeBid = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => {
     // 1. Authenticate
     const caller = await (0, auth_1.verifyCaller)(request.auth?.uid, [
@@ -143,6 +144,9 @@ exports.placeBid = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => 
             clientActionId,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
+        (0, audit_1.writeAuditEvent)({ actor: caller, action: caller.role === 'ADMIN' || caller.role === 'SUPER_ADMIN' ? 'BID_ON_BEHALF' : 'BID_PLACED',
+            targetType: 'LOT', targetId: lotId, editionId: lot.editionId,
+            metadata: { bidId: bidRef.id, franchiseId, amount: nextBid }, transaction: txn });
         // Update lot
         const newTimerDeadline = admin.firestore.Timestamp.fromMillis(Date.now() + 20000); // 20 sec
         txn.update(lotRef, {

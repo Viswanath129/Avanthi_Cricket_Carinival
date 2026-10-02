@@ -1,6 +1,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { db, verifyCaller } from '../utils/auth';
 import * as admin from 'firebase-admin';
+import { writeAuditEvent } from '../utils/audit';
 
 export const openLot = onCall({ maxInstances: 5 }, async (request) => {
   const caller = await verifyCaller(request.auth?.uid, ['SUPER_ADMIN', 'ADMIN']);
@@ -51,19 +52,8 @@ export const openLot = onCall({ maxInstances: 5 }, async (request) => {
     txn.set(auctionRef, { franchiseStatuses }, { merge: true });
     
     // Audit
-    const auditRef = db.collection('auditLogs').doc();
-    txn.set(auditRef, {
-      editionId: lot.editionId,
-      actorUid: caller.uid,
-      actorRole: caller.role,
-      action: 'OPEN_LOT',
-      entityType: 'LOT',
-      entityId: lotId,
-      beforeState: { status: lot.status },
-      afterState: { status: 'LIVE', basePrice: lot.basePrice },
-      reason: null,
-      timestamp: admin.firestore.FieldValue.serverTimestamp(),
-    });
+    writeAuditEvent({ actor: caller, action: 'OPEN_LOT', targetType: 'LOT', targetId: lotId, editionId: lot.editionId,
+      before: { status: lot.status }, after: { status: 'LIVE', basePrice: lot.basePrice }, transaction: txn });
     
     return { success: true, lotId, basePrice: lot.basePrice };
   });

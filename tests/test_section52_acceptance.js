@@ -217,9 +217,9 @@ assert(modalHTML6.includes("CANNOT DELETE PLAYER"), "Modal explicitly blocks del
 assert(modalHTML6.includes("ARCHIVE PLAYER INSTEAD"), "Modal requires ARCHIVE instead of physical deletion");
 
 // ---------------------------------------------------------
-// TEST 7: Player with no history: DELETE requires typing "DELETE"
+// TEST 7: Player with no history: ARCHIVE requires typed confirmation and preserves identity
 // ---------------------------------------------------------
-console.log("\n--- TEST 7: DELETE WITHOUT HISTORY REQUIRES TYPED CONFIRMATION ---");
+console.log("\n--- TEST 7: ARCHIVE WITHOUT HISTORY REQUIRES TYPED CONFIRMATION ---");
 vm.runInContext(`
 players.push({
   id: 994,
@@ -232,12 +232,14 @@ players.push({
 
 vm.runInContext("openDeletePlayerModal(994);", ctx);
 const modalHTML7 = elementsMap["modalContainer"]?.innerHTML || '';
-assert(modalHTML7.includes("DELETE PLAYER?"), "Delete confirmation modal opened");
-assert(modalHTML7.includes("TYPE \"DELETE\" TO CONFIRM") || modalHTML7.includes("DELETE"), "Modal requires typed confirmation 'DELETE'");
+assert(modalHTML7.includes("ARCHIVE PLAYER?"), "Archive confirmation modal opened");
+assert(modalHTML7.includes("TYPE \"ARCHIVE\" TO CONFIRM"), "Modal requires typed confirmation 'ARCHIVE'");
 
+elementsMap["deleteConfirmTypedInput"] = { value: "ARCHIVE" };
 vm.runInContext("executeDeletePlayer(994);", ctx);
-const deletedP = vm.runInContext("players.find(p => p.id === 994)", ctx);
-assert(!deletedP, "Player without history successfully deleted after confirmation");
+const archivedP = vm.runInContext("deletedPlayers.find(p => p.id === 994)", ctx);
+assert(archivedP && archivedP.status === 'ARCHIVED', "Player without history is archived, not physically deleted");
+assert(archivedP.roll === "26811A0101", "Canonical roll remains intact");
 
 // ---------------------------------------------------------
 // TEST 8: Existing roll: 24815A0443 vs 24815a0443 -> duplicate blocked

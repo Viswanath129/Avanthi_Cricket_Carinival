@@ -37,6 +37,7 @@ exports.pauseResumeAuction = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const auth_1 = require("../utils/auth");
 const admin = __importStar(require("firebase-admin"));
+const audit_1 = require("../utils/audit");
 exports.pauseResumeAuction = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => {
     const caller = await (0, auth_1.verifyCaller)(request.auth?.uid, ['SUPER_ADMIN', 'ADMIN']);
     const { editionId, action: controlAction } = request.data;
@@ -51,18 +52,8 @@ exports.pauseResumeAuction = (0, https_1.onCall)({ maxInstances: 5 }, async (req
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
     // Audit
-    await auth_1.db.collection('auditLogs').add({
-        editionId,
-        actorUid: caller.uid,
-        actorRole: caller.role,
-        action: controlAction === 'PAUSE' ? 'PAUSE_AUCTION' : 'RESUME_AUCTION',
-        entityType: 'AUCTION',
-        entityId: editionId,
-        beforeState: null,
-        afterState: { status: controlAction === 'PAUSE' ? 'PAUSED' : 'LIVE' },
-        reason: null,
-        timestamp: admin.firestore.FieldValue.serverTimestamp(),
-    });
+    await (0, audit_1.writeAuditEvent)({ actor: caller, action: controlAction, targetType: 'AUCTION', targetId: editionId,
+        editionId, after: { status: controlAction === 'PAUSE' ? 'PAUSED' : 'LIVE' } });
     return { success: true, status: controlAction === 'PAUSE' ? 'PAUSED' : 'LIVE' };
 });
 //# sourceMappingURL=pauseResume.js.map

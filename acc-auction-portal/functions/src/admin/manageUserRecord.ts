@@ -1,6 +1,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { db, verifyCaller } from '../utils/auth';
 import * as admin from 'firebase-admin';
+import { writeAuditEvent } from '../utils/audit';
 
 type Action = 'DELETE' | 'RESTORE' | 'PERMANENT_DELETE';
 
@@ -16,11 +17,12 @@ export const manageUserRecord = onCall({ maxInstances: 3 }, async (request) => {
   }
   if (uid === caller.uid) throw new HttpsError('failed-precondition', 'You cannot delete or restore your own account.');
   if (action === 'PERMANENT_DELETE' && confirmation !== `DELETE ${uid}`) {
+    await writeAuditEvent({ actor: caller, action: 'USER_DELETE_REJECTED', targetType: 'USER', targetId: uid,
+      result: 'REJECTED', metadata: { reason: 'CONFIRMATION_MISMATCH' } });
     throw new HttpsError('failed-precondition', `Type DELETE ${uid} to permanently delete this account.`);
   }
 
   const userRef = db.collection('users').doc(uid);
-  const auditRef = db.collection('auditLogs').doc();
   const result = await db.runTransaction(async (txn) => {
     const snap = await txn.get(userRef);
     if (!snap.exists) throw new HttpsError('not-found', 'User record not found.');
@@ -56,13 +58,10 @@ export const manageUserRecord = onCall({ maxInstances: 3 }, async (request) => {
       txn.delete(userRef);
     }
 
-    txn.create(auditRef, {
-      actorUid: caller.uid, actorRole: caller.role,
-      action: action === 'DELETE' ? 'USER_DELETED' : action === 'RESTORE' ? 'USER_RESTORED' : 'USER_PERMANENTLY_DELETED',
-      target: { uid, role: before.role || null, email: before.email || null },
-      entityType: 'USER', entityId: uid,
-      timestamp: admin.firestore.FieldValue.serverTimestamp(), result: 'SUCCESS',
-    });
+    writeAuditEvent({ actor: caller,
+      action: action === 'DELETE' ? 'USER_DISABLED' : action === 'RESTORE' ? 'USER_RESTORED' : 'USER_PERMANENTLY_DELETED',
+      targetType: 'USER', targetId: uid, result: 'SUCCESS',
+      metadata: { role: before.role || null, email: before.email || null }, transaction: txn });
     return { success: true, alreadyApplied: false };
   });
 

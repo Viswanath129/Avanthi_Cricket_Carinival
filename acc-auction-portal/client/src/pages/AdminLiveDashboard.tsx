@@ -9,7 +9,6 @@ import {
   limit, 
   updateDoc, 
   setDoc,
-  addDoc, 
   serverTimestamp, 
   Timestamp,
   runTransaction 
@@ -33,6 +32,7 @@ import {
 } from '@shared/types';
 import { checkScarcity } from '@shared/engine/scarcity';
 import { checkBucketEligibility } from '@shared/engine/bucketEligibility';
+import { mergeAuditTimeline, auditTimestampValue } from '@/services/auditTimeline';
 
 const EDITION_ID = 'acc-2026';
 
@@ -148,16 +148,19 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
       setAllLots(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
-    // 7. Audit Logs (last 20)
-    const auditQ = query(
-      collection(db, 'auditLogs'), 
-      where('editionId', '==', EDITION_ID), 
-      orderBy('timestamp', 'desc'), 
-      limit(20)
-    );
-    const auditUnsub = onSnapshot(auditQ, (snap) => {
-      setAuditLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    // Read both historical streams, display one chronological timeline.
+    const auditRows = new Map<string, any>();
+    const publishAudit = () => {
+      setAuditLogs(mergeAuditTimeline(Array.from(auditRows.values())).slice(0, 50));
+    };
+    const auditUnsub = onSnapshot(query(collection(db, 'auditLogs'), where('editionId', '==', EDITION_ID), limit(100)), (snap) => {
+      snap.docs.forEach(d => auditRows.set(`auditLogs:${d.id}`, { id: d.id, ...d.data() }));
+      publishAudit();
     });
+    const legacyAuditUnsub = onSnapshot(collection(db, 'auditLog'), (snap) => {
+      snap.docs.forEach(d => auditRows.set(`auditLog:${d.id}`, { id: d.id, ...d.data(), legacy: true }));
+      publishAudit();
+    }, (error) => console.warn('Legacy audit timeline unavailable:', error));
 
     return () => {
       unsubConn();
@@ -168,6 +171,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
       acqUnsub();
       allLotsUnsub();
       auditUnsub();
+      legacyAuditUnsub();
     };
   }, []);
 
@@ -355,12 +359,8 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
   // Audit Log helper
   const recordAudit = async (action: string, details: string) => {
     try {
-      await addDoc(collection(db, 'auditLogs'), {
-        editionId: EDITION_ID,
-        actor: `${capabilities.roleLabel} (${user?.email || 'Admin'})`,
-        action,
-        details,
-        timestamp: serverTimestamp(),
+      await httpsCallable(functions, 'recordAuditEvent')({
+        editionId: EDITION_ID, targetType: 'AUCTION', targetId: EDITION_ID, action, details,
       });
     } catch (e) {
       console.warn('Audit record warning:', e);
@@ -1369,11 +1369,11 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
                   <div className="flex justify-between items-center text-[9px] text-slate-500">
                     <span className="font-bold text-amber-500/90">{log.action}</span>
                     <span>
-                      {log.timestamp?.toDate ? log.timestamp.toDate().toLocaleTimeString() : 'now'}
+                      {log.timestamp ? new Date(auditTimestampValue(log.timestamp)).toLocaleTimeString() : 'now'}
                     </span>
                   </div>
                   <div className="text-[10px] text-slate-300 truncate mt-0.5">
-                    {log.details}
+                    {log.details || log.metadata?.details || log.reason || `${log.targetType || log.entityType || ''} ${log.targetId || log.entityId || ''}`}
                   </div>
                 </div>
               ))}

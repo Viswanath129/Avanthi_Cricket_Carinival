@@ -37,6 +37,7 @@ exports.manageUserRecord = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const auth_1 = require("../utils/auth");
 const admin = __importStar(require("firebase-admin"));
+const audit_1 = require("../utils/audit");
 /** Governance actions on the canonical user directory. Historical tournament
  * records are deliberately not touched by these operations. */
 exports.manageUserRecord = (0, https_1.onCall)({ maxInstances: 3 }, async (request) => {
@@ -48,10 +49,11 @@ exports.manageUserRecord = (0, https_1.onCall)({ maxInstances: 3 }, async (reque
     if (uid === caller.uid)
         throw new https_1.HttpsError('failed-precondition', 'You cannot delete or restore your own account.');
     if (action === 'PERMANENT_DELETE' && confirmation !== `DELETE ${uid}`) {
+        await (0, audit_1.writeAuditEvent)({ actor: caller, action: 'USER_DELETE_REJECTED', targetType: 'USER', targetId: uid,
+            result: 'REJECTED', metadata: { reason: 'CONFIRMATION_MISMATCH' } });
         throw new https_1.HttpsError('failed-precondition', `Type DELETE ${uid} to permanently delete this account.`);
     }
     const userRef = auth_1.db.collection('users').doc(uid);
-    const auditRef = auth_1.db.collection('auditLogs').doc();
     const result = await auth_1.db.runTransaction(async (txn) => {
         const snap = await txn.get(userRef);
         if (!snap.exists)
@@ -89,13 +91,10 @@ exports.manageUserRecord = (0, https_1.onCall)({ maxInstances: 3 }, async (reque
         else {
             txn.delete(userRef);
         }
-        txn.create(auditRef, {
-            actorUid: caller.uid, actorRole: caller.role,
-            action: action === 'DELETE' ? 'USER_DELETED' : action === 'RESTORE' ? 'USER_RESTORED' : 'USER_PERMANENTLY_DELETED',
-            target: { uid, role: before.role || null, email: before.email || null },
-            entityType: 'USER', entityId: uid,
-            timestamp: admin.firestore.FieldValue.serverTimestamp(), result: 'SUCCESS',
-        });
+        (0, audit_1.writeAuditEvent)({ actor: caller,
+            action: action === 'DELETE' ? 'USER_DISABLED' : action === 'RESTORE' ? 'USER_RESTORED' : 'USER_PERMANENTLY_DELETED',
+            targetType: 'USER', targetId: uid, result: 'SUCCESS',
+            metadata: { role: before.role || null, email: before.email || null }, transaction: txn });
         return { success: true, alreadyApplied: false };
     });
     // Disable/re-enable Firebase Auth where possible. The Firestore profile is

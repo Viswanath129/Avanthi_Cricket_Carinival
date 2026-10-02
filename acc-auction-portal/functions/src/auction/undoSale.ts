@@ -1,6 +1,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { db, verifyCaller } from '../utils/auth';
 import * as admin from 'firebase-admin';
+import { writeAuditEvent } from '../utils/audit';
 
 export const undoSale = onCall({ maxInstances: 5 }, async (request) => {
   const caller = await verifyCaller(request.auth?.uid, ['SUPER_ADMIN']);
@@ -70,19 +71,9 @@ export const undoSale = onCall({ maxInstances: 5 }, async (request) => {
     }
     
     // Audit log
-    const auditRef = db.collection('auditLogs').doc();
-    txn.set(auditRef, {
-      editionId: acq.editionId,
-      actorUid: caller.uid,
-      actorRole: caller.role,
-      action: 'AUCTION_UNDO',
-      entityType: 'ACQUISITION',
-      entityId: acquisitionId,
-      beforeState: { status: 'ACTIVE', price: acq.price, franchiseId: acq.franchiseId, playerId: acq.playerId },
-      afterState: { status: 'UNDONE', undoReason: reason.trim() },
-      reason: reason.trim(),
-      timestamp: admin.firestore.FieldValue.serverTimestamp(),
-    });
+    writeAuditEvent({ actor: caller, action: 'AUCTION_UNDO', targetType: 'ACQUISITION', targetId: acquisitionId,
+      editionId: acq.editionId, before: { status: 'ACTIVE', price: acq.price, franchiseId: acq.franchiseId, playerId: acq.playerId },
+      after: { status: 'UNDONE', undoReason: reason.trim() }, reason: reason.trim(), transaction: txn });
     
     return {
       success: true,
