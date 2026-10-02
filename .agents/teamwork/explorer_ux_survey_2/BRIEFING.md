@@ -1,4 +1,4 @@
-# BRIEFING — 2026-10-02T05:32:00Z
+# BRIEFING — 2026-10-02T05:42:00Z
 
 ## Mission
 Perform a comprehensive technical survey of the ACC codebase for R1 (Global Light Theme Across All Surfaces) and R5 (Registration Form UX & Unicode Cleanup) to guide implementation.
@@ -8,7 +8,7 @@ Perform a comprehensive technical survey of the ACC codebase for R1 (Global Ligh
 - Roles: Theme & UX Survey Explorer (Gen 2)
 - Working directory: B:\projects\ACC\.agents\teamwork\explorer_ux_survey_2
 - Original parent: ed938d1c-ceb1-4a11-9e01-743f5566ca18
-- Milestone: Survey Phase (R1 & R5)
+- Milestone: Survey Phase Complete (R1 & R5)
 
 ## 🔒 Key Constraints
 - Read-only investigation — do NOT implement changes to source code directly
@@ -17,18 +17,28 @@ Perform a comprehensive technical survey of the ACC codebase for R1 (Global Ligh
 
 ## Current Parent
 - Conversation ID: ed938d1c-ceb1-4a11-9e01-743f5566ca18
-- Updated: 2026-10-02T05:32:00Z
+- Updated: 2026-10-02T05:42:00Z
 
 ## Investigation State
-- **Explored paths**: [Initial workspace inspection]
-- **Key findings**: [Pending survey]
-- **Unexplored areas**: Styling files, tailwind config, pages, Unicode sequences, registration forms
+- **Explored paths**:
+  - `acc-auction-portal/client/src/index.css`, `index.html`, `main.tsx`, `App.tsx`
+  - All 14 pages in `acc-auction-portal/client/src/pages/`
+  - Registration components in `components/registration/*`
+  - Shadcn UI components in `components/ui/*`
+  - Root single-file application `Acc-Auction-Os.html` / `index.html`
+  - Acceptance and unit test suites
+- **Key findings**:
+  - Root cause of dark styling is `:root` CSS variables in `index.css` (`--background: #0e1114`, `--card: #151a1f`, `--popover: #151a1f`) and page-level opaque dark wrappers (`bg-slate-900`, `bg-[#080c0a]`).
+  - 44 escaped Unicode sequences cataloged across 12 files; 0 in `Acc-Auction-Os.html`.
+  - Stepper grid bug in `ProgressBar.tsx` (hardcoded 5 cols for 6 steps).
+  - Draft roll input in Franchise registration lacks uppercase caret stabilization.
+  - Photo canvas crop embeds dark slate `#0f172a` fill.
+  - Projector page bottom strip has contrast bug (`bg-[#0b1322]` with `text-slate-900`).
+- **Unexplored areas**: None for R1 and R5 survey scope.
 
 ## Key Decisions Made
-- Start with identifying styling configuration and scanning for dark navy / dark slate tokens.
-- Map all pages in `acc-auction-portal/client/src/pages` and relevant components.
-- Search for Unicode escape sequences across entire client and root repositories.
-- Analyze Player and Franchise registration forms.
+- Detailed technical report compiled into `report.md`.
+- Concise 5-component handoff compiled into `handoff.md`.
 
 ## Artifact Index
 - DISPATCH.md — Initial task dispatch
