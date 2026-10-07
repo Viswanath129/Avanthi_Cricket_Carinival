@@ -1,124 +1,107 @@
-# Project: ACC 2026 Architecture & UX Overhaul
+# Project: ACC 2026 Cricket Auction Platform - Live Sync & Feature Verification
 
 ## Architecture
-- **Application Model**: Production React + TypeScript + Vite SPA (`acc-auction-portal`) backed by Firebase Authentication, Firestore real-time database, and Firebase Cloud Storage.
-- **Design System**: Authoritative ACC Light Token System (`#F8FAFC` slate-50 background, `#FFFFFF` white surfaces, `#0F172A` high-contrast typography, clean borders `#E2E8F0`, soft shadows, ACC emerald green `#059669` and deep blue brand accents). Frosted glassmorphism over the dynamic Opal sky backdrop (`<BlueAnimatedBackground />`).
-- **Authentication & Authorization Architecture**:
-  - Decoupled route-intent model: explicit query parameter modes (`/login?mode=player`, `/login?mode=franchise`, `/login?mode=admin`).
-  - Single authoritative Firebase `onAuthStateChanged` listener in `AuthContext` with sequence/epoch gating to prevent race conditions.
-  - Zero authorization-determining state in client storage (`localStorage` / `sessionStorage`).
-  - Dual-layer Admin Authentication: real Firebase Email/Password auth attempt paired with graceful fallback to authoritative directory credentials on `auth/configuration-not-found` for demo/offline resilience.
-  - Complete error humanization mapping technical Firebase error codes to polished user feedback.
-- **Interactive Canvas Media Pipeline**:
-  - Shared light-themed HTML5 canvas image editor (`ImageEditorModal.tsx`) with default 4:3 crop box (and optional 1:1 preset).
-  - Pointer events with `touch-action: none` supporting single-touch pan/drag, multi-touch pinch-to-zoom, slider zoom, 90° rotation, fit, fill, reset, and cancel.
-  - Non-destructive re-edit preserving raw file and transform coordinates.
-  - Client-side validation, aspect-ratio enforcement, and compression before storage upload.
-  - Storage paths aligned with `storage.rules` (`players/${normalizedRoll}/photo.jpg`, `franchises/${franchiseId}/logo.png`), saving genuine download URLs into Firestore.
-- **Core Auction Engine & Security Boundaries**:
-  - 100% zero-regression preservation of auction mechanics (`bidEngine.ts`, `bucketEligibility.ts`, `scarcity.ts`, `rollClassifier.ts`, `useAuctionTimer.ts`, `useBidSubmission.ts`, `storage.rules`, `firestore.rules`).
+- **Application Model**: Single-file Web OS (`Acc-Auction-Os.html`, ~17,000 lines) with matching mirrors (`index.html` and `acc-auction-portal/dist/index.html`).
+- **Backend & Cloud Services**: Firebase Authentication, Cloud Firestore (`acc_auctions`, `players`, `franchises`, `users`), Firebase Realtime Database (`auctionState`, `presence`, `publicStats`, `.info`), Firebase Cloud Storage, and Firebase Hosting (`studio-6471864054-30ce7`).
+- **Live Sync Dual-Channel Pipeline**:
+  - **Fast Pipe**: Firebase Realtime Database WebSocket channel (`auctionState/live`) for ultra-low-latency (<100ms) bid, lot, timer deadline, and leading bidder state propagation across all connected devices (Admin, Franchise, Projector, Public).
+  - **Persistence Pipe**: Firestore document `acc_auctions/acc_main_2026` for cold start, durable audit trail, and historical recovery.
+  - **Zero-Reload Reactive DOM Engine**: Targeted element mutators (`updateLiveAuctionDOM`, `updateTimerDOM`) replacing full `innerHTML` re-parsing, eliminating input blur, form focus loss, and scroll jumps.
+  - **Clock Synchronization**: Median-of-8 sample NTP filter using `.info/serverTimeOffset` ensuring all clients tick against identical server-corrected epoch deadlines (`sNow + remainingMs`).
+  - **Connection State Machine**: Tri-state live indicators (`LIVE` green pulse, `RECONNECTING` amber spinner, `OFFLINE` red solid) with automatic resubscription on network wake.
+- **Role Isolation & Security Boundaries**:
+  - URL query mode isolation (`/login?mode=player|franchise|admin`) rendering dedicated authentication interfaces.
+  - Removal of automatic `DEMO_MODE` Super Admin bypass on `#admin` hash navigation and elimination of post-logout auto-login loops.
+  - Proper scoping of keyboard shortcuts (`H`, `S`, `P`, `U`, `B`, `A`, `D`, `N`, R, Space) and timer modals strictly to authenticated administrators.
+- **3-File Byte Parity Invariant**:
+  - `Acc-Auction-Os.html`, `index.html`, and `acc-auction-portal/dist/index.html` MUST remain 100% bit-for-bit SHA-256 byte identical.
 
 ## Feature Inventory
 | # | Feature | Description | Milestone | Source |
 |---|---------|-------------|-----------|--------|
-| 1 | Decoupled Auth Intent Routing | `/login?mode=player`, `/login?mode=franchise`, `/login?mode=admin` rendering single-persona forms | M1 | ORIGINAL_REQUEST §R2 |
-| 2 | Authoritative AuthContext Listener | Single `onAuthStateChanged` listener with epoch gating, eliminating concurrent resolution races | M1 | Survey Explorer Auth |
-| 3 | Route Role Isolation | Restrict `/player` to `['PLAYER']`, preventing Admin/Coordinator mock data leak into player dashboard | M1 | Survey Explorer Auth |
-| 4 | Storage Role Leak Elimination | Audit and rename `acc_admin_role` to `acc_admin_profile_designation`; ensure 0 storage auth overrides | M1 | ORIGINAL_REQUEST §R2 |
-| 5 | Admin Auth Dual-Layer Resolution | Live Firebase Email/Password attempt + fallback on `auth/configuration-not-found` | M1 | ORIGINAL_REQUEST §R3 |
-| 6 | Explicit Admin Action Button | Button text strictly styled and labeled `SIGN IN AS ADMINISTRATOR` | M1 | ORIGINAL_REQUEST §R3 |
-| 7 | Firebase Error Humanization | Comprehensive 15-code error mapping table in `lib/authErrorMap.ts` | M1 | ORIGINAL_REQUEST §R3 |
-| 8 | Global Light Theme Root Tokens | Rewrite `:root` variables in `index.css` to ACC Light Palette (#F8FAFC, #FFFFFF, #0F172A, #E2E8F0, #059669) | M2 | ORIGINAL_REQUEST §R1 |
-| 9 | Page Backdrop Transparency | Remove opaque dark backgrounds (`bg-slate-900`, `bg-[#080c0a]`, `bg-slate-950`) restoring Opal sky backdrop | M2 | Survey Explorer UX |
-| 10 | Frosted White Glass Cards | High-contrast light cards (`bg-white/95 backdrop-blur-xl border border-slate-200 shadow-xl`) across all routes | M2 | ORIGINAL_REQUEST §R1 |
-| 11 | Dashboard & Portal Light Overhaul | Light theme across Home, Player/Franchise/Admin Dashboards, Modals, Dropdowns, and Empty States | M2 | ORIGINAL_REQUEST §R1 |
-| 12 | Projector & Live Display Light Polish | Light theme & high-contrast typography in Projector (`/projector`) and Public Live (`/live`) | M2 | ORIGINAL_REQUEST §R1 |
-| 13 | Interactive 4:3 Canvas Image Editor | Shared `ImageEditorModal.tsx` with default 4:3 crop box, 1:1 option, zoom slider, pan/drag, 90° rotate | M3 | ORIGINAL_REQUEST §R4 |
-| 14 | Touch Gestures & Action Controls | Pointer events with `touch-action: none`, Pinch-to-zoom, Drag, Fit, Fill, Reset, Cancel controls | M3 | ORIGINAL_REQUEST §R4 |
-| 15 | Non-Destructive Image Re-edit | Preserve raw file & transform coordinates, allowing users to re-crop without re-selecting from disk | M3 | ORIGINAL_REQUEST §R4 |
-| 16 | Storage Path & URL Persistence Fix | Align upload paths to `storage.rules` and persist valid `getDownloadURL` (eliminating `blob:` URL bug) | M3 | Survey Explorer Photo |
-| 17 | Global Unicode Escape Cleanup | Sweep repository and replace all 44 escaped Unicode sequences (`\u2192`, `\u2190`, etc.) with Lucide icons | M4 | ORIGINAL_REQUEST §R5 |
-| 18 | Registration Stepper 6-Column Grid | Fix `ProgressBar.tsx` grid layout (`grid-cols-6`) eliminating wrapping defect for step 6 | M4 | Survey Explorer UX |
-| 19 | Caret-Stable Roll Number Inputs | Stabilize caret position and uppercase normalization in Franchise referred player draft input | M4 | ORIGINAL_REQUEST §R5 |
-| 20 | Photo Cropper Canvas White Fill | Replace dark `#0f172a` canvas fill with clean `#FFFFFF` background | M4 | Survey Explorer UX |
-| 21 | Auth Intent Isolation Test Suite | Vitest tests for route intent isolation, single persona rendering, and storage security | M5 | ORIGINAL_REQUEST §R6 |
-| 22 | Admin Auth & Error Mapping Test Suite | Vitest tests for admin authentication handling, fallback, and 15 error code translations | M5 | ORIGINAL_REQUEST §R6 |
-| 23 | Photo Editor Canvas Test Suite | Vitest tests for 4:3 aspect ratio math, zoom/pan transforms, and dimension enforcement | M5 | ORIGINAL_REQUEST §R6 |
-| 24 | Zero Regression Verification | Verification of 85 Vitest unit tests, 5 Node acceptance suites, `pnpm check`, `pnpm build` | M5 | ORIGINAL_REQUEST §R6 |
-| 25 | Comprehensive Audit Deliverable | Authoritative audit deliverable `docs/ACC_AUTH_UX_FINAL.md` with root cause analyses & test matrix | M6 | ORIGINAL_REQUEST §R6 |
+| 1 | RTDB Fast-Pipe Live Sync | Realtime Database WebSocket channel for sub-100ms bid, leader, and lot broadcasts | M1 | Survey Explorer Sync |
+| 2 | Fine-Grained Reactive DOM Patching | Targeted DOM element updates avoiding page-level innerHTML thrashing and input blur | M1 | Survey Explorer Sync |
+| 3 | Server-Time Offset Synchronized Timer | Cross-device timer countdown adhering to server deadlines within ±1 second | M1 | ORIGINAL_REQUEST §R2 |
+| 4 | Admin SVG Timer Ring Selector Fix | Align SVG ring stroke-dasharray selector ('327' & '157') restoring countdown ring animation | M1 | Survey Explorer Sync |
+| 5 | Reactive Franchise & Squad Sync | Add onSnapshot listener for franchises and handle FRANCHISE_STATE_MUTATION in BroadcastChannel | M1 | Survey Explorer Sync |
+| 6 | Resilient Tri-State Connection Badges | LIVE/RECONNECTING/OFFLINE indicators across Admin, Franchise, Projector, and Public views | M1 | ORIGINAL_REQUEST §R2 |
+| 7 | Network Reconnect Auto-Resubscription | Fix online event listener to call RealtimeManager.subscribeAuctionState | M1 | Survey Explorer Sync |
+| 8 | Auth Route Query Parameter Isolation | Support /login?mode=player, franchise, and admin rendering single-persona forms | M1 | ORIGINAL_REQUEST §R1 |
+| 9 | Secure Session Lifecycle & Logout Loop Fix | Clear acc_last_active_view on logout and eliminate auto-login bypass on #admin | M1 | Survey Explorer Features |
+| 10 | Direct Assign & Undo Sale Relational Integrity | Set soldTo, soldPrice on direct assign; fix alphanumeric roll truncation; support undo refund | M1 | Survey Explorer Features |
+| 11 | Manual Lot Modal String ID Syntax Fix | Quote player IDs in revealAndStartAuctionLot('${p.id}') preventing JS syntax crashes | M1 | Survey Explorer Features |
+| 12 | Quick Lot Call Number Mapping | Map Lot # correctly to catalog lots rather than searching by player ID | M1 | Survey Explorer Features |
+| 13 | Draw Mode Toggle State Alignment | Fix toggleDrawMode to cycle AUTO <-> MANUAL properly, making manual lot selection accessible | M1 | Survey Explorer Features |
+| 14 | Photo Cropper Clean Canvas Fill | Replace dark #0b0f19 fill with transparent/clean fill preserving PNG logos and photos | M1 | Survey Explorer Features |
+| 15 | Franchise Approval Dual Account Creation | Provision both Coordinator and Team Leader (Captain) accounts upon franchise approval | M1 | Survey Explorer Features |
+| 16 | Scoped Keyboard Shortcuts & Admin Modals | Gate keyboard shortcuts (H, S, P, U, B, A, D, N, R, Space) and timer zero modals strictly to Admin role | M1 | Survey Explorer Features |
+| 17 | Franchise Terminal Pass Action Wiring | Connect PASS button to passLot(myFranchise.id) properly recording franchise pass status | M1 | Survey Explorer Features |
+| 18 | Public View Lot Index Synchronization | Fix public view lot resolution using master players index rather than filtered subset | M1 | Survey Explorer Features |
+| 19 | Franchise Cards Dynamic Status Badges | Reflect actual franchise status (ACTIVE, PENDING_APPROVAL, DISABLED) on public franchise cards | M1 | Survey Explorer Features |
+| 20 | Franchise Public Registration Typo Fix | Correct RealtimeManager method call in franchise registration avoiding runtime TypeError | M1 | Survey Explorer Sync |
+| 21 | End-to-End Automated Acceptance Verification | Comprehensive test suites validating all role workflows, real-time sync, and edge cases | M2 | ORIGINAL_REQUEST §R1 |
+| 22 | Adversarial Stress & Chaos Verification | Boundary conditions, concurrent bidding, clock drift simulation, network toggle tests | M2 | Project Pattern Tier 5 |
+| 23 | 3-File Bit-for-Bit SHA-256 Byte Parity | Exact byte parity across Acc-Auction-Os.html, index.html, and acc-auction-portal/dist/index.html | M3 | ORIGINAL_REQUEST §R3 |
+| 24 | Firebase Hosting Production Deployment | Deploy to studio-6471864054-30ce7 and verify HTTP 200 on live web app | M3 | ORIGINAL_REQUEST §R3 |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| M1 | Auth Intent Model & Admin Auth Fix | R2 & R3: Intent routing, AuthContext single listener, role route guards, Admin email/password fix & error mapping | none | PLANNED |
-| M2 | Global Light Theme Enforcement | R1: index.css tokens, index.html, main.tsx, Home, Login, Dashboards, Projector, Live light styling | M1 | PLANNED |
-| M3 | Interactive Photo & Logo Canvas Editor | R4: `ImageEditorModal.tsx`, 4:3 / 1:1 crop, pan/zoom/rotate, touch gestures, storage path alignment | none | PLANNED |
-| M4 | Registration Multi-Step UX & Unicode Cleanup | R5: Replace 44 unicode escapes, fix ProgressBar 6-col grid, franchise roll input caret stabilization | M2, M3 | PLANNED |
-| M5 | Automated Testing & Zero Regression Verification | R6: Vitest suites (`authIntentIsolation`, `adminAuthErrorMapping`, `photoEditor`), run full test suite, pnpm check, build | M1, M2, M3, M4 | PLANNED |
-| M6 | Comprehensive Deliverable & Audit Readiness | R6: Author `docs/ACC_AUTH_UX_FINAL.md`, Reviewer & Forensic Auditor gates, final verification | M5 | PLANNED |
+| M1 | Core Platform Remediation & Live Sync Engine | Features 1–20: RTDB fast-pipe, granular DOM patching, timer clock sync, SVG ring fix, franchise sync, connection badges, reconnect, auth query isolation, logout fix, direct assign & undo, manual lot syntax, quick call, photo cropper fill, captain account, scoped shortcuts, pass button, public lot sync, registration typo | none | IN_PROGRESS |
+| M2 | E2E Verification & Adversarial Testing | Features 21–22: Comprehensive automated acceptance testing, cross-device sync simulation, adversarial stress testing | M1 | PLANNED |
+| M3 | 3-File Byte Parity & Production Deployment | Features 23–24: SHA-256 byte parity synchronization, Firebase Hosting deployment, live URL verification | M2 | PLANNED |
 
 ## Interface Contracts
 
-### Auth Intent & Route Contract
-- URLs: `/login?mode=player`, `/login?mode=franchise`, `/login?mode=admin`.
-- Behavior:
-  - If `mode === 'player'`: Render strictly Player Google Sign-In. Auto-redirect only if `userDoc.role === 'PLAYER'`.
-  - If `mode === 'franchise'`: Render strictly Franchise Google Sign-In. Auto-redirect only if `userDoc.role.startsWith('FRANCHISE')`.
-  - If `mode === 'admin'`: Render strictly Admin Email & Password login. Auto-redirect only if `['SUPER_ADMIN', 'ADMIN'].includes(userDoc.role)`.
-- Protected Routes:
-  - `/player`: `allowedRoles={['PLAYER']}` (exclude admin/coordinator roles).
-
-### Firebase Error Humanization Contract
-- File: `acc-auction-portal/client/src/lib/authErrorMap.ts`
-- Signature: `mapFirebaseAuthError(error: any): string`
-- Handles: `auth/configuration-not-found`, `auth/user-not-found`, `auth/wrong-password`, `auth/invalid-credential`, `auth/network-request-failed`, `auth/too-many-requests`, `auth/user-disabled`, etc.
-
-### Image Editor Contract
-- File: `acc-auction-portal/client/src/components/ui/ImageEditorModal.tsx`
-- Props:
-  ```ts
-  interface ImageEditorModalProps {
-    isOpen: boolean;
-    rawFile: File | null;
-    initialState?: ImageTransformState;
-    defaultAspect?: '4:3' | '1:1';
-    onConfirm: (result: { blob: Blob; dataUrl: string; state: ImageTransformState }) => void;
-    onCancel: () => void;
+### Live Sync State Contract (RTDB `/auctionState/live`)
+- Path: `auctionState/live`
+- Schema:
+  ```json
+  {
+    "lotId": "string | number",
+    "lotIndex": "number",
+    "currentBid": "number",
+    "leadingBidderId": "number | string | null",
+    "timerDeadline": "number | null",
+    "timerDuration": "number",
+    "timerRunning": "boolean",
+    "timerVersion": "number",
+    "auctionPaused": "boolean",
+    "pausedRemainingMs": "number | null",
+    "timestamp": "number",
+    "updatedBy": "string"
   }
   ```
 
+### Reactive DOM Patching Contract
+- `updateLiveAuctionDOM(state, isPartial)`:
+  - Updates `#liveCurrentBidText`, `#liveLeadingBidderName`, `#liveNextLegalBid`, `#liveBidIncrement`.
+  - Animates price badge if bid increased.
+  - Does NOT rewrite `appMain.innerHTML`.
+- `updateTimerDOM(remainingMs, remainingSeconds, isRunning, isPaused)`:
+  - Updates all `.timer-countdown-number` and `.admin-timer-text`.
+  - Updates SVG circles matching `svg circle[data-timer-ring], svg circle[stroke-dasharray='157'], svg circle[stroke-dasharray='327']`.
+
+### Direct Assign & Undo Sale Contract
+- Assigned Player Object:
+  - `player.status = 'SOLD'`
+  - `player.franchiseId = franchise.id`
+  - `player.franchiseName = franchise.name`
+  - `player.soldTo = franchise.name`
+  - `player.soldPrice = price`
+  - `player.salePrice = price`
+  - `player.price = price`
+- `executeUndoSale(playerId)`:
+  - Finds franchise by `player.soldTo || player.franchiseName`.
+  - Refunds `player.soldPrice || player.price || player.salePrice`.
+  - Removes player from franchise squad.
+  - Resets player status to `'AVAILABLE'`.
+
 ## Code Layout & Write Boundaries
-- **Milestone 1 Files**:
-  - `acc-auction-portal/client/src/contexts/AuthContext.tsx`
-  - `acc-auction-portal/client/src/pages/LoginPage.tsx`
-  - `acc-auction-portal/client/src/components/auth/ProtectedRoute.tsx`
-  - `acc-auction-portal/client/src/lib/authErrorMap.ts`
-  - `acc-auction-portal/client/src/App.tsx`
-- **Milestone 2 Files**:
-  - `acc-auction-portal/client/src/index.css`
-  - `acc-auction-portal/client/index.html`
-  - `acc-auction-portal/client/src/main.tsx`
-  - `acc-auction-portal/client/src/pages/Home.tsx`
-  - `acc-auction-portal/client/src/pages/AdminDashboardPage.tsx`
-  - `acc-auction-portal/client/src/pages/AdminAuctionPage.tsx`
-  - `acc-auction-portal/client/src/pages/ProjectorPage.tsx`
-  - `acc-auction-portal/client/src/pages/PublicLivePage.tsx`
-  - `acc-auction-portal/client/src/pages/PlayerDashboardPage.tsx`
-  - `acc-auction-portal/client/src/pages/FranchiseBiddingPage.tsx`
-- **Milestone 3 Files**:
-  - `acc-auction-portal/client/src/components/ui/ImageEditorModal.tsx`
-  - `acc-auction-portal/client/src/components/registration/PhotoStep.tsx`
-- **Milestone 4 Files**:
-  - `acc-auction-portal/client/src/components/registration/ProgressBar.tsx`
-  - `acc-auction-portal/client/src/components/registration/IdentityStep.tsx`
-  - `acc-auction-portal/client/src/components/registration/StatsCricHeroesStep.tsx`
-  - `acc-auction-portal/client/src/components/registration/ReferenceBasePriceStep.tsx`
-  - `acc-auction-portal/client/src/components/registration/ActionBar.tsx`
-  - `acc-auction-portal/client/src/pages/PlayerRegistrationPage.tsx`
-  - `acc-auction-portal/client/src/pages/FranchiseRegistrationPage.tsx`
-- **Milestone 5 Files**:
-  - `acc-auction-portal/client/src/__tests__/authIntentIsolation.test.ts`
-  - `acc-auction-portal/client/src/__tests__/adminAuthErrorMapping.test.ts`
-  - `acc-auction-portal/client/src/__tests__/photoEditor.test.ts`
-- **Milestone 6 Files**:
-  - `docs/ACC_AUTH_UX_FINAL.md`
+- Core Application: `B:\projects\ACC\Acc-Auction-Os.html`
+- Mirrors (Byte Parity):
+  - `B:\projects\ACC\index.html`
+  - `B:\projects\ACC\acc-auction-portal\dist\index.html`
+- Sync Script: `B:\projects\ACC\acc-auction-portal\sync-dist.js`
+- Test Suites:
+  - `B:\projects\ACC\tests/`

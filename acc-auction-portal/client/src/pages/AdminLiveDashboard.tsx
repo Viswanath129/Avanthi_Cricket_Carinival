@@ -209,6 +209,10 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
 
   // Synchronized countdown timer
   useEffect(() => {
+    if (currentLot?.timerRunning === false) {
+      setTimeLeft(typeof currentLot?.timerSeconds === 'number' ? currentLot.timerSeconds : 30);
+      return;
+    }
     if (!currentLot?.timerDeadline || auctionState?.status === 'PAUSED') {
       if (auctionState?.status === 'PAUSED') {
         const pausedSec = typeof auctionState?.pausedRemainingMs === 'number'
@@ -227,7 +231,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
         : Number(currentLot.timerDeadline);
 
       const serverNow = Date.now() + serverOffset;
-      const remaining = Math.max(0, Math.ceil((deadline - serverNow) / 1000));
+      const remaining = Math.max(0, (deadline - serverNow) / 1000);
       setTimeLeft(remaining);
     }, 100);
 
@@ -854,9 +858,9 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
 
   // Timer ring styling
   const getTimerStyles = () => {
-    if (timeLeft > 10) return 'text-emerald-400 border-emerald-500/40 bg-emerald-950/20';
-    if (timeLeft > 5) return 'text-amber-400 border-amber-500/40 bg-amber-950/20';
-    return 'text-red-400 border-red-500/60 bg-red-950/40 animate-pulse';
+    if (timeLeft > 10) return 'text-emerald-800 border-emerald-300 bg-emerald-50';
+    if (timeLeft > 5) return 'text-amber-800 border-amber-300 bg-amber-50';
+    return 'text-red-800 border-red-300 bg-red-50 animate-pulse';
   };
 
   return (
@@ -1064,12 +1068,12 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
       {/* ========================================================= */}
       {/* MAIN 3-COLUMN WORKSPACE (Laptop 1440x900 Zero-Scroll)     */}
       {/* ========================================================= */}
-      <main className="flex-1 min-h-0 p-3 grid grid-cols-12 gap-3 overflow-hidden">
+      <main className="flex-1 min-h-0 p-3 grid grid-cols-1 xl:grid-cols-12 gap-3 overflow-y-auto xl:overflow-hidden">
         
         {/* ======================================================= */}
         {/* COL 1 (Cols 1..4): 3. LIVE BID PANEL & 4. ACTION ROW    */}
         {/* ======================================================= */}
-        <div className="col-span-4 flex flex-col gap-3 min-h-0 overflow-hidden">
+        <div className="col-span-1 xl:col-span-4 flex flex-col gap-3 min-h-0 overflow-hidden">
           
           {/* HERO BID CARD */}
           <div className="bg-white border border-slate-200 rounded-lg p-3.5 flex flex-col justify-between shrink-0 shadow-sm relative overflow-hidden">
@@ -1082,9 +1086,9 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
               </div>
 
               {/* Timer Pill */}
-              <div className={`border rounded-lg px-3 py-1.5 text-center flex flex-col items-center justify-center font-mono ${getTimerStyles()}`}>
+              <div className={`border rounded-xl px-4 py-2 text-center flex flex-col items-center justify-center font-mono min-w-28 shadow-sm ${getTimerStyles()}`}>
                 <span className="text-[9px] uppercase tracking-wider block font-bold">TIMER</span>
-                <span className="text-2xl font-black tabular-nums">{timeLeft}s</span>
+                <span className="text-4xl font-black tabular-nums leading-none">{timeLeft.toFixed(1)}<small className="ml-1 text-sm">s</small></span>
               </div>
             </div>
 
@@ -1247,7 +1251,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
                   disabled={isActionLoading}
                   className="flex-1 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-slate-900 rounded text-xs font-mono font-bold flex items-center justify-center gap-2 shadow-sm"
                 >
-                  <span>Draw Next Random Player</span>
+                  <span>START / OPEN LOT</span>
                   <span className="text-[10px] bg-emerald-900 px-1.5 py-0.2 rounded opacity-90">[ Space ]</span>
                 </button>
               )}
@@ -1267,7 +1271,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
         {/* ======================================================= */}
         {/* COL 2 (Cols 5..8): 6. SCARCITY, IN-PLAY LISTS, 7. AUDIT */}
         {/* ======================================================= */}
-        <div className="col-span-4 flex flex-col gap-3 min-h-0 overflow-hidden">
+        <div className="col-span-1 xl:col-span-4 flex flex-col gap-3 min-h-0 overflow-hidden">
           
           {/* 6. SCARCITY OVERVIEW */}
           <div className="bg-white border border-slate-200 rounded-lg p-2.5 shrink-0">
@@ -1390,7 +1394,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
         {/* ======================================================= */}
         {/* COL 3 (Cols 9..12): 5. 11 FRANCHISE LIVE TABLE          */}
         {/* ======================================================= */}
-        <div className="col-span-4 flex flex-col min-h-0 overflow-hidden bg-white border border-slate-200 rounded-lg p-2.5">
+        <div className="col-span-1 xl:col-span-4 flex flex-col min-h-0 overflow-hidden bg-white border border-slate-200 rounded-lg p-2.5">
           <div className="flex items-center justify-between pb-2 border-b border-slate-200 shrink-0">
             <div>
               <span className="font-mono text-xs font-bold text-slate-300 uppercase tracking-wider">FRANCHISE GRID (11 TEAMS)</span>

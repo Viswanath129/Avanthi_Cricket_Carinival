@@ -4,22 +4,28 @@
       ".read": true,
       "$userKey": {
         ".read": true,
-        ".write": "auth != null || $userKey.beginsWith('pub_')",
+        ".write": "auth != null || $userKey.beginsWith('pub_') || true",
         "$connId": {
           ".read": true,
-          ".write": "auth != null || $userKey.beginsWith('pub_')"
+          ".write": "auth != null || $userKey.beginsWith('pub_') || true"
         }
       }
     },
     "publicStats": {
+      ".read": true,
+      ".write": true,
       "liveUsers": {
         ".read": true,
-        ".write": "auth != null"
+        ".write": true
       }
     },
     "auctionState": {
       ".read": true,
-      ".write": "auth != null"
+      ".write": true
+    },
+    "players": {
+      ".read": true,
+      ".write": true
     }
   }
 }

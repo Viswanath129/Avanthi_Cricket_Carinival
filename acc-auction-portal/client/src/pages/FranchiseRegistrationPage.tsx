@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, Link } from 'wouter';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { 
@@ -25,7 +25,14 @@ import {
   Upload, 
   Plus, 
   Trash2, 
-  Clock 
+  Clock,
+  Crop,
+  ZoomIn,
+  ZoomOut,
+  Check,
+  X,
+  RefreshCw,
+  UploadCloud
 } from 'lucide-react';
 
 const OFFICIAL_TEAMS = [
@@ -163,14 +170,132 @@ export default function FranchiseRegistrationPage() {
     }
   };
 
+  // 4:3 Franchise Logo Editor State
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const [rawLogoSrc, setRawLogoSrc] = useState<string | null>(null);
+  const [showLogoCropModal, setShowLogoCropModal] = useState(false);
+  const [logoCropZoom, setLogoCropZoom] = useState(1);
+  const [logoCropPan, setLogoCropPan] = useState({ x: 0, y: 0 });
+  const [logoCropError, setLogoCropError] = useState<string | null>(null);
+  const [isLogoCropping, setIsLogoCropping] = useState(false);
+  const [isDraggingLogo, setIsDraggingLogo] = useState(false);
+  const [dragStartPos, setDragStartPos] = useState({ x: 0, y: 0 });
+  const [initialPanPos, setInitialPanPos] = useState({ x: 0, y: 0 });
+
+  const handleLogoMouseDown = (e: React.MouseEvent) => {
+    setIsDraggingLogo(true);
+    setDragStartPos({ x: e.clientX, y: e.clientY });
+    setInitialPanPos(logoCropPan);
+  };
+
+  const handleLogoMouseMove = (e: React.MouseEvent) => {
+    if (!isDraggingLogo) return;
+    const dx = e.clientX - dragStartPos.x;
+    const dy = e.clientY - dragStartPos.y;
+    setLogoCropPan({
+      x: initialPanPos.x + dx,
+      y: initialPanPos.y + dy,
+    });
+  };
+
+  const handleLogoMouseUp = () => {
+    setIsDraggingLogo(false);
+  };
+
+  const handleLogoTouchStart = (e: React.TouchEvent) => {
+    if (!e.touches[0]) return;
+    setIsDraggingLogo(true);
+    setDragStartPos({ x: e.touches[0].clientX, y: e.touches[0].clientY });
+    setInitialPanPos(logoCropPan);
+  };
+
+  const handleLogoTouchMove = (e: React.TouchEvent) => {
+    if (!isDraggingLogo || !e.touches[0]) return;
+    const dx = e.touches[0].clientX - dragStartPos.x;
+    const dy = e.touches[0].clientY - dragStartPos.y;
+    setLogoCropPan({
+      x: initialPanPos.x + dx,
+      y: initialPanPos.y + dy,
+    });
+  };
+
+  const handleCommitLogo43Crop = async () => {
+    if (!rawLogoSrc) return;
+    setIsLogoCropping(true);
+
+    try {
+      const img = new Image();
+      img.src = rawLogoSrc;
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+      });
+
+      // Render into authoritative 800x600 (4:3) canvas
+      const canvas = document.createElement('canvas');
+      canvas.width = 800;
+      canvas.height = 600;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error("Could not initialize 2D canvas");
+
+      // Background fill
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, 800, 600);
+
+      // Compute scale & position with zoom/pan
+      const baseScale = Math.max(800 / img.naturalWidth, 600 / img.naturalHeight);
+      const finalScale = baseScale * logoCropZoom;
+      const drawW = img.naturalWidth * finalScale;
+      const drawH = img.naturalHeight * finalScale;
+      const drawX = (800 - drawW) / 2 + logoCropPan.x;
+      const drawY = (600 - drawH) / 2 + logoCropPan.y;
+
+      ctx.drawImage(img, drawX, drawY, drawW, drawH);
+
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          setLogoCropError("Failed to encode cropped 4:3 logo");
+          setIsLogoCropping(false);
+          return;
+        }
+        const croppedFile = new File([blob], `franchise_logo_43_${Date.now()}.png`, { type: 'image/png' });
+        const previewUrl = canvas.toDataURL('image/png');
+        setFormData(prev => ({
+          ...prev,
+          logoFile: croppedFile,
+          logoPreview: previewUrl,
+        }));
+        setShowLogoCropModal(false);
+        setIsLogoCropping(false);
+      }, 'image/png');
+    } catch {
+      setLogoCropError("Error while generating 4:3 cropped franchise logo.");
+      setIsLogoCropping(false);
+    }
+  };
+
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setFormData(prev => ({
-      ...prev,
-      logoFile: file,
-      logoPreview: URL.createObjectURL(file),
-    }));
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      if (!file.type.startsWith('image/')) {
+        setLogoCropError("Invalid file format. Please upload a PNG, JPEG, or WebP logo.");
+        return;
+      }
+      if (file.size > 8 * 1024 * 1024) {
+        setLogoCropError("Logo file exceeds 8MB limit. Please upload an optimized file.");
+        return;
+      }
+      setLogoCropError(null);
+      const reader = new FileReader();
+      reader.onload = () => {
+        setRawLogoSrc(reader.result as string);
+        setLogoCropZoom(1);
+        setLogoCropPan({ x: 0, y: 0 });
+        setShowLogoCropModal(true);
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleCoordPhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -564,26 +689,99 @@ export default function FranchiseRegistrationPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-300 mb-2">
-                  Franchise Logo
-                </label>
-                <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 rounded-2xl border-2 border-dashed border-slate-700 bg-slate-900 flex items-center justify-center overflow-hidden">
-                    {formData.logoPreview ? (
-                      <img src={formData.logoPreview} alt="Logo" className="w-full h-full object-cover" />
-                    ) : (
-                      <span className="text-xs text-slate-500 font-mono">Logo</span>
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleLogoUpload}
-                      className="block w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-950/60 file:text-blue-300 hover:file:bg-blue-900 cursor-pointer"
-                    />
-                    <p className="text-[11px] text-slate-500 mt-1">PNG, JPG, or SVG emblem.</p>
-                  </div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-300">
+                    Franchise Logo (4:3 Official Ratio) <span className="text-rose-400">*</span>
+                  </label>
+                  <span className="text-[11px] font-mono text-emerald-400 font-semibold">
+                    800×600 STADIUM STANDARD
+                  </span>
+                </div>
+                
+                <input
+                  ref={logoInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={handleLogoUpload}
+                  className="hidden"
+                />
+
+                <div className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-slate-700 rounded-2xl bg-slate-900/60 backdrop-blur-xl">
+                  {formData.logoPreview ? (
+                    <div className="flex flex-col items-center space-y-4">
+                      {/* 4:3 Rectangular Stadium Projector Frame */}
+                      <div className="relative w-64 h-48 rounded-xl overflow-hidden border-4 border-emerald-500 shadow-2xl bg-slate-950 flex items-center justify-center">
+                        <img
+                          src={formData.logoPreview}
+                          alt="4:3 Franchise Logo Preview"
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute top-2 right-2 px-2 py-0.5 rounded bg-black/70 text-emerald-400 text-[10px] font-mono font-bold border border-emerald-500/40">
+                          4:3 VERIFIED
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-950/60 text-emerald-300 border border-emerald-700">
+                          ✓ 4:3 Stadium & Projector View Ready (800x600)
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {rawLogoSrc && (
+                          <button
+                            type="button"
+                            onClick={() => setShowLogoCropModal(true)}
+                            className="min-h-[40px] px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-xl text-xs transition-all shadow-sm flex items-center gap-2"
+                          >
+                            <Crop size={14} />
+                            <span>ADJUST CROP</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => logoInputRef.current?.click()}
+                          className="min-h-[40px] px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-xl text-xs transition-all shadow-sm flex items-center gap-2"
+                        >
+                          <RefreshCw size={14} />
+                          <span>REPLACE LOGO</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center text-center space-y-3">
+                      <div
+                        onClick={() => logoInputRef.current?.click()}
+                        className="w-48 h-36 rounded-xl border-2 border-dashed border-emerald-500/50 hover:border-emerald-500 flex flex-col items-center justify-center cursor-pointer bg-emerald-950/20 hover:scale-105 transition-all group"
+                      >
+                        <div className="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-lg font-bold group-hover:scale-110 transition-transform">
+                          +
+                        </div>
+                        <span className="text-xs font-semibold text-emerald-400 mt-2">
+                          Choose 4:3 Franchise Logo
+                        </span>
+                      </div>
+
+                      <p className="text-xs text-slate-400 max-w-xs">
+                        PNG, JPG, or WebP. Selecting an emblem automatically opens the 4:3 crop editor to position and frame your team logo.
+                      </p>
+
+                      <button
+                        type="button"
+                        onClick={() => logoInputRef.current?.click()}
+                        className="min-h-[40px] px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl text-xs transition-all shadow-sm flex items-center gap-2"
+                      >
+                        <UploadCloud size={16} />
+                        <span>Select Logo File</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {logoCropError && (
+                    <div className="mt-4 p-3 rounded-lg bg-red-950/40 border border-red-800 text-xs text-red-400 font-medium">
+                      ⚠ {logoCropError}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -925,7 +1123,7 @@ export default function FranchiseRegistrationPage() {
               disabled={isSubmitting}
               className="min-h-[46px] px-6 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs uppercase tracking-wider rounded-xl transition-all"
             >
-              \u2190 Previous
+              ← Previous
             </button>
           ) : <div />}
 
@@ -951,6 +1149,130 @@ export default function FranchiseRegistrationPage() {
           )}
         </div>
       </div>
+
+      {/* Interactive 4:3 Franchise Logo Crop Modal */}
+      {showLogoCropModal && rawLogoSrc && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-lg p-6 rounded-2xl bg-slate-900 border border-slate-700 space-y-4 shadow-2xl">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="font-serif font-bold text-base text-white">Crop Franchise Logo to 4:3 Ratio</h3>
+                <p className="text-[11px] text-slate-400">Position and zoom your team emblem within the official 4:3 catalog frame.</p>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setShowLogoCropModal(false)} 
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* 4:3 Cropper Viewport Container with Drag Support */}
+            <div 
+              className="relative w-full aspect-[4/3] bg-slate-950 rounded-xl overflow-hidden border-2 border-emerald-500 shadow-inner flex items-center justify-center cursor-grab active:cursor-grabbing select-none touch-none"
+              onMouseDown={handleLogoMouseDown}
+              onMouseMove={handleLogoMouseMove}
+              onMouseUp={handleLogoMouseUp}
+              onMouseLeave={handleLogoMouseUp}
+              onTouchStart={handleLogoTouchStart}
+              onTouchMove={handleLogoTouchMove}
+              onTouchEnd={handleLogoMouseUp}
+            >
+              <img
+                src={rawLogoSrc}
+                alt="Source Logo Crop"
+                style={{
+                  transform: `scale(${logoCropZoom}) translate(${logoCropPan.x / logoCropZoom}px, ${logoCropPan.y / logoCropZoom}px)`,
+                  transition: isDraggingLogo ? 'none' : 'transform 0.05s ease-out',
+                }}
+                className="max-w-none max-h-none pointer-events-none select-none"
+                draggable={false}
+              />
+              {/* Rule of Thirds Grid */}
+              <div className="absolute inset-0 pointer-events-none border border-emerald-500/40 grid grid-cols-3 grid-rows-3 opacity-30">
+                <div className="border-r border-b border-white" />
+                <div className="border-r border-b border-white" />
+                <div className="border-b border-white" />
+                <div className="border-r border-b border-white" />
+                <div className="border-r border-b border-white" />
+                <div className="border-b border-white" />
+                <div className="border-r border-white" />
+                <div className="border-r border-white" />
+                <div />
+              </div>
+              {/* 4:3 Ratio Badge */}
+              <div className="absolute top-2 right-2 px-2 py-0.5 rounded bg-black/70 text-emerald-400 text-[10px] font-mono font-bold border border-emerald-500/40 pointer-events-none">
+                4:3
+              </div>
+            </div>
+
+            {/* Zoom & Transform Controls */}
+            <div className="flex items-center justify-between gap-4 p-3 rounded-xl bg-slate-800/80 border border-slate-700">
+              <span className="text-xs font-mono text-slate-300 flex items-center gap-1.5 font-bold">
+                <Crop size={14} className="text-emerald-400" />
+                ZOOM: {(logoCropZoom * 100).toFixed(0)}%
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setLogoCropZoom(prev => Math.max(0.5, prev - 0.15))}
+                  className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-white font-bold"
+                  title="Zoom Out"
+                >
+                  <ZoomOut size={16} />
+                </button>
+                <input
+                  type="range"
+                  min="0.5"
+                  max="3.0"
+                  step="0.05"
+                  value={logoCropZoom}
+                  onChange={e => setLogoCropZoom(parseFloat(e.target.value))}
+                  className="w-32 accent-emerald-500 cursor-pointer"
+                />
+                <button
+                  type="button"
+                  onClick={() => setLogoCropZoom(prev => Math.min(3.0, prev + 0.15))}
+                  className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-white font-bold"
+                  title="Zoom In"
+                >
+                  <ZoomIn size={16} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLogoCropZoom(1);
+                    setLogoCropPan({ x: 0, y: 0 });
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-[11px] font-semibold text-slate-300"
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowLogoCropModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 font-semibold transition-colors"
+              >
+                CANCEL
+              </button>
+              <button
+                type="button"
+                onClick={handleCommitLogo43Crop}
+                disabled={isLogoCropping}
+                className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-500/20 transition-all disabled:opacity-50"
+              >
+                <Check size={14} />
+                <span>{isLogoCropping ? 'CROPPING...' : 'USE THIS LOGO (4:3)'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
