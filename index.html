@@ -2679,8 +2679,12 @@
     // Normalize franchise metadata
     franchises.forEach((f, idx) => {
       if (!f.franchiseId) f.franchiseId = 'FR' + String(f.id || (idx + 1)).padStart(3, '0');
-      if (!f.approvalStatus) f.approvalStatus = 'APPROVED';
-      if (!f.status) f.status = 'ACTIVE';
+      if (!f.approvalStatus) {
+        f.approvalStatus = (f.id <= 11) ? 'APPROVED' : 'PENDING_APPROVAL';
+      }
+      if (!f.status) {
+        f.status = (f.id <= 11) ? 'ACTIVE' : 'PENDING_APPROVAL';
+      }
     });
     let deletedFranchises = JSON.parse(localStorage.getItem("acc_deleted_franchises_2026")) || [];
     let players = JSON.parse(localStorage.getItem("acc_players_2026")) || DEFAULT_PLAYERS;
@@ -5630,6 +5634,38 @@
       openFranchiseCredentialModal(f.id);
     }
 
+    function adminRejectFranchise(fId, reason) {
+      if (currentUser.role !== 'SUPER_ADMIN') {
+        showToast("ACCESS DENIED: Super Admin privilege required to reject franchise applications.", "error");
+        return;
+      }
+      const f = franchises.find(x => x.id == fId || x.franchiseId == fId);
+      if (!f) return;
+      const rejectReason = reason || prompt(`Reason for rejecting franchise "${f.name}" application:`, "Incomplete documentation or unverified department authorization") || "Application rejected by Tournament Directorate";
+      f.approvalStatus = 'REJECTED';
+      f.status = 'REJECTED';
+      f.rejectionReason = rejectReason;
+      f.rejectedAt = new Date().toISOString();
+
+      auditLog.unshift({
+        time: new Date().toLocaleTimeString(),
+        action: "FRANCHISE_REJECTED",
+        actorUid: currentUser.uid || 'usr_superadmin',
+        role: currentUser.role,
+        targetId: f.franchiseId || f.name,
+        timestamp: new Date().toISOString(),
+        beforeStatus: "PENDING_APPROVAL",
+        afterStatus: "REJECTED",
+        details: `Franchise ${f.name} rejected: ${rejectReason}`
+      });
+
+      saveDatabase();
+      syncFranchiseToFirebase(f, 'REJECT');
+      broadcastAuthoritativeState();
+      showToast(`Franchise application for "${f.name}" has been REJECTED.`, "info");
+      renderCurrentView();
+    }
+
     function adminDisableFranchise(fId) {
       const f = franchises.find(x => x.id == fId || x.franchiseId == fId);
       if (!f) return;
@@ -6230,6 +6266,12 @@
       const f = franchises.find(item => item.id === franchiseId);
       const cur = players[lotIndex];
       if (!f || !cur || cur.status !== 'AVAILABLE' || auctionPaused) return;
+
+      // Strict Super Admin Approval Gate
+      if (f.approvalStatus !== 'APPROVED' || f.status === 'PENDING_APPROVAL' || f.status === 'DISABLED' || f.status === 'REJECTED') {
+        showToast(`BID REJECTED: Franchise "${f.name}" is pending Super Admin approval.`, "error");
+        return;
+      }
 
       // Prevent same team bidding continuously against itself
       if (leadingBidderId && (leadingBidderId === franchiseId || String(leadingBidderId) === String(franchiseId))) {
@@ -7179,7 +7221,9 @@
                     <div style="font-size: 0.6875rem; font-weight: 700; color: var(--color-green); text-transform: uppercase;">AVANTHI CRICKET CARNIVAL</div>
                   </div>
                 </div>
-                <span class="status-badge status-live">VERIFIED PASS</span>
+                ${isPlayerApproved(p) 
+                  ? `<span class="status-badge status-live">VERIFIED PASS</span>`
+                  : `<span class="status-badge status-warning" style="background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.4);">AWAITING ADMIN APPROVAL</span>`}
               </div>
 
               <div style="display: flex; gap: var(--space-4); align-items: center;">
@@ -7193,26 +7237,32 @@
                 </div>
               </div>
 
+              ${!isPlayerApproved(p) ? `
+                <div style="margin-top: var(--space-3); padding: 8px 12px; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 6px; font-size: 0.75rem; color: #f59e0b;">
+                  ⚠️ <strong>Provisional Registration:</strong> This profile is pending Super Admin review. Player auction eligibility will be unlocked upon admin verification.
+                </div>
+              ` : ''}
+
               <div style="margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px dashed var(--border-medium); display: flex; justify-content: space-between; align-items: center;">
                 <div style="font-size: 0.6875rem; color: var(--text-muted);">
                   LOT ID: #${p.id}<br>DATE: OCT 2026
                 </div>
-                <div class="font-mono" style="font-size: 0.6875rem; color: var(--color-green); letter-spacing: 0.1em;">
-                  OFFICIAL AUTHENTICATED PASS
+                <div class="font-mono" style="font-size: 0.6875rem; color: ${isPlayerApproved(p) ? 'var(--color-green)' : 'var(--color-orange)'}; letter-spacing: 0.1em;">
+                  ${isPlayerApproved(p) ? 'OFFICIAL AUTHENTICATED PASS' : 'PROVISIONAL REGISTRATION PASS'}
                 </div>
               </div>
             </div>
 
             <div style="display: flex; gap: var(--space-3); justify-content: flex-end;">
               <button class="btn btn-secondary" onclick="window.print()">PRINT PASS</button>
-              <button class="btn btn-primary" onclick="downloadPassAsImage('${p.name}', '${p.roll}')">SAVE PASS IMAGE</button>
+              <button class="btn btn-primary" onclick="downloadPassAsImage('${p.name}', '${p.roll}', ${isPlayerApproved(p)})">SAVE PASS IMAGE</button>
             </div>
           </div>
         </div>
       `;
     }
 
-    function downloadPassAsImage(playerName, roll) {
+    function downloadPassAsImage(playerName, roll, isApproved = true) {
       const canvas = document.createElement("canvas");
       canvas.width = 600;
       canvas.height = 360;
@@ -7223,7 +7273,7 @@
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.fillStyle = "#F6F9FF";
       ctx.fillRect(12, 12, canvas.width - 24, canvas.height - 24);
-      ctx.strokeStyle = "#059669";
+      ctx.strokeStyle = isApproved ? "#059669" : "#D97706";
       ctx.lineWidth = 3;
       ctx.strokeRect(12, 12, canvas.width - 24, canvas.height - 24);
 
@@ -7231,9 +7281,9 @@
       ctx.fillStyle = "#0F172A";
       ctx.font = "bold 24px sans-serif";
       ctx.fillText("AVANTHI CRICKET CARNIVAL 2026", 32, 54);
-      ctx.fillStyle = "#059669";
+      ctx.fillStyle = isApproved ? "#059669" : "#D97706";
       ctx.font = "bold 13px monospace";
-      ctx.fillText("OFFICIAL PLAYER AUCTION PASS", 32, 78);
+      ctx.fillText(isApproved ? "OFFICIAL PLAYER AUCTION PASS" : "PROVISIONAL REGISTRATION PASS", 32, 78);
 
       // Details
       ctx.fillStyle = "#0F172A";
@@ -7242,8 +7292,8 @@
       ctx.fillStyle = "#334155";
       ctx.font = "bold 16px monospace";
       ctx.fillText("ROLL: " + roll, 32, 175);
-      ctx.fillStyle = "#059669";
-      ctx.fillText("STATUS: VERIFIED ELIGIBLE", 32, 205);
+      ctx.fillStyle = isApproved ? "#059669" : "#D97706";
+      ctx.fillText(isApproved ? "STATUS: VERIFIED ELIGIBLE" : "STATUS: PENDING ADMIN APPROVAL", 32, 205);
 
       ctx.fillStyle = "#D97706";
       ctx.font = "bold 15px monospace";
@@ -8818,6 +8868,10 @@
         }
 
         const targetFranchise = franchises.find(item => item.id === fId);
+        if (targetFranchise && (targetFranchise.approvalStatus !== 'APPROVED' || targetFranchise.status === 'PENDING_APPROVAL' || targetFranchise.status === 'REJECTED')) {
+          showToast(`ACCESS DENIED: Franchise "${targetFranchise.name}" application is ${targetFranchise.status === 'REJECTED' ? 'REJECTED' : 'PENDING SUPER ADMIN APPROVAL'}. Bidding terminal is locked until approved.`, "error");
+          return;
+        }
         const expectedFranchisePass = targetFranchise ? generateFranchiseInitialPassword(targetFranchise.name, targetFranchise.id) : '';
         const validFranchisePasswords = [
           user.passwordHash,
@@ -10050,7 +10104,11 @@
                     ${getTeamEmblem(f.id, 38)}
                     <span class="card-title">${f.name}</span>
                   </div>
-                  <span class="status-badge status-connected">ACTIVE</span>
+                  ${(f.approvalStatus === 'APPROVED' && f.status === 'ACTIVE') ? `
+                    <span class="status-badge status-connected">ACTIVE</span>
+                  ` : `
+                    <span class="status-badge status-warning" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3);">PENDING APPROVAL</span>
+                  `}
                 </div>
 
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); background: var(--surface-2); padding: 10px; border-radius: var(--radius-sm);">
@@ -10667,9 +10725,14 @@
                 <div class="form-group" style="margin-bottom: 0;">
                   <label class="form-label" style="font-size: 0.7rem; font-weight: 800; letter-spacing: 0.05em; color: var(--text-bright); margin-bottom: 6px;">TARGET FRANCHISE</label>
                   <select class="form-select auth-clean-input" id="loginFranchiseSelect" onchange="franchiseLoginSelection = parseInt(this.value, 10)" style="width: 100%; text-overflow: ellipsis; white-space: nowrap; overflow: hidden;">
-                    ${franchises.map(f => `
-                      <option value="${f.id}" ${franchiseLoginSelection === f.id ? 'selected' : ''}>${f.name} (${f.short}) — ${f.purse} Credits</option>
-                    `).join('')}
+                    ${franchises.map(f => {
+                      const isApproved = f.approvalStatus === 'APPROVED' && f.status === 'ACTIVE';
+                      return `
+                        <option value="${f.id}" ${franchiseLoginSelection === f.id ? 'selected' : ''} ${!isApproved ? 'disabled style="color: #94a3b8;"' : ''}>
+                          ${f.name} (${f.short}) ${isApproved ? `— ${f.purse} Credits` : '— [PENDING ADMIN APPROVAL]'}
+                        </option>
+                      `;
+                    }).join('')}
                   </select>
                 </div>
 
@@ -13497,6 +13560,54 @@
                 ` : ''}
               </div>
 
+              <!-- PENDING FRANCHISE REGISTRATION APPROVAL QUEUE -->
+              ${isSuperAdmin && franchises.some(f => f.approvalStatus === 'PENDING_APPROVAL' || f.status === 'PENDING_APPROVAL') ? `
+                <div class="surface-card" style="padding: var(--space-4); border: 2px solid var(--color-yellow); background: rgba(245, 158, 11, 0.05); border-radius: var(--radius-md);">
+                  <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <span class="status-indicator status-warning" style="width: 10px; height: 10px;"></span>
+                      <h4 style="font-family: var(--font-display); font-size: 1.05rem; font-weight: 800; color: var(--color-yellow); margin: 0;">
+                        NEW FRANCHISE REGISTRATIONS AWAITING ADMIN APPROVAL (${franchises.filter(f => f.approvalStatus === 'PENDING_APPROVAL' || f.status === 'PENDING_APPROVAL').length})
+                      </h4>
+                    </div>
+                    <span class="status-badge status-warning">SUPER ADMIN REVIEW REQUIRED</span>
+                  </div>
+                  <div style="display: flex; flex-direction: column; gap: 10px;">
+                    ${franchises.filter(f => f.approvalStatus === 'PENDING_APPROVAL' || f.status === 'PENDING_APPROVAL').map(pf => `
+                      <div style="background: var(--surface-1); border: 1px solid var(--border-medium); border-radius: 6px; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                        <div style="display: flex; align-items: center; gap: 14px;">
+                          ${getTeamEmblem(pf.id, 44)}
+                          ${(pf.coordinatorPhoto || (pf.coordinator && pf.coordinator.photo)) ? `
+                            <img src="${pf.coordinatorPhoto || pf.coordinator.photo}" style="width: 44px; height: 44px; border-radius: 50%; object-fit: cover; border: 2px solid var(--color-blue); flex-shrink: 0;" title="Coordinator Passport Photo">
+                          ` : ''}
+                          <div>
+                            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                              <strong style="font-size: 1rem; color: var(--text-bright);">${pf.name}</strong>
+                              <span class="font-mono" style="font-size: 0.75rem; color: var(--color-green); font-weight: 700;">[${pf.short}]</span>
+                              <span class="status-badge status-warning" style="font-size: 0.65rem;">PENDING APPROVAL</span>
+                            </div>
+                            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">
+                              <strong>Department Sponsor:</strong> ${pf.department || 'N/A'} • <strong>Faculty Coordinator:</strong> ${pf.coordinatorName || (pf.coordinator && pf.coordinator.name) || 'N/A'} (${pf.coordinatorMobile || (pf.coordinator && pf.coordinator.phone) || 'N/A'})
+                            </div>
+                            <div style="font-size: 0.72rem; color: var(--text-faint); margin-top: 1px;">
+                              <strong>Captain:</strong> ${pf.captainName || (pf.captain && pf.captain.name) || 'N/A'} (${pf.captainMobile || (pf.captain && pf.captain.phone) || 'N/A'}) • <strong>Email:</strong> ${pf.coordinatorEmail || (pf.coordinator && pf.coordinator.email) || 'N/A'}
+                            </div>
+                          </div>
+                        </div>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                          <button class="btn btn-primary" style="font-size: 0.75rem; padding: 6px 14px; min-height: 32px; background: var(--color-green); border-color: var(--color-green); color: #000; font-weight: 800;" onclick="adminApproveFranchise(${pf.id})">
+                            ✓ APPROVE FRANCHISE
+                          </button>
+                          <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 6px 14px; min-height: 32px; color: var(--color-red); border-color: rgba(225,29,72,0.4);" onclick="adminRejectFranchise(${pf.id})">
+                            ✕ REJECT
+                          </button>
+                        </div>
+                      </div>
+                    `).join('')}
+                  </div>
+                </div>
+              ` : ''}
+
               <!-- Franchises Table -->
               <div class="surface-card" style="padding: 0; overflow-x: auto;">
                 <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.8125rem;">
@@ -13564,7 +13675,8 @@
                           <div style="display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap;">
                             ${isSuperAdmin ? `
                               ${f.approvalStatus !== 'APPROVED' ? `
-                                <button class="btn btn-primary" style="font-size: 0.6875rem; padding: 4px 8px; min-height: 28px;" onclick="adminApproveFranchise(${f.id})">APPROVE</button>
+                                <button class="btn btn-primary" style="font-size: 0.6875rem; padding: 4px 8px; min-height: 28px; background: var(--color-green); border-color: var(--color-green); color: #000; font-weight: 800;" onclick="adminApproveFranchise(${f.id})">APPROVE</button>
+                                <button class="btn btn-secondary" style="font-size: 0.6875rem; padding: 4px 8px; min-height: 28px; color: var(--color-red); border-color: rgba(225,29,72,0.4);" onclick="adminRejectFranchise(${f.id})">REJECT</button>
                               ` : ''}
                               <button class="btn btn-secondary" style="font-size: 0.6875rem; padding: 4px 8px; min-height: 28px; color: var(--color-orange); border-color: rgba(255,153,0,0.4);" onclick="openFranchiseCredentialModal(${f.id})">CREDS</button>
                               ${f.status !== 'DISABLED' ? `
@@ -14480,6 +14592,35 @@
             <!-- TAB: TOURNAMENT COMMAND CENTER & OPERATIONAL OVERVIEW -->
             <div style="display: flex; flex-direction: column; gap: var(--space-4);">
               
+              <!-- 0. PENDING APPROVALS ALERT STRIP -->
+              ${(franchises.some(f => f.approvalStatus === 'PENDING_APPROVAL' || f.status === 'PENDING_APPROVAL') || players.some(p => !isPlayerApproved(p) && p.status !== 'DELETED' && p.status !== 'ARCHIVED')) ? `
+                <div class="surface-card" style="padding: 12px 18px; background: rgba(245, 158, 11, 0.08); border: 1.5px solid rgba(245, 158, 11, 0.4); border-radius: 8px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+                  <div style="display: flex; align-items: center; gap: 10px;">
+                    <span class="status-indicator status-warning" style="width: 10px; height: 10px;"></span>
+                    <div>
+                      <div style="font-weight: 800; color: #f59e0b; font-size: 0.9rem;">
+                        PENDING REGISTRATIONS AWAITING SUPER ADMIN APPROVAL
+                      </div>
+                      <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">
+                        ${franchises.filter(f => f.approvalStatus === 'PENDING_APPROVAL' || f.status === 'PENDING_APPROVAL').length} new franchise application(s) and ${players.filter(p => !isPlayerApproved(p) && p.status !== 'DELETED' && p.status !== 'ARCHIVED').length} player registration(s) must be reviewed before participating in the auction.
+                      </div>
+                    </div>
+                  </div>
+                  <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    ${franchises.some(f => f.approvalStatus === 'PENDING_APPROVAL' || f.status === 'PENDING_APPROVAL') ? `
+                      <button class="btn btn-primary" style="font-size: 0.75rem; padding: 6px 14px; min-height: 32px; background: var(--color-yellow); border-color: var(--color-yellow); color: #000; font-weight: 800;" onclick="setAdminNavTab('FRANCHISES')">
+                        REVIEW FRANCHISES (${franchises.filter(f => f.approvalStatus === 'PENDING_APPROVAL' || f.status === 'PENDING_APPROVAL').length})
+                      </button>
+                    ` : ''}
+                    ${players.some(p => !isPlayerApproved(p) && p.status !== 'DELETED' && p.status !== 'ARCHIVED') ? `
+                      <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 6px 14px; min-height: 32px; border-color: rgba(245, 158, 11, 0.4); color: var(--color-yellow);" onclick="playerApprovalFilter = 'PENDING'; setAdminNavTab('PLAYERS')">
+                        REVIEW PLAYERS (${players.filter(p => !isPlayerApproved(p) && p.status !== 'DELETED' && p.status !== 'ARCHIVED').length})
+                      </button>
+                    ` : ''}
+                  </div>
+                </div>
+              ` : ''}
+
               <!-- 1. PRIMARY STATUS STRIP -->
               <div class="surface-card" style="padding: 12px 18px; display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 14px; background: rgba(16, 185, 129, 0.04); border: 1px solid var(--border-subtle); border-radius: 8px;">
                 <div>
