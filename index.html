@@ -464,9 +464,11 @@
       border-color: rgba(5, 150, 105, 0.45);
     }
     .status-unsold {
-      background: rgba(225, 29, 72, 0.10);
-      color: var(--color-red);
-      border-color: rgba(225, 29, 72, 0.3);
+      background: rgba(225, 29, 72, 0.12);
+      color: #e11d48;
+      border-color: rgba(225, 29, 72, 0.35);
+      font-weight: 800;
+      letter-spacing: 0.04em;
     }
     .status-connected {
       background: rgba(5, 150, 105, 0.12);
@@ -6661,10 +6663,14 @@
     }
 
     function toggleAuctionPause() {
-      auctionPaused = !auctionPaused;
-      if (auctionPaused) {
+      if (!auctionPaused) {
+        // PAUSING: let AuctionTimerEngine.pause() set auctionPaused=true and freeze state
         AuctionTimerEngine.pause();
+        // Null out timerDeadline so broadcast doesn't send a stale deadline
+        // that the Firestore echo-back would use to restart the timer
+        timerDeadline = null;
       } else {
+        // RESUMING: let AuctionTimerEngine.resume() set auctionPaused=false and restart
         AuctionTimerEngine.resume();
       }
       broadcastAuthoritativeState();
@@ -6978,30 +6984,35 @@
                   No players registered in Bucket ${activeB}.
                 </div>
               ` : allInBucket.map(p => {
-                const isAvail = p.status === 'AVAILABLE' || p.status === 'UNSOLD';
+                const isAvail = (p.status === 'AVAILABLE' || p.status === 'UNSOLD') && p.status !== 'SOLD';
                 const isSold = p.status === 'SOLD';
+                const isUnsold = p.status === 'UNSOLD';
                 const isCurrent = players[lotIndex] && players[lotIndex].id === p.id;
                 
-                let cardBg = isCurrent ? '#fef3c7' : isAvail ? '#ffffff' : '#f8fafc';
-                let borderColor = isCurrent ? '#f59e0b' : isAvail ? '#10b981' : '#e2e8f0';
-                let numColor = isCurrent ? '#b45309' : isAvail ? '#047857' : '#94a3b8';
+                let cardBg = isCurrent ? '#fef3c7' : isSold ? '#f8fafc' : isUnsold ? '#fff1f2' : '#ffffff';
+                let borderColor = isCurrent ? '#f59e0b' : isSold ? '#e2e8f0' : isUnsold ? '#f43f5e' : '#10b981';
+                let numColor = isCurrent ? '#b45309' : isSold ? '#94a3b8' : isUnsold ? '#e11d48' : '#047857';
 
                 return `
                   <div onclick="${isAvail ? `revealAndStartAuctionLot('${p.id}')` : ''}" style="background: ${cardBg}; border: 2px solid ${borderColor}; border-radius: 12px; padding: 16px 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; cursor: ${isAvail ? 'pointer' : 'not-allowed'}; opacity: ${isAvail ? '1' : '0.55'}; transition: all 0.2s ease; box-shadow: ${isCurrent ? '0 4px 12px rgba(245,158,11,0.25)' : '0 2px 6px rgba(0,0,0,0.04)'}; min-height: 110px;" onmouseover="if(${isAvail}) { this.style.transform='translateY(-4px) scale(1.02)'; this.style.boxShadow='0 8px 18px rgba(16,185,129,0.2)'; }" onmouseout="if(${isAvail}) { this.style.transform='translateY(0) scale(1)'; this.style.boxShadow='0 2px 6px rgba(0,0,0,0.04)'; }">
                     
                     <!-- Token Circle with ONLY the number -->
-                    <div style="width: 52px; height: 52px; border-radius: 50%; background: ${isCurrent ? '#fde68a' : isAvail ? 'rgba(5, 150, 105, 0.1)' : '#f1f5f9'}; border: 2px solid ${isCurrent ? '#f59e0b' : isAvail ? '#059669' : '#cbd5e1'}; display: flex; align-items: center; justify-content: center; margin-bottom: 6px;">
+                    <div style="width: 52px; height: 52px; border-radius: 50%; background: ${isCurrent ? '#fde68a' : isSold ? '#f1f5f9' : isUnsold ? 'rgba(225,29,72,0.12)' : 'rgba(5, 150, 105, 0.1)'}; border: 2px solid ${isCurrent ? '#f59e0b' : isSold ? '#cbd5e1' : isUnsold ? '#e11d48' : '#059669'}; display: flex; align-items: center; justify-content: center; margin-bottom: 6px;">
                       <span class="font-mono" style="font-size: 1.55rem; font-weight: 900; color: ${numColor};">
                         #${p.id}
                       </span>
                     </div>
                     
-                    <!-- Subtitle under number: TAP TO REVEAL (Details kept hidden under number until clicked) -->
+                    <!-- Subtitle under number: TAP TO REVEAL or UNSOLD tag -->
                     <div style="margin-top: 4px;">
                       ${isCurrent ? `
                         <span class="status-badge" style="background: #fef3c7; color: #b45309; border: 1px solid #fde68a; font-size: 0.62rem; font-weight: 800; padding: 2px 6px; border-radius: 4px;">ON FLOOR</span>
                       ` : isSold ? `
                         <span class="status-badge" style="background: #f1f5f9; color: #64748b; border: 1px solid #cbd5e1; font-size: 0.62rem; font-weight: 800; padding: 2px 6px; border-radius: 4px;">SOLD</span>
+                      ` : isUnsold ? `
+                        <span class="status-badge" style="background: rgba(225,29,72,0.12); color: #e11d48; border: 1px solid rgba(225,29,72,0.35); font-size: 0.62rem; font-weight: 900; padding: 2px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;">
+                          <span>UNSOLD ↺</span>
+                        </span>
                       ` : `
                         <span class="status-badge" style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; font-size: 0.62rem; font-weight: 900; padding: 2px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;">
                           <span>TAP TO REVEAL</span>
@@ -7009,8 +7020,8 @@
                       `}
                     </div>
                     ${isAvail ? `
-                      <div style="font-size: 0.62rem; color: #64748b; margin-top: 3px; font-weight: 600;">
-                        GUEST TOKEN
+                      <div style="font-size: 0.62rem; color: ${isUnsold ? '#e11d48' : '#64748b'}; margin-top: 3px; font-weight: 600;">
+                        ${isUnsold ? 'RE-AUCTION' : 'GUEST TOKEN'}
                       </div>
                     ` : ''}
                   </div>
@@ -7098,6 +7109,12 @@
           <div class="hammer-modal-overlay" onclick="closeModal()">
             <div class="hammer-modal-dialog" onclick="event.stopPropagation();">
               <div class="hammer-sold-badge">HAMMER SALE CONFIRMED</div>
+              <div style="display:flex;align-items:center;justify-content:center;margin:12px 0 4px;">
+                ${cur.photo && cur.photo.trim() !== '' && cur.photo !== 'acc-logo.png'
+                  ? `<img src="${cur.photo}" alt="${cur.name}" style="width:90px;height:90px;object-fit:cover;border-radius:50%;border:3.5px solid #059669;box-shadow:0 4px 20px rgba(5,150,105,0.25);">`
+                  : `<div style="width:90px;height:90px;border-radius:50%;background:linear-gradient(145deg,#f0fdf4,#d1fae5);border:3.5px solid #059669;display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-size:2rem;font-weight:800;color:#059669;letter-spacing:0.04em;box-shadow:0 4px 20px rgba(5,150,105,0.25);">${(cur.name || '').split(' ').map(n => n[0]).join('').slice(0,2).toUpperCase()}</div>`
+                }
+              </div>
               <div class="hammer-svg-container">
                 <img src="auction-hammer.svg?t=${Date.now()}" alt="Hammer Strike Animation" class="hammer-svg-img">
               </div>
@@ -9529,6 +9546,7 @@
     // ========================================================
     let publicSearchQuery = "";
     let publicBucketFilter = "ALL";
+    let publicStatusFilter = "ALL";
 
     function renderPublicView() {
       // HARD GATE: Strictly only verified and publicly visible players admitted to public portal
@@ -9552,6 +9570,9 @@
       const filteredPlayers = verifiedPool.filter(p => {
         if (publicSearchQuery && !p.name.toLowerCase().includes(publicSearchQuery.toLowerCase()) && !p.roll.toLowerCase().includes(publicSearchQuery.toLowerCase())) return false;
         if (publicBucketFilter !== "ALL" && p.bucket !== publicBucketFilter) return false;
+        if (publicStatusFilter === "AVAILABLE" && p.status !== "AVAILABLE") return false;
+        if (publicStatusFilter === "UNSOLD" && p.status !== "UNSOLD") return false;
+        if (publicStatusFilter === "SOLD" && p.status !== "SOLD") return false;
         return true;
       });
 
@@ -9653,24 +9674,45 @@
               </div>
             </div>
 
-            <!-- Bucket Filters -->
-            <div style="display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px;">
-              ${['ALL', 'B1', 'B2', 'B3', 'B4', 'D5', 'M6'].map(b => `
-                <button class="btn btn-secondary" style="min-height: 34px; padding: 4px 12px; font-size: 0.75rem; ${publicBucketFilter === b ? 'background: var(--surface-3); border-color: var(--color-green); color: var(--color-green);' : ''}" onclick="publicBucketFilter = '${b}'; renderCurrentView();">
-                  ${b === 'ALL' ? 'ALL PLAYERS' : b + ' BUCKET'}
-                </button>
-              `).join('')}
+            <!-- Status & Bucket Filter Rows (UI/UX Pro Max) -->
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              <!-- Status Filter Pills -->
+              <div style="display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; align-items: center;">
+                <span class="label-micro" style="color: var(--text-muted); font-size: 0.65rem; margin-right: 2px;">STATUS:</span>
+                ${[
+                  { id: 'ALL', label: 'ALL PLAYERS', count: verifiedPool.length },
+                  { id: 'AVAILABLE', label: 'AVAILABLE', count: verifiedPool.filter(p => p.status === 'AVAILABLE').length },
+                  { id: 'UNSOLD', label: 'UNSOLD', count: verifiedPool.filter(p => p.status === 'UNSOLD').length },
+                  { id: 'SOLD', label: 'SOLD', count: verifiedPool.filter(p => p.status === 'SOLD').length }
+                ].map(st => `
+                  <button class="btn btn-secondary" style="min-height: 30px; padding: 3px 10px; font-size: 0.72rem; font-weight: 700; border-radius: 20px; ${publicStatusFilter === st.id ? (st.id === 'UNSOLD' ? 'background: rgba(225,29,72,0.15); border-color: #e11d48; color: #e11d48;' : st.id === 'SOLD' ? 'background: rgba(5,150,105,0.15); border-color: #059669; color: #059669;' : 'background: var(--surface-3); border-color: var(--color-green); color: var(--color-green);') : ''}" onclick="publicStatusFilter = '${st.id}'; renderCurrentView();">
+                    ${st.label} <span class="font-mono" style="opacity: 0.85; margin-left: 3px; font-size: 0.68rem;">(${st.count})</span>
+                  </button>
+                `).join('')}
+              </div>
+
+              <!-- Bucket Filters -->
+              <div style="display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; align-items: center;">
+                <span class="label-micro" style="color: var(--text-muted); font-size: 0.65rem; margin-right: 2px;">BUCKET:</span>
+                ${['ALL', 'B1', 'B2', 'B3', 'B4', 'D5', 'M6'].map(b => `
+                  <button class="btn btn-secondary" style="min-height: 30px; padding: 3px 10px; font-size: 0.72rem; ${publicBucketFilter === b ? 'background: var(--surface-3); border-color: var(--color-green); color: var(--color-green);' : ''}" onclick="publicBucketFilter = '${b}'; renderCurrentView();">
+                    ${b === 'ALL' ? 'ALL BUCKETS' : b}
+                  </button>
+                `).join('')}
+              </div>
             </div>
 
             <!-- 4-Column Player Cards Grid -->
             <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-4);">
               ${filteredPlayers.map(p => `
-                <div class="surface-card" style="padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); border-radius: var(--radius-md);">
+                <div class="surface-card" style="padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); border-radius: var(--radius-md); ${p.status === 'UNSOLD' ? 'border-left: 3px solid #e11d48;' : p.status === 'SOLD' ? 'border-left: 3px solid #059669;' : ''}">
                   <div style="display: flex; gap: var(--space-3);">
                     ${getPlayerAvatar(p, 70, 88)}
                     <div style="flex: 1; min-width: 0;">
                       <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                        <span class="status-badge ${p.status === 'SOLD' ? 'status-sold' : p.status === 'UNSOLD' ? 'status-unsold' : 'status-live'}">${p.status}</span>
+                        <span class="status-badge ${p.status === 'SOLD' ? 'status-sold' : p.status === 'UNSOLD' ? 'status-unsold' : 'status-live'}">
+                          ${p.status === 'UNSOLD' ? 'UNSOLD' : p.status}
+                        </span>
                         <span class="label-micro font-mono" style="color: var(--text-faint);">#${p.id}</span>
                       </div>
                       <div class="card-title" style="margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${p.name}</div>
@@ -9693,6 +9735,10 @@
                       <div style="text-align: right;">
                         <span class="label-micro" style="color: var(--color-green);">SOLD TO</span>
                         <div style="font-size: 0.8125rem; font-weight: 700; color: var(--color-green);">${p.soldTo || 'TITANS'}</div>
+                      </div>
+                    ` : p.status === 'UNSOLD' ? `
+                      <div style="display: flex; gap: 4px; align-items: center;">
+                        <button class="btn btn-secondary" style="min-height: 30px; padding: 4px 10px; font-size: 0.6875rem; color: #e11d48; border-color: rgba(225,29,72,0.3);" onclick="openPlayerPassModal('${p.id}')">VIEW PASS</button>
                       </div>
                     ` : `
                       <button class="btn btn-secondary" style="min-height: 30px; padding: 4px 10px; font-size: 0.6875rem;" onclick="openPlayerPassModal('${p.id}')">VIEW PASS</button>
@@ -14095,18 +14141,19 @@
                     return bucketPlayers.map(p => {
                       const isCur = players[lotIndex] && players[lotIndex].id === p.id;
                       const isSold = p.status === 'SOLD';
-                      const isAvail = (p.status === 'AVAILABLE' || p.status === 'UNSOLD') && !isCur;
+                      const isUnsold = p.status === 'UNSOLD';
+                      const isAvail = (p.status === 'AVAILABLE' || isUnsold) && !isCur;
 
-                      let badgeBg = isCur ? '#fef3c7' : isSold ? '#f1f5f9' : '#ffffff';
-                      let badgeBorder = isCur ? '#f59e0b' : isSold ? '#cbd5e1' : '#10b981';
-                      let textColor = isCur ? '#b45309' : isSold ? '#64748b' : '#047857';
+                      let badgeBg = isCur ? '#fef3c7' : isSold ? '#f1f5f9' : isUnsold ? '#fff1f2' : '#ffffff';
+                      let badgeBorder = isCur ? '#f59e0b' : isSold ? '#cbd5e1' : isUnsold ? '#f43f5e' : '#10b981';
+                      let textColor = isCur ? '#b45309' : isSold ? '#64748b' : isUnsold ? '#e11d48' : '#047857';
                       let cursorStyle = isAvail ? 'pointer' : isCur ? 'default' : 'not-allowed';
 
                       return `
-                        <button type="button" class="btn" style="padding: 6px 14px; font-size: 0.78rem; font-weight: 800; border-radius: 6px; display: inline-flex; align-items: center; gap: 6px; background: ${badgeBg}; color: ${textColor}; border: 1.5px solid ${badgeBorder}; cursor: ${cursorStyle}; transition: all 0.15s ease; flex-shrink: 0; box-shadow: ${isCur ? '0 2px 6px rgba(245,158,11,0.25)' : 'none'};" onclick="${isAvail ? `revealAndStartAuctionLot('${p.id}')` : ''}" title="${isSold ? `Lot #${p.id} (SOLD)` : isCur ? `Lot #${p.id} (ON AUCTION FLOOR)` : `Lot #${p.id} (CLICK TO REVEAL PLAYER & START AUCTION)`}">
+                        <button type="button" class="btn" style="padding: 6px 14px; font-size: 0.78rem; font-weight: 800; border-radius: 6px; display: inline-flex; align-items: center; gap: 6px; background: ${badgeBg}; color: ${textColor}; border: 1.5px solid ${badgeBorder}; cursor: ${cursorStyle}; transition: all 0.15s ease; flex-shrink: 0; box-shadow: ${isCur ? '0 2px 6px rgba(245,158,11,0.25)' : 'none'};" onclick="${isAvail ? `revealAndStartAuctionLot('${p.id}')` : ''}" title="${isSold ? `Lot #${p.id} (SOLD)` : isCur ? `Lot #${p.id} (ON AUCTION FLOOR)` : isUnsold ? `Lot #${p.id} (UNSOLD — CLICK TO RE-AUCTION)` : `Lot #${p.id} (CLICK TO REVEAL PLAYER & START AUCTION)`}">
                           <span style="font-family: var(--font-mono); font-size: 1.05rem; font-weight: 900;">#${p.id}</span>
-                          <span style="font-size: 0.64rem; padding: 2px 6px; border-radius: 4px; background: ${isCur ? '#fde68a' : isSold ? '#e2e8f0' : '#ecfdf5'}; color: ${textColor}; font-weight: 800;">
-                            ${isCur ? 'ON FLOOR' : isSold ? 'SOLD' : 'REVEAL &rarr;'}
+                          <span style="font-size: 0.64rem; padding: 2px 6px; border-radius: 4px; background: ${isCur ? '#fde68a' : isSold ? '#e2e8f0' : isUnsold ? 'rgba(225,29,72,0.15)' : '#ecfdf5'}; color: ${textColor}; font-weight: 800;">
+                            ${isCur ? 'ON FLOOR' : isSold ? 'SOLD' : isUnsold ? 'UNSOLD ↺' : 'REVEAL &rarr;'}
                           </span>
                         </button>
                       `;
@@ -14216,6 +14263,7 @@
                             ${cur.bucket === 'NO_BUCKET' ? 'PG' : cur.bucket}
                           </span>
                           <span class="status-badge" style="background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; font-size: 0.65rem; font-weight: 700; padding: 1px 6px; border-radius: 4px;">${cur.derivedType || 'ALL-ROUNDER'}</span>
+                          ${cur.status === 'UNSOLD' ? '<span class="status-badge status-unsold" style="font-size: 0.65rem; font-weight: 900; padding: 1px 8px; border-radius: 4px;">UNSOLD POOL</span>' : ''}
                           ${cur.cricHeroesStatus === 'PROFILE CREATION PENDING' ? '<span class="status-badge" style="background: #fffbeb; color: #b45309; border: 1px solid #fde68a; font-size: 0.6rem; font-weight: 700; padding: 1px 5px; border-radius: 4px;">CRICHEROES PENDING</span>' : '<span class="status-badge" style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; font-size: 0.6rem; font-weight: 700; padding: 1px 5px; border-radius: 4px;">CRICHEROES VERIFIED</span>'}
                         </div>
                         <div class="admin-lot-hero-name" style="font-family: var(--font-display); font-size: 1.45rem; font-weight: 800; color: #0f172a; letter-spacing: -0.02em; line-height: 1.2;">
@@ -17056,9 +17104,21 @@
       if (!data) return;
 
       // Section 22: Stale Event Protection via Monotonic timerVersion
+      // Also: self-echo protection — if the admin authored this state, skip timer re-application
+      const isAdminAuthor = typeof currentUser !== 'undefined' && currentUser && (currentUser.role === 'ADMIN' || currentUser.role === 'SUPER_ADMIN');
       if (typeof data.timerVersion === 'number' && typeof timerVersion === 'number') {
         if (data.timerVersion < timerVersion) {
           console.warn("[AuctionTimer] Dropped stale update. Current:", timerVersion, "Received:", data.timerVersion);
+          return;
+        }
+        // Self-echo: admin's own Firestore write came back with same version — skip timer re-sync
+        if (data.timerVersion === timerVersion && isAdminAuthor) {
+          // Still update non-timer fields (franchises, players, etc.) but skip timer manipulation
+          lotIndex = typeof data.lotIndex === "number" ? data.lotIndex : lotIndex;
+          leadingBidderId = data.leadingBidderId !== undefined ? data.leadingBidderId : leadingBidderId;
+          if (typeof data.currentBid === "number") currentBid = data.currentBid;
+          passedFranchiseIds = Array.isArray(data.passedFranchiseIds) ? data.passedFranchiseIds : passedFranchiseIds;
+          renderCurrentView();
           return;
         }
         timerVersion = data.timerVersion;
