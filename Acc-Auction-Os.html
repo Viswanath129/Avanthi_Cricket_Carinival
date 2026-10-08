@@ -11606,6 +11606,191 @@
       closeModal();
     }
 
+    // ========================================================
+    // DELETE ALL DATA — NUCLEAR WIPE (PLAYERS + FRANCHISES + LINKS)
+    // ========================================================
+    function openDeleteAllDataModal() {
+      if (currentUser.role !== 'SUPER_ADMIN') {
+        showToast("ACCESS DENIED: Super Admin authorization required for full data wipe.", "error");
+        return;
+      }
+      const totalPlayers = players.length;
+      const soldPlayers = players.filter(p => p.status === 'SOLD').length;
+      const unsoldPlayers = players.filter(p => p.status === 'UNSOLD').length;
+      const availablePlayers = players.filter(p => p.status === 'AVAILABLE').length;
+      const totalFranchises = franchises.length;
+      const totalSquadMembers = franchises.reduce((sum, f) => sum + (f.squad ? f.squad.length : 0), 0);
+      const trashedPlayers = deletedPlayers.length;
+      const trashedFranchises = (deletedFranchises || []).length;
+
+      const m = document.getElementById("modalContainer");
+      m.innerHTML = `
+        <div class="modal-overlay" onclick="closeModal()">
+          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 580px;">
+            <!-- Danger Header -->
+            <div style="background: linear-gradient(135deg, #fef2f2, #fee2e2); border: 2px solid #dc2626; border-radius: var(--radius-md); padding: 16px; margin-bottom: 16px;">
+              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                <div style="width: 40px; height: 40px; border-radius: 50%; background: #dc2626; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                  <svg width="22" height="22" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+                    <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6"/>
+                  </svg>
+                </div>
+                <div>
+                  <h3 style="font-family: var(--font-display); font-size: 1.25rem; font-weight: 900; color: #dc2626; margin: 0; letter-spacing: 0.04em;">
+                    DELETE ALL DATA
+                  </h3>
+                  <div style="font-size: 0.75rem; color: #991b1b; font-weight: 700; letter-spacing: 0.06em;">IRREVERSIBLE · PERMANENT · NUCLEAR</div>
+                </div>
+              </div>
+              <p style="font-size: 0.8125rem; color: #7f1d1d; margin: 0; line-height: 1.6;">
+                This will <strong>permanently delete</strong> every player, franchise, squad, sold record, and linked data. Trash/archive will also be emptied. This action <strong>cannot be undone</strong>.
+              </p>
+            </div>
+
+            <!-- Impact Summary -->
+            <div style="background: var(--surface-2); padding: 14px; border-radius: var(--radius-sm); margin-bottom: 16px;">
+              <div style="font-family: var(--font-display); font-size: 0.75rem; font-weight: 800; color: var(--color-red); letter-spacing: 0.08em; margin-bottom: 10px;">DESTRUCTION IMPACT</div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-family: var(--font-mono); font-size: 0.8125rem; color: var(--text-secondary);">
+                <div style="display: flex; justify-content: space-between;">
+                  <span>Players</span>
+                  <strong style="color: var(--color-red);">${totalPlayers}</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                  <span>Franchises</span>
+                  <strong style="color: var(--color-red);">${totalFranchises}</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                  <span>Sold</span>
+                  <strong>${soldPlayers}</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                  <span>Squad Members</span>
+                  <strong>${totalSquadMembers}</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                  <span>Unsold</span>
+                  <strong>${unsoldPlayers}</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                  <span>Available</span>
+                  <strong>${availablePlayers}</strong>
+                </div>
+                <div style="grid-column: span 2; border-top: 1px solid var(--border-subtle); padding-top: 8px; display: flex; justify-content: space-between;">
+                  <span>Trash (also wiped)</span>
+                  <strong style="color: var(--color-orange);">${trashedPlayers} players + ${trashedFranchises} franchises</strong>
+                </div>
+              </div>
+            </div>
+
+            <!-- Preserved Items -->
+            <div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
+              <div style="font-size: 0.75rem; font-weight: 800; color: #166534; letter-spacing: 0.06em; margin-bottom: 6px;">✓ PRESERVED (NOT DELETED)</div>
+              <ul style="margin: 0; padding: 0 0 0 16px; font-size: 0.75rem; color: #15803d; line-height: 1.7;">
+                <li>Admin & Operator accounts</li>
+                <li>Audit log history</li>
+                <li>Tournament configuration</li>
+              </ul>
+            </div>
+
+            <!-- Type to Confirm -->
+            <div style="margin-bottom: 16px;">
+              <label style="display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 6px; font-weight: 700;">
+                Type <strong style="color: var(--color-red); font-family: var(--font-mono);">DELETE ALL DATA</strong> to confirm:
+              </label>
+              <input type="text" id="confirmDeleteAllDataInput" class="form-input" 
+                     placeholder="DELETE ALL DATA" 
+                     style="text-transform: uppercase; border-color: var(--color-red); font-family: var(--font-mono); font-weight: 700;"
+                     autocomplete="off" spellcheck="false">
+            </div>
+
+            <!-- Actions -->
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+              <button class="btn btn-secondary" onclick="closeModal()" style="min-height: 44px; padding: 10px 24px;">
+                CANCEL
+              </button>
+              <button class="btn btn-danger" onclick="executeDeleteAllData()" 
+                      style="min-height: 44px; padding: 10px 24px; font-weight: 900; letter-spacing: 0.06em; background: #dc2626; border-color: #991b1b;">
+                🗑️ PERMANENTLY DELETE EVERYTHING
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+    window.openDeleteAllDataModal = openDeleteAllDataModal;
+
+    function executeDeleteAllData() {
+      const input = (document.getElementById("confirmDeleteAllDataInput")?.value || '').trim().toUpperCase();
+      if (input !== 'DELETE ALL DATA') {
+        showToast("Confirmation text did not match. Type DELETE ALL DATA exactly.", "error");
+        return;
+      }
+
+      const playerCount = players.length;
+      const franchiseCount = franchises.length;
+      const trashPlayerCount = deletedPlayers.length;
+      const trashFranchiseCount = (deletedFranchises || []).length;
+
+      // 1. Clear all franchise squad links
+      franchises.forEach(f => {
+        f.squad = [];
+        f.status = 'DELETED';
+        f.deletedAt = new Date().toISOString();
+      });
+
+      // 2. Unlink all players from franchises
+      players.forEach(p => {
+        p.status = 'ARCHIVED';
+        p.soldTo = null;
+        p.franchiseId = null;
+        p.franchiseName = null;
+        p.soldPrice = null;
+        p.salePrice = null;
+        p.price = null;
+        p.deletedAt = new Date().toISOString();
+        syncPlayerToFirebase(p, 'DELETE');
+      });
+
+      // 3. Wipe active arrays
+      players = [];
+      franchises = [];
+
+      // 4. Wipe trash/archive
+      deletedPlayers = [];
+      deletedFranchises = [];
+
+      // 5. Reset auction state
+      lotIndex = 0;
+      currentBid = 0;
+      leadingBidderId = null;
+      passedFranchiseIds = [];
+      timerRunning = false;
+      auctionPaused = false;
+      timerDeadline = null;
+      pausedRemainingMs = null;
+      frozenRemainingSeconds = null;
+      timerSeconds = 0;
+      AuctionTimerEngine.stopLoop();
+
+      // 6. Audit log entry
+      auditLog.unshift({
+        time: new Date().toLocaleTimeString(),
+        action: "NUCLEAR_DELETE_ALL_DATA",
+        details: `Permanently deleted ALL data: ${playerCount} players, ${franchiseCount} franchises, ${trashPlayerCount} trashed players, ${trashFranchiseCount} trashed franchises. All squad links, sold records, and purse data wiped.`,
+        actorUid: currentUser.uid || 'usr_sys',
+        actorRole: currentUser.role,
+        severity: 'CRITICAL'
+      });
+
+      // 7. Persist & broadcast
+      saveDatabase();
+      broadcastAuthoritativeState();
+      closeModal();
+      renderCurrentView();
+      showToast(`DELETED: ${playerCount} players + ${franchiseCount} franchises permanently removed. All data wiped.`, "success");
+    }
+    window.executeDeleteAllData = executeDeleteAllData;
+
     function restorePlayerFromTrash(playerId) {
       const idx = deletedPlayers.findIndex(x => x.id == playerId || x.playerId == playerId);
       if (idx === -1) return;
@@ -13846,6 +14031,9 @@
                     </button>
                     <button class="btn btn-danger" onclick="openDeleteAllFranchisesModal()" style="font-size: 0.75rem; padding: 6px 14px; min-height: 32px;">
                       DELETE ALL FRANCHISES
+                    </button>
+                    <button class="btn btn-danger" onclick="openDeleteAllDataModal()" style="font-size: 0.75rem; padding: 6px 14px; min-height: 32px; background: #991b1b; border-color: #7f1d1d; letter-spacing: 0.04em;">
+                      🗑️ DELETE ALL DATA
                     </button>
                   ` : ''}
                 </div>
