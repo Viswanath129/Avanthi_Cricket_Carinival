@@ -11731,35 +11731,79 @@
       const trashPlayerCount = deletedPlayers.length;
       const trashFranchiseCount = (deletedFranchises || []).length;
 
-      // 1. Clear all franchise squad links
-      franchises.forEach(f => {
-        f.squad = [];
-        f.status = 'DELETED';
-        f.deletedAt = new Date().toISOString();
-      });
+      // ============================================================
+      // STEP 1: DELETE FROM FIRESTORE (all collections)
+      // ============================================================
+      if (typeof fbDb !== 'undefined' && fbDb) {
+        const collectionsToWipe = [
+          'players', 'publicPlayers', 'deletedPlayers',
+          'franchises', 'franchisesPublic', 'deletedFranchises',
+          'playerUniqueKeys'
+        ];
 
-      // 2. Unlink all players from franchises
-      players.forEach(p => {
-        p.status = 'ARCHIVED';
-        p.soldTo = null;
-        p.franchiseId = null;
-        p.franchiseName = null;
-        p.soldPrice = null;
-        p.salePrice = null;
-        p.price = null;
-        p.deletedAt = new Date().toISOString();
-        syncPlayerToFirebase(p, 'DELETE');
-      });
+        collectionsToWipe.forEach(colName => {
+          try {
+            fbDb.collection(colName).get().then(snapshot => {
+              const batch = fbDb.batch();
+              snapshot.docs.forEach(doc => batch.delete(doc.ref));
+              return batch.commit();
+            }).then(() => {
+              console.log(`[DELETE ALL] Firestore collection '${colName}' wiped.`);
+            }).catch(err => {
+              console.warn(`[DELETE ALL] Error wiping '${colName}':`, err);
+            });
+          } catch (e) {
+            console.warn(`[DELETE ALL] Skip collection '${colName}':`, e);
+          }
+        });
 
-      // 3. Wipe active arrays
+        // Wipe the main auction state document
+        if (typeof auctionDocRef !== 'undefined' && auctionDocRef) {
+          try {
+            auctionDocRef.set({
+              lotIndex: 0,
+              currentBid: 0,
+              leadingBidderId: null,
+              timerSeconds: 0,
+              timerDeadline: null,
+              timerDuration: 30000,
+              timerStartedAt: null,
+              lastBidAt: null,
+              timerVersion: (timerVersion || 1) + 1,
+              timerRunning: false,
+              auctionPaused: false,
+              pausedRemainingMs: null,
+              passedFranchiseIds: [],
+              franchises: [],
+              deletedFranchises: [],
+              players: [],
+              deletedPlayers: [],
+              auditLog: auditLog,
+              currentLot: null,
+              timestamp: Date.now()
+            }).then(() => {
+              console.log("[DELETE ALL] Auction state doc reset.");
+            }).catch(err => {
+              console.warn("[DELETE ALL] Error resetting auction doc:", err);
+            });
+          } catch (e) {}
+        }
+      }
+
+      // ============================================================
+      // STEP 2: CLEAR ALL LOCAL STATE ARRAYS
+      // ============================================================
       players = [];
       franchises = [];
-
-      // 4. Wipe trash/archive
       deletedPlayers = [];
       deletedFranchises = [];
+      if (typeof franchiseMembers !== 'undefined') {
+        franchiseMembers = [];
+      }
 
-      // 5. Reset auction state
+      // ============================================================
+      // STEP 3: RESET ALL AUCTION / BIDDING STATE
+      // ============================================================
       lotIndex = 0;
       currentBid = 0;
       leadingBidderId = null;
@@ -11767,27 +11811,66 @@
       timerRunning = false;
       auctionPaused = false;
       timerDeadline = null;
+      timerStartedAt = null;
+      lastBidAt = null;
       pausedRemainingMs = null;
       frozenRemainingSeconds = null;
       timerSeconds = 0;
+      timerVersion = (timerVersion || 1) + 1;
       AuctionTimerEngine.stopLoop();
 
-      // 6. Audit log entry
+      // ============================================================
+      // STEP 4: CLEAR ALL LOCALSTORAGE KEYS
+      // ============================================================
+      const keysToRemove = [
+        'acc_players_2026', 'acc_deleted_players_2026',
+        'acc_franchises_2026', 'acc_deleted_franchises_2026',
+        'acc_franchise_members_2026',
+        'acc_active_bucket_2026', 'acc_draw_mode_2026',
+        'acc_bucket_minimums_2026'
+      ];
+      keysToRemove.forEach(key => {
+        try { localStorage.removeItem(key); } catch (e) {}
+      });
+
+      // Also clear any snapshot keys
+      try {
+        const allKeys = Object.keys(localStorage);
+        allKeys.forEach(key => {
+          if (key.startsWith('acc_snapshot_lot_') || key.startsWith('acc_last_lot_')) {
+            localStorage.removeItem(key);
+          }
+        });
+      } catch (e) {}
+
+      // ============================================================
+      // STEP 5: AUDIT LOG (keep audit, just add this entry)
+      // ============================================================
       auditLog.unshift({
         time: new Date().toLocaleTimeString(),
         action: "NUCLEAR_DELETE_ALL_DATA",
-        details: `Permanently deleted ALL data: ${playerCount} players, ${franchiseCount} franchises, ${trashPlayerCount} trashed players, ${trashFranchiseCount} trashed franchises. All squad links, sold records, and purse data wiped.`,
+        details: `PERMANENTLY DELETED ALL DATA: ${playerCount} players, ${franchiseCount} franchises, ${trashPlayerCount} trashed players, ${trashFranchiseCount} trashed franchises. All Firestore collections wiped. All squad links, sold records, bidding data, and purse data destroyed.`,
         actorUid: currentUser.uid || 'usr_sys',
         actorRole: currentUser.role,
         severity: 'CRITICAL'
       });
 
-      // 7. Persist & broadcast
+      // ============================================================
+      // STEP 6: SAVE EMPTY STATE & BROADCAST TO ALL TABS
+      // ============================================================
       saveDatabase();
       broadcastAuthoritativeState();
+
+      // Force BroadcastChannel update to all open tabs
+      if (typeof broadcastChannel !== 'undefined' && broadcastChannel) {
+        try {
+          broadcastChannel.postMessage({ type: "FORCE_RELOAD" });
+        } catch (e) {}
+      }
+
       closeModal();
       renderCurrentView();
-      showToast(`DELETED: ${playerCount} players + ${franchiseCount} franchises permanently removed. All data wiped.`, "success");
+      showToast(`NUCLEAR DELETE COMPLETE: ${playerCount} players + ${franchiseCount} franchises permanently destroyed from all stores (Firestore + Local).`, "success");
     }
     window.executeDeleteAllData = executeDeleteAllData;
 
