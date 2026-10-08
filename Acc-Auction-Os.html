@@ -2886,6 +2886,15 @@
       saveDatabase();
     }
 
+    function recordAuditEvent(action, details, targetId) {
+      appendAuditTrail({
+        action: action || 'AUDIT_EVENT',
+        details: details || '',
+        playerName: targetId || '',
+        reason: details || ''
+      });
+    }
+
     function saveDatabase() {
       localStorage.setItem("acc_franchises_2026", JSON.stringify(franchises));
       localStorage.setItem("acc_deleted_franchises_2026", JSON.stringify(deletedFranchises));
@@ -7307,7 +7316,7 @@
       photoEditorState.playerId = playerId || null;
       photoEditorState.customMsgId = customMsgId || null;
       photoEditorState.customPreviewId = customPreviewId || null;
-      photoEditorState.context = context || (customMsgId && String(customMsgId).toLowerCase().includes('franchise') ? 'FRANCHISE_LOGO' : 'PLAYER');
+      photoEditorState.context = context || (customMsgId && String(customMsgId).toLowerCase().includes('coord') ? 'FRANCHISE_COORD_PHOTO' : customMsgId && String(customMsgId).toLowerCase().includes('franchise') ? 'FRANCHISE_LOGO' : 'PLAYER');
       photoEditorState.zoom = 1.0;
       photoEditorState.panX = 0;
       photoEditorState.panY = 0;
@@ -7342,7 +7351,7 @@
               <div>
                 <div style="display: flex; align-items: center; gap: 8px;">
                   <h3 style="font-family: var(--font-display); font-size: 1.15rem; font-weight: 800; color: var(--text-bright); margin: 0;">
-                    ${photoEditorState.context === 'FRANCHISE_LOGO' ? 'EDIT FRANCHISE LOGO' : 'EDIT PLAYER PHOTO'}
+                    ${photoEditorState.context === 'FRANCHISE_COORD_PHOTO' ? 'EDIT COORDINATOR PASSPORT PHOTO' : photoEditorState.context === 'FRANCHISE_LOGO' ? 'EDIT FRANCHISE LOGO' : 'EDIT PLAYER PHOTO'}
                   </h3>
                   <span class="status-badge status-connected" style="font-size: 0.65rem; padding: 2px 6px; font-weight: 800;">4:3 LOCKED</span>
                 </div>
@@ -7662,8 +7671,43 @@
       const dataUrl = canvas.toDataURL("image/jpeg", 0.94);
       photoEditorState.lastCommittedUrl = dataUrl;
 
+      // Handle Franchise Coordinator Passport Photo context
+      if (photoEditorState.context === 'FRANCHISE_COORD_PHOTO' || photoEditorState.customMsgId === 'regFranchiseCoordMsg') {
+        window.uploadedFranchiseCoordPhoto = dataUrl;
+        const msgEl = document.getElementById(photoEditorState.customMsgId || "regFranchiseCoordMsg");
+        if (msgEl) {
+          msgEl.innerHTML = `
+            <div style="color: var(--color-blue); font-size: 0.75rem; font-weight: 700; padding: 8px 12px; background: rgba(30, 58, 138, 0.08); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 4px; display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 4px;">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <img src="${dataUrl}" style="width: 48px; height: 48px; object-fit: cover; border-radius: 50%; border: 1.5px solid var(--color-blue);">
+                <div>
+                  <div><strong>Coordinator Passport Photo Ready</strong></div>
+                  <div style="font-size: 0.7rem; color: var(--text-muted); font-weight: 500;">Approved for Faculty Verification</div>
+                </div>
+              </div>
+              <div style="display: flex; gap: 6px;">
+                <button type="button" class="btn btn-secondary" style="font-size: 0.7rem; padding: 4px 8px; min-height: 28px;" onclick="openPhotoEditorModal(window.uploadedFranchiseCoordPhoto, null, 'regFranchiseCoordMsg', 'regFranchiseCoordPreview', 'FRANCHISE_COORD_PHOTO')">Edit Photo</button>
+                <button type="button" class="btn btn-secondary" style="font-size: 0.7rem; padding: 4px 8px; min-height: 28px;" onclick="const inp = document.getElementById('regFranchiseCoordPhoto'); if (inp) inp.click();">Replace</button>
+              </div>
+            </div>
+          `;
+        }
+
+        const previewEl = photoEditorState.customPreviewId ? document.getElementById(photoEditorState.customPreviewId) : document.getElementById("regFranchiseCoordPreview");
+        if (previewEl) {
+          previewEl.style.display = "block";
+          previewEl.innerHTML = `
+            <img src="${dataUrl}" style="width: 72px; height: 72px; object-fit: cover; border-radius: 6px; border: 1.5px solid var(--color-blue);">
+          `;
+        }
+
+        closePhotoEditorModal();
+        showToast("Coordinator passport photo framed successfully!", "success");
+        return;
+      }
+
       // Handle Franchise Logo context (Registration or Franchise Settings)
-      if (photoEditorState.context === 'FRANCHISE_LOGO' || (photoEditorState.customMsgId && String(photoEditorState.customMsgId).toLowerCase().includes('franchise'))) {
+      if (photoEditorState.context === 'FRANCHISE_LOGO' || (photoEditorState.customMsgId && String(photoEditorState.customMsgId).toLowerCase().includes('franchise') && photoEditorState.customMsgId !== 'regFranchiseCoordMsg')) {
         window.uploadedFranchiseLogoData = dataUrl;
         newFranchiseLogoData = dataUrl;
         tempFranchiseLogoData = dataUrl;
@@ -10086,10 +10130,48 @@
       isPhotoUploadProcessing = true;
       setTimeout(() => { isPhotoUploadProcessing = false; }, 600);
       if (e.target) e.target.value = "";
+
+      if (!file.type.startsWith("image/")) {
+        showToast("Please choose an image file (PNG, JPG, WEBP).", "error");
+        return;
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        showToast("Image file exceeds 10MB limit. Please choose a smaller file.", "error");
+        return;
+      }
       const reader = new FileReader();
       reader.onload = function(evt) {
-        window.uploadedFranchiseCoordPhoto = evt.target.result;
-        showToast("Coordinator photo loaded successfully", "info");
+        const dataUrl = evt.target.result;
+        window.uploadedFranchiseCoordPhoto = dataUrl;
+        const mc = typeof document !== 'undefined' ? document.getElementById("modalContainer") : null;
+        if (mc && typeof mc.innerHTML !== 'undefined') {
+          openPhotoEditorModal(dataUrl, null, 'regFranchiseCoordMsg', 'regFranchiseCoordPreview', 'FRANCHISE_COORD_PHOTO');
+        } else {
+          const msgEl = document.getElementById("regFranchiseCoordMsg");
+          if (msgEl) {
+            msgEl.innerHTML = `
+              <div style="color: var(--color-blue); font-size: 0.75rem; font-weight: 700; padding: 8px 12px; background: rgba(30, 58, 138, 0.08); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 4px; display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 4px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <img src="${dataUrl}" style="width: 48px; height: 48px; object-fit: cover; border-radius: 50%; border: 1.5px solid var(--color-blue);">
+                  <div>
+                    <div><strong>Coordinator Passport Photo Ready</strong></div>
+                    <div style="font-size: 0.7rem; color: var(--text-muted); font-weight: 500;">Approved for Faculty Verification</div>
+                  </div>
+                </div>
+                <div style="display: flex; gap: 6px;">
+                  <button type="button" class="btn btn-secondary" style="font-size: 0.7rem; padding: 4px 8px; min-height: 28px;" onclick="openPhotoEditorModal(window.uploadedFranchiseCoordPhoto, null, 'regFranchiseCoordMsg', 'regFranchiseCoordPreview', 'FRANCHISE_COORD_PHOTO')">Edit Photo</button>
+                  <button type="button" class="btn btn-secondary" style="font-size: 0.7rem; padding: 4px 8px; min-height: 28px;" onclick="const inp = document.getElementById('regFranchiseCoordPhoto'); if (inp) inp.click();">Replace</button>
+                </div>
+              </div>
+            `;
+          }
+          const prev = document.getElementById("regFranchiseCoordPreview");
+          if (prev) {
+            prev.style.display = "block";
+            prev.innerHTML = `<img src="${dataUrl}" style="width: 72px; height: 72px; object-fit: cover; border-radius: 6px; border: 1.5px solid var(--color-blue);">`;
+          }
+          showToast("Coordinator photo loaded successfully", "success");
+        }
       };
       reader.readAsDataURL(file);
     }
@@ -10102,42 +10184,82 @@
       const slogan = (document.getElementById("regFranchiseSlogan")?.value || "").trim();
       const coordName = (document.getElementById("regFranchiseCoordName")?.value || "").trim();
       const coordDept = (document.getElementById("regFranchiseCoordDept")?.value || "").trim();
-      const coordMobile = (document.getElementById("regFranchiseCoordMobile")?.value || "").trim();
+      const rawCoordMobile = (document.getElementById("regFranchiseCoordMobile")?.value || "").trim();
+      const coordMobile = rawCoordMobile.replace(/\D/g, '').slice(-10);
       const coordEmail = (document.getElementById("regFranchiseCoordEmail")?.value || "").trim();
       const capName = (document.getElementById("regFranchiseCapName")?.value || "").trim();
-      const capMobile = (document.getElementById("regFranchiseCapMobile")?.value || "").trim();
+      const rawCapMobile = (document.getElementById("regFranchiseCapMobile")?.value || "").trim();
+      const capMobile = rawCapMobile.replace(/\D/g, '').slice(-10);
       const vcName = (document.getElementById("regFranchiseVcName")?.value || "").trim();
+      const agree = document.getElementById("regFranchiseAgree")?.checked;
+
+      if (!agree) {
+        showToast("Please agree to the official ACC 2026 Tournament Rules.", "error");
+        return;
+      }
 
       if (!name || !shortCode || !coordName || !coordMobile || !capName || !capMobile) {
         showToast("Please fill all required franchise fields.", "error");
         return;
       }
 
-      if (franchises.some(f => f.name.toLowerCase() === name.toLowerCase())) {
+      if (coordMobile.length !== 10) {
+        showToast("Please enter a valid 10-digit mobile number for Coordinator.", "error");
+        return;
+      }
+
+      if (capMobile.length !== 10) {
+        showToast("Please enter a valid 10-digit mobile number for Captain.", "error");
+        return;
+      }
+
+      if (franchises.some(f => (f.name || '').toLowerCase() === name.toLowerCase())) {
         showToast(`Franchise name "${name}" is already registered.`, "error");
         return;
       }
 
-      const nextId = franchises.length + 1;
+      if (franchises.some(f => (f.short || '').toUpperCase() === shortCode)) {
+        showToast(`Franchise short code "${shortCode}" is already taken.`, "error");
+        return;
+      }
+
+      const maxId = franchises.reduce((acc, f) => Math.max(acc, Number(f.id) || 0), 0);
+      const nextId = maxId + 1;
+      const franchiseDocId = 'FR' + String(nextId).padStart(3, '0');
+
+      const coordPhoto = window.uploadedFranchiseCoordPhoto || "";
+      const teamLogo = window.uploadedFranchiseLogoData || "";
+
       const newFranchise = {
         id: nextId,
-        franchiseId: 'FR' + String(nextId).padStart(3, '0'),
+        franchiseId: franchiseDocId,
         name: name,
         short: shortCode,
         department: dept,
         slogan: slogan,
-        logo: window.uploadedFranchiseLogoData || "",
+        logo: teamLogo,
         purse: 1000,
         squad: [],
         status: 'PENDING_APPROVAL',
         approvalStatus: 'PENDING_APPROVAL',
         accountStatus: 'NOT_CREATED',
+        createdAt: new Date().toISOString(),
+        // Top-level fields for convenience & compatibility
+        coordinatorName: coordName,
+        coordinatorMobile: coordMobile,
+        coordinatorDept: coordDept,
+        coordinatorEmail: coordEmail,
+        coordinatorPhoto: coordPhoto,
+        captainName: capName,
+        captainMobile: capMobile,
+        viceCaptain: vcName,
+        // Nested objects
         coordinator: {
           name: coordName,
           dept: coordDept,
           phone: coordMobile,
           email: coordEmail,
-          photo: window.uploadedFranchiseCoordPhoto || ""
+          photo: coordPhoto
         },
         captain: {
           name: capName,
@@ -10150,8 +10272,51 @@
       saveDatabase();
       broadcastAuthoritativeState();
       syncFranchiseToFirebase(newFranchise, 'REGISTER');
-      if (window.RealtimeManager) window.RealtimeManager.publishAuctionState();
-      recordAuditEvent("FRANCHISE REGISTRATION SUBMITTED", `Franchise ${name} (${shortCode}) registered as pending approval`);
+      if (window.RealtimeManager && typeof window.RealtimeManager.publishAuctionState === 'function') {
+        window.RealtimeManager.publishAuctionState();
+      }
+
+      if (typeof broadcastChannel !== 'undefined' && broadcastChannel) {
+        try {
+          broadcastChannel.postMessage({
+            type: "FRANCHISE_STATE_MUTATION",
+            action: 'REGISTER',
+            franchiseId: newFranchise.id,
+            franchise: newFranchise
+          });
+        } catch(e) {}
+      }
+      if (window.broadcastMeshChannel) {
+        try {
+          window.broadcastMeshChannel.postMessage({
+            type: "FRANCHISE_STATE_MUTATION",
+            action: 'REGISTER',
+            franchiseId: newFranchise.id,
+            franchise: newFranchise
+          });
+        } catch(e) {}
+      }
+
+      if (typeof recordAuditEvent === 'function') {
+        recordAuditEvent("FRANCHISE REGISTRATION SUBMITTED", `Franchise ${name} (${shortCode}) registered as pending approval`, franchiseDocId);
+      } else if (typeof appendAuditTrail === 'function') {
+        appendAuditTrail({ action: "FRANCHISE REGISTRATION SUBMITTED", details: `Franchise ${name} (${shortCode}) registered as pending approval`, targetId: franchiseDocId });
+      } else {
+        auditLog.unshift({
+          time: new Date().toLocaleTimeString(),
+          timestamp: Date.now(),
+          type: "FRANCHISE REGISTRATION SUBMITTED",
+          action: "FRANCHISE REGISTRATION SUBMITTED",
+          details: `Franchise ${name} (${shortCode}) registered as pending approval`,
+          actorUid: 'usr_reg'
+        });
+        auditLedger = auditLog;
+        saveDatabase();
+      }
+
+      // Reset uploaded files for next form submission
+      window.uploadedFranchiseCoordPhoto = null;
+      window.uploadedFranchiseLogoData = null;
 
       showToast("Franchise application submitted successfully! Queued for Super Admin approval.", "success");
 
@@ -10271,7 +10436,7 @@
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
                   <div class="form-group" style="margin-bottom: 0;">
                     <label class="form-label">COORDINATOR PRIVATE MOBILE (10 DIGITS) *</label>
-                    <input type="tel" class="form-input font-mono" id="regFranchiseCoordMobile" placeholder="e.g. 9876543210" pattern="[0-9]{10}" maxlength="10" required>
+                    <input type="tel" class="form-input font-mono" id="regFranchiseCoordMobile" placeholder="e.g. 9876543210" maxlength="15" required>
                     <div style="font-size: 0.7rem; color: var(--text-faint); margin-top: 2px;">Private: Never visible on public displays or spectator view</div>
                   </div>
                   <div class="form-group" style="margin-bottom: 0;">
@@ -10280,8 +10445,32 @@
                   </div>
                 </div>
                 <div class="form-group" style="margin-bottom: 0;">
-                  <label class="form-label">COORDINATOR PASSPORT PHOTO</label>
-                  <input type="file" class="form-input" id="regFranchiseCoordPhoto" accept="image/*" onchange="handleFranchiseCoordPhotoUpload(event)">
+                  <label class="form-label">COORDINATOR PASSPORT PHOTO (PASSPORT SIZE / 4:3)</label>
+                  <input type="file" class="form-input" id="regFranchiseCoordPhoto" accept="image/*" onchange="handleFranchiseCoordPhotoUpload(event)" style="padding: 7px 12px;">
+                  <div id="regFranchiseCoordMsg" style="font-size: 0.75rem; margin-top: 6px;">
+                    ${window.uploadedFranchiseCoordPhoto ? `
+                      <div style="color: var(--color-blue); font-size: 0.75rem; font-weight: 700; padding: 8px 12px; background: rgba(30, 58, 138, 0.08); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 4px; display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 4px;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                          <img src="${window.uploadedFranchiseCoordPhoto}" style="width: 48px; height: 48px; object-fit: cover; border-radius: 50%; border: 1.5px solid var(--color-blue);">
+                          <div>
+                            <div><strong>Coordinator Passport Photo Ready</strong></div>
+                            <div style="font-size: 0.7rem; color: var(--text-muted); font-weight: 500;">Approved for Faculty Verification</div>
+                          </div>
+                        </div>
+                        <div style="display: flex; gap: 6px;">
+                          <button type="button" class="btn btn-secondary" style="font-size: 0.7rem; padding: 4px 8px; min-height: 28px;" onclick="openPhotoEditorModal(window.uploadedFranchiseCoordPhoto, null, 'regFranchiseCoordMsg', 'regFranchiseCoordPreview', 'FRANCHISE_COORD_PHOTO')">Edit Photo</button>
+                          <button type="button" class="btn btn-secondary" style="font-size: 0.7rem; padding: 4px 8px; min-height: 28px;" onclick="document.getElementById('regFranchiseCoordPhoto').click()">Replace</button>
+                        </div>
+                      </div>
+                    ` : `
+                      <div style="font-size: 0.72rem; color: var(--text-faint); margin-top: 2px;">
+                        Optional: Upload official passport-size photo of the Faculty Coordinator for identity verification and accreditation badge.
+                      </div>
+                    `}
+                  </div>
+                  <div id="regFranchiseCoordPreview" style="margin-top: 8px; display: ${window.uploadedFranchiseCoordPhoto ? 'block' : 'none'}; width: 72px; height: 72px; border-radius: 6px; overflow: hidden; border: 1.5px solid var(--color-blue);">
+                    ${window.uploadedFranchiseCoordPhoto ? `<img src="${window.uploadedFranchiseCoordPhoto}" style="width:100%;height:100%;object-fit:cover;">` : ''}
+                  </div>
                 </div>
               </div>
 
@@ -10295,7 +10484,7 @@
                   </div>
                   <div class="form-group" style="margin-bottom: 0;">
                     <label class="form-label">CAPTAIN PRIVATE MOBILE (10 DIGITS) *</label>
-                    <input type="tel" class="form-input font-mono" id="regFranchiseCapMobile" placeholder="e.g. 9876543211" pattern="[0-9]{10}" maxlength="10" required>
+                    <input type="tel" class="form-input font-mono" id="regFranchiseCapMobile" placeholder="e.g. 9876543211" maxlength="15" required>
                   </div>
                 </div>
                 <div class="form-group" style="margin-bottom: 0;">
@@ -10306,7 +10495,7 @@
 
               <!-- Agreement -->
               <div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px; background: rgba(5,150,105,0.06); border-radius: var(--radius-sm); border: 1px solid rgba(5,150,105,0.2);">
-                <input type="checkbox" id="regFranchiseAgree" required style="margin-top: 3px;">
+                <input type="checkbox" id="regFranchiseAgree" style="margin-top: 3px;">
                 <label for="regFranchiseAgree" style="font-size: 0.8125rem; color: var(--text-muted); cursor: pointer;">
                   I certify this franchise application is authorized by the sponsoring department and agree to abide by the official ACC 2026 Auction Rules (1000 credits purse, mandatory bucket quotas, and discrete increment ladder).
                 </label>
@@ -13341,8 +13530,15 @@
                           <span style="font-size: 0.7rem; color: var(--text-muted);">(${f.short})</span>
                         </td>
                         <td style="padding: 12px 16px;">
-                          <div style="font-weight: 700; color: var(--text-bright);">${f.coordinatorName || 'Prof. Faculty Coordinator'}</div>
-                          <div style="font-size: 0.7rem; color: var(--text-muted);">${f.coordinatorDept || 'Sports Committee'}</div>
+                          <div style="display: flex; align-items: center; gap: 8px;">
+                            ${(f.coordinatorPhoto || (f.coordinator && f.coordinator.photo)) ? `
+                              <img src="${f.coordinatorPhoto || f.coordinator.photo}" style="width: 30px; height: 30px; border-radius: 50%; object-fit: cover; border: 1.5px solid var(--color-blue); flex-shrink: 0;" alt="Coordinator Photo">
+                            ` : ''}
+                            <div>
+                              <div style="font-weight: 700; color: var(--text-bright);">${f.coordinatorName || (f.coordinator && f.coordinator.name) || 'Prof. Faculty Coordinator'}</div>
+                              <div style="font-size: 0.7rem; color: var(--text-muted);">${f.coordinatorDept || (f.coordinator && f.coordinator.dept) || 'Sports Committee'}</div>
+                            </div>
+                          </div>
                         </td>
                         <td style="padding: 12px 16px;">
                           <div class="font-mono" style="font-size: 0.75rem;">${f.coordinatorMobile || '9876500000'}</div>
@@ -16140,6 +16336,7 @@
     window.RealtimeManager = {
       unsubAuction: null,
       unsubPlayers: null,
+      unsubFranchises: null,
       unsubPresence: null,
       unsubPublicStats: null,
       unsubConnected: null,
@@ -16153,6 +16350,7 @@
         this.subscribeServerOffset();
         this.subscribeAuctionState();
         this.subscribePlayersDirectory();
+        this.subscribeFranchisesDirectory();
         this.subscribeCurrentUser();
         this.subscribePresenceSystem();
       },
@@ -16264,6 +16462,62 @@
         }
       },
 
+      subscribeFranchisesDirectory() {
+        if (!fbDb) return;
+        if (this.unsubFranchises) {
+          try { this.unsubFranchises(); } catch(e) {}
+          this.unsubFranchises = null;
+        }
+        try {
+          this.unsubFranchises = fbDb.collection("franchises").onSnapshot((snapshot) => {
+            if (!snapshot.empty) {
+              snapshot.docChanges().forEach((change) => {
+                const fData = change.doc.data();
+                const fId = fData.id || change.doc.id;
+                const existingIdx = franchises.findIndex(f => String(f.id) === String(fId) || (f.short && fData.short && f.short.toUpperCase() === fData.short.toUpperCase()));
+
+                if (change.type === "added" || change.type === "modified") {
+                  if (fData.status === 'DELETED' || fData.status === 'ARCHIVED') {
+                    if (existingIdx >= 0) franchises.splice(existingIdx, 1);
+                    if (!deletedFranchises.some(d => String(d.id) === String(fId))) {
+                      deletedFranchises.push(fData);
+                    }
+                  } else {
+                    const mappedFranchise = {
+                      ...(existingIdx >= 0 ? franchises[existingIdx] : {}),
+                      ...fData,
+                      id: fData.id !== undefined ? fData.id : (existingIdx >= 0 ? franchises[existingIdx].id : fId)
+                    };
+                    if (existingIdx >= 0) {
+                      franchises[existingIdx] = mappedFranchise;
+                    } else {
+                      franchises.push(mappedFranchise);
+                    }
+                  }
+                } else if (change.type === "removed") {
+                  if (existingIdx >= 0) {
+                    const removedF = franchises.splice(existingIdx, 1)[0];
+                    if (!deletedFranchises.some(d => String(d.id) === String(fId))) {
+                      deletedFranchises.push(removedF);
+                    }
+                  }
+                }
+              });
+              saveDatabase();
+              if (typeof renderAll === 'function') renderAll();
+              else {
+                if (typeof renderHeaderNav === 'function') renderHeaderNav();
+                if (typeof renderCurrentView === 'function') renderCurrentView();
+              }
+            }
+          }, (err) => {
+            console.warn("[Firestore] franchises directory listener note:", err);
+          });
+        } catch (e) {
+          console.warn("[Firestore] franchises sync initialization note:", e);
+        }
+      },
+
       subscribeMultiTab() {
         try {
           if (typeof BroadcastChannel !== "undefined") {
@@ -16296,6 +16550,23 @@
                     if (existingIdx >= 0) players[existingIdx] = { ...players[existingIdx], ...player };
                     else players.push(player);
                   }
+                }
+                saveDatabase();
+                renderCurrentView();
+              } else if (event.data.type === "FRANCHISE_STATE_MUTATION") {
+                const { action, franchiseId, franchise } = event.data;
+                const fId = franchiseId || (franchise && franchise.id);
+                const existingIdx = franchises.findIndex(f => String(f.id) === String(fId));
+                if (action === 'DELETE' || action === 'ARCHIVE') {
+                  if (existingIdx >= 0) franchises.splice(existingIdx, 1);
+                } else if (action === 'RESTORE' || action === 'REGISTER' || action === 'CREATE' || action === 'APPROVE') {
+                  if (franchise) {
+                    if (existingIdx >= 0) franchises[existingIdx] = { ...franchises[existingIdx], ...franchise };
+                    else franchises.push(franchise);
+                  }
+                } else if (franchise) {
+                  if (existingIdx >= 0) franchises[existingIdx] = { ...franchises[existingIdx], ...franchise };
+                  else franchises.push(franchise);
                 }
                 saveDatabase();
                 renderCurrentView();
