@@ -2314,7 +2314,104 @@
         gap: 12px;
       }
     }
-    
+
+    /* Admin Auction Responsive Command Surface */
+    .admin-auction-command-grid {
+      display: grid;
+      grid-template-columns: 260px 1fr 280px;
+      gap: 10px;
+      align-items: stretch;
+      margin-bottom: 4px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .admin-auction-col-franchises {
+      order: 1;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .admin-auction-col-center {
+      order: 2;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .admin-auction-col-intel {
+      order: 3;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .franchise-monitor-desktop-table {
+      display: block;
+      width: 100%;
+    }
+    .franchise-monitor-mobile-cards {
+      display: none;
+    }
+
+    @media (max-width: 1024px) {
+      .admin-auction-command-grid {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 12px !important;
+        width: 100% !important;
+      }
+      /* Center Column (Current Lot, Timer, Hammer & Actions) is displayed at the VERY TOP on Mobile/Tablet */
+      .admin-auction-col-center {
+        order: 1 !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+      }
+      .admin-auction-col-franchises {
+        order: 2 !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+        max-height: 380px !important;
+      }
+      .admin-auction-col-intel {
+        order: 3 !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+        max-height: 420px !important;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .admin-live-control-surface {
+        padding-bottom: 72px; /* Clearance above fixed mobile bottom nav */
+      }
+      .admin-auction-status-bar {
+        padding: 8px 10px !important;
+      }
+      .admin-auction-pipeline-bar {
+        padding: 8px 10px !important;
+      }
+      .admin-auction-lots-strip {
+        padding: 8px 10px !important;
+      }
+      .franchise-monitor-desktop-table {
+        display: none !important;
+      }
+      .franchise-monitor-mobile-cards {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 8px !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+      }
+      .admin-timer-bid-row {
+        gap: 8px !important;
+      }
+      .admin-timer-bid-row .price-display {
+        font-size: 2.1rem !important;
+      }
+      .admin-lot-photo-spotlight {
+        width: 68px !important;
+        height: 68px !important;
+      }
+      .admin-lot-hero-name {
+        font-size: 1.25rem !important;
+      }
+    }
   </style>
   <!-- Google Firebase SDK (v10 compat scripts for Firestore, Realtime Database Presence, & Auth) -->
   <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
@@ -6125,6 +6222,12 @@
       const cur = players[lotIndex];
       if (!f || !cur || cur.status !== 'AVAILABLE' || auctionPaused) return;
 
+      // Prevent same team bidding continuously against itself
+      if (leadingBidderId && (leadingBidderId === franchiseId || String(leadingBidderId) === String(franchiseId))) {
+        showToast(`BID BLOCKED: ${f.name} already holds the highest bid (${currentBid}C). Await counter-bid from another team.`, "warning");
+        return;
+      }
+
       if (cur && typeof cur.basePrice === 'number' && (!leadingBidderId || currentBid < cur.basePrice)) {
         currentBid = cur.basePrice;
       }
@@ -9817,7 +9920,16 @@
 
             <!-- Bidding & Action Controls -->
             <div style="display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-2);">
-              ${isBlocked ? `
+              ${isLeader ? `
+                <div style="display: flex; flex-direction: column; gap: 6px;">
+                  <button class="btn btn-secondary" style="min-height: 52px; font-size: 1rem; font-weight: 800; border-color: #f59e0b; color: #b45309; background: #fffbeb; cursor: not-allowed; width: 100%; box-shadow: 0 2px 8px rgba(245,158,11,0.15);" disabled>
+                    👑 CURRENT HIGHEST BIDDER (${currentBid}C)
+                  </button>
+                  <div style="text-align: center; font-size: 0.72rem; color: #b45309; font-weight: 700;">
+                    Your franchise holds the leading bid. Awaiting counter-bid from another team.
+                  </div>
+                </div>
+              ` : isBlocked ? `
                 <button class="btn btn-secondary" style="min-height: 52px; font-size: 0.95rem; font-weight: 800; border-color: rgba(225,29,72,0.5); color: var(--color-red); background: rgba(225,29,72,0.1); cursor: not-allowed; width: 100%;" disabled>
                   ${blockedReason}
                 </button>
@@ -12660,8 +12772,12 @@
                 ${franchises.map(f => {
                   const maxB = calculateMaxBid(f.id, cur.bucket);
                   const nextB = currentBid + getBidIncrement(currentBid);
-                  const eligible = maxB >= nextB;
-                  return `<option value="${f.id}" ${!eligible ? 'disabled' : ''}>${f.name} (Purse: ${f.purse}C | Max: ${maxB}C ${!eligible ? '— BLOCKED' : ''})</option>`;
+                  const isLeader = leadingBidderId && (f.id === leadingBidderId || String(f.id) === String(leadingBidderId));
+                  const eligible = maxB >= nextB && !isLeader;
+                  let reason = '';
+                  if (isLeader) reason = ' — CURRENT LEADER';
+                  else if (!eligible) reason = ' — BLOCKED';
+                  return `<option value="${f.id}" ${!eligible ? 'disabled' : ''}>${f.name} (Purse: ${f.purse}C | Max: ${maxB}C${reason})</option>`;
                 }).join('')}
               </select>
             </div>
@@ -13573,7 +13689,7 @@
             <div class="admin-live-control-surface" style="display: flex; flex-direction: column; gap: 8px; width: 100%; box-sizing: border-box;">
 
               <!-- REGION 1: STATUS BAR (Light Theme Status Header) -->
-              <div class="surface-card" style="padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; background: #ffffff; border: 1px solid var(--border-medium); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">
+              <div class="surface-card admin-auction-status-bar" style="padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; background: #ffffff; border: 1px solid var(--border-medium); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">
                 <div style="display: flex; align-items: center; gap: 8px; font-size: 0.75rem; flex-wrap: wrap;">
                   <div style="display: flex; align-items: center; gap: 6px; background: #ecfdf5; border: 1px solid #a7f3d0; padding: 3px 8px; border-radius: 4px;">
                     <span class="label-micro" style="color: #047857; font-weight: 800;">EDITION</span>
@@ -13617,7 +13733,7 @@
               </div>
 
               <!-- REGION 1B: BUCKET PIPELINE & DRAW MODE CONTROLLER -->
-              <div class="surface-card" style="padding: 10px 16px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; background: #ffffff; border: 1px solid var(--border-medium); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
+              <div class="surface-card admin-auction-pipeline-bar" style="padding: 10px 16px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; background: #ffffff; border: 1px solid var(--border-medium); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
                 <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                   <span class="label-micro" style="color: #64748b; font-weight: 800; font-size: 0.7rem; letter-spacing: 0.5px;">BUCKET PIPELINE:</span>
                   <div style="display: flex; align-items: center; gap: 5px; flex-wrap: wrap;">
@@ -13650,7 +13766,7 @@
               </div>
 
               <!-- REGION 1C: BUCKET LOT NUMBERS DISPLAY STRIP (Click to Display Player) -->
-              <div class="surface-card" style="padding: 10px 16px; margin-bottom: 8px; background: #ffffff; border: 1px solid var(--border-medium); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.03); display: flex; flex-direction: column; gap: 8px;">
+              <div class="surface-card admin-auction-lots-strip" style="padding: 10px 16px; margin-bottom: 8px; background: #ffffff; border: 1px solid var(--border-medium); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.03); display: flex; flex-direction: column; gap: 8px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
                   <div style="display: flex; align-items: center; gap: 8px;">
                     <span class="label-micro" style="color: #047857; font-weight: 900; font-size: 0.72rem; letter-spacing: 0.5px;">
@@ -13697,10 +13813,10 @@
               <!-- CENTER: CURRENT LOT + BID + TIMER + ACTIONS              -->
               <!-- RIGHT: AUCTION INTELLIGENCE                              -->
               <!-- ======================================================== -->
-              <div style="display: grid; grid-template-columns: 260px 1fr 280px; gap: 10px; align-items: stretch; margin-bottom: 4px;">
+              <div class="admin-auction-command-grid">
                 
                 <!-- 1. LEFT: FRANCHISE LIVE BOARD (All 11 Franchises) -->
-                <div class="surface-card" style="padding: 12px; display: flex; flex-direction: column; gap: 6px; background: rgba(255, 255, 255, 0.82); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.90); border-radius: 10px; box-shadow: var(--shadow-sm); overflow-y: auto; max-height: 480px;">
+                <div class="surface-card admin-auction-col-franchises" style="padding: 12px; display: flex; flex-direction: column; gap: 6px; background: rgba(255, 255, 255, 0.82); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.90); border-radius: 10px; box-shadow: var(--shadow-sm); overflow-y: auto; max-height: 480px;">
                   <div style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 6px; border-bottom: 1px solid #f1f5f9;">
                     <div>
                       <span style="color: #047857; font-weight: 800; font-size: 0.72rem; letter-spacing: 0.5px; text-transform: uppercase;">FRANCHISE LIVE BOARD</span>
@@ -13776,13 +13892,13 @@
                 </div>
 
                 <!-- 2. CENTER: CURRENT LOT + BID + TIMER + ACTIONS -->
-                <div class="surface-elevated" style="padding: 14px 18px; display: flex; flex-direction: column; justify-content: space-between; background: rgba(255, 255, 255, 0.90); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.95); border-top: 4px solid #10b981; border-radius: 12px; box-shadow: var(--shadow-md); gap: 10px;">
+                <div class="surface-elevated admin-auction-col-center" style="padding: 14px 18px; display: flex; flex-direction: column; justify-content: space-between; background: rgba(255, 255, 255, 0.90); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.95); border-top: 4px solid #10b981; border-radius: 12px; box-shadow: var(--shadow-md); gap: 10px;">
                   
                   <!-- CURRENT LOT HERO (Player Focus) -->
                   <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; border-bottom: 1px solid #f1f5f9; padding-bottom: 10px;">
                     <div style="display: flex; align-items: center; gap: 12px;">
                       <!-- 92px Photo Spotlight -->
-                      <div style="width: 84px; height: 84px; border-radius: 10px; overflow: hidden; background: linear-gradient(135deg, #f1f5f9, #e2e8f0); display: flex; align-items: center; justify-content: center; border: 2px solid #cbd5e1; box-shadow: 0 2px 6px rgba(0,0,0,0.06); flex-shrink: 0;">
+                      <div class="admin-lot-photo-spotlight" style="width: 84px; height: 84px; border-radius: 10px; overflow: hidden; background: linear-gradient(135deg, #f1f5f9, #e2e8f0); display: flex; align-items: center; justify-content: center; border: 2px solid #cbd5e1; box-shadow: 0 2px 6px rgba(0,0,0,0.06); flex-shrink: 0;">
                         ${cur.photo ? `<img src="${cur.photo}" style="width: 100%; height: 100%; object-fit: cover;">` : `<span style="font-size: 2.2rem; font-weight: 800; color: #64748b;">${(cur.name || 'P').charAt(0)}</span>`}
                       </div>
                       <div>
@@ -13794,7 +13910,7 @@
                           <span class="status-badge" style="background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; font-size: 0.65rem; font-weight: 700; padding: 1px 6px; border-radius: 4px;">${cur.derivedType || 'ALL-ROUNDER'}</span>
                           ${cur.cricHeroesStatus === 'PROFILE CREATION PENDING' ? '<span class="status-badge" style="background: #fffbeb; color: #b45309; border: 1px solid #fde68a; font-size: 0.6rem; font-weight: 700; padding: 1px 5px; border-radius: 4px;">CRICHEROES PENDING</span>' : '<span class="status-badge" style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; font-size: 0.6rem; font-weight: 700; padding: 1px 5px; border-radius: 4px;">CRICHEROES VERIFIED</span>'}
                         </div>
-                        <div style="font-family: var(--font-display); font-size: 1.45rem; font-weight: 800; color: #0f172a; letter-spacing: -0.02em; line-height: 1.2;">
+                        <div class="admin-lot-hero-name" style="font-family: var(--font-display); font-size: 1.45rem; font-weight: 800; color: #0f172a; letter-spacing: -0.02em; line-height: 1.2;">
                           ${cur.name}
                         </div>
                         <div style="font-size: 0.72rem; color: #475569; margin-top: 2px;">
@@ -13812,7 +13928,7 @@
                   </div>
 
                   <!-- TIMER + CURRENT BID + LEADING BIDDER -->
-                  <div style="display: flex; align-items: center; justify-content: space-around; gap: 16px; margin: 4px 0;">
+                  <div class="admin-timer-bid-row" style="display: flex; align-items: center; justify-content: space-around; gap: 16px; margin: 4px 0;">
                     <!-- Dominant Circular Countdown Timer (Large & Visually Dominant) -->
                     <div style="position: relative; width: 120px; height: 120px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
                       <svg width="120" height="120" viewBox="0 0 120 120" style="transform: rotate(-90deg);">
@@ -13897,7 +14013,7 @@
                 </div>
 
                 <!-- 3. RIGHT: AUCTION INTELLIGENCE -->
-                <div class="surface-card" style="padding: 12px; display: flex; flex-direction: column; gap: 8px; font-size: 0.75rem; background: rgba(255, 255, 255, 0.82); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.90); border-radius: 10px; box-shadow: var(--shadow-sm); overflow-y: auto; max-height: 480px;">
+                <div class="surface-card admin-auction-col-intel" style="padding: 12px; display: flex; flex-direction: column; gap: 8px; font-size: 0.75rem; background: rgba(255, 255, 255, 0.82); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.90); border-radius: 10px; box-shadow: var(--shadow-sm); overflow-y: auto; max-height: 480px;">
                   
                   <!-- 1. CURRENT BUCKET -->
                   <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 8px 10px;">
@@ -14000,7 +14116,7 @@
               </div>
 
               <!-- REGION 4: 11-FRANCHISE MONITOR TABLE (Sticky Header) -->
-              <div class="surface-card" style="padding: 0; overflow-x: auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.04);">
+              <div class="surface-card franchise-monitor-desktop-table" style="padding: 0; overflow-x: auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.04);">
                 <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.75rem;">
                   <thead>
                     <tr style="position: sticky; top: 0; background: #f8fafc; border-bottom: 2px solid #e2e8f0; color: #475569; font-size: 0.68rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; z-index: 2;">
@@ -14063,8 +14179,8 @@
                           <td style="padding: 7px 10px; font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 700; color: #0284c7;">${slotsRemaining}</td>
                           <td style="padding: 7px 10px;">${statusBadge}</td>
                           <td style="padding: 7px 10px; text-align: right;">
-                            <button class="btn btn-secondary" style="font-size: 0.68rem; font-weight: 800; padding: 4px 10px; border-radius: 4px; min-height: 28px; background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; cursor: pointer;" onclick="placeBid(${f.id})" ${blockedReason ? 'disabled style="opacity: 0.35; cursor: not-allowed; padding: 4px 10px; font-size: 0.68rem;"' : ''}>
-                              BID
+                            <button class="btn btn-secondary" style="font-size: 0.68rem; font-weight: 800; padding: 4px 10px; border-radius: 4px; min-height: 28px; background: ${isLeader ? '#fffbeb' : '#ecfdf5'}; color: ${isLeader ? '#b45309' : '#047857'}; border: 1px solid ${isLeader ? '#fde68a' : '#a7f3d0'}; cursor: ${blockedReason || isLeader ? 'not-allowed' : 'pointer'}; opacity: ${blockedReason ? '0.35' : '1'};" onclick="${isLeader || blockedReason ? '' : `placeBid(${f.id})`}" ${blockedReason || isLeader ? 'disabled' : ''}>
+                              ${isLeader ? 'HOLDING' : 'BID'}
                             </button>
                           </td>
                         </tr>
@@ -14072,6 +14188,79 @@
                     }).join('')}
                   </tbody>
                 </table>
+              </div>
+
+              <!-- REGION 4B: 11-FRANCHISE MONITOR MOBILE CARDS (<= 768px Viewports) -->
+              <div class="franchise-monitor-mobile-cards">
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 2px;">
+                  <span style="font-size: 0.75rem; font-weight: 800; color: #047857; text-transform: uppercase; letter-spacing: 0.5px;">FRANCHISE ROSTER &amp; BID CONTROLS</span>
+                  <span class="font-mono" style="font-size: 0.68rem; color: #64748b; font-weight: 700;">11 TEAMS</span>
+                </div>
+                ${franchises.map(f => {
+                  const nextB = currentBid + getBidIncrement(currentBid);
+                  const maxB = calculateMaxBid(f.id, cur.bucket);
+                  const isPassed = passedFranchiseIds.includes(f.id);
+                  const isLeader = f.id === leadingBidderId;
+                  const ap = (f.squad || []).filter(p => !p.isCaptain && !p.isViceCaptain && !p.isReferred);
+                  const bMins = window.bucketMinimums || { B1: 2, B2: 2, B3: 2, B4: 2, D5: 2 };
+                  
+                  let unmetMandatory = 0;
+                  const bStatus = ['B1', 'B2', 'B3', 'B4', 'D5'].map(b => {
+                    const count = ap.filter(p => p.bucket === b).length;
+                    const req = bMins[b] !== undefined ? bMins[b] : 2;
+                    const satisfied = count >= req;
+                    if (!satisfied) unmetMandatory += (req - count);
+                    return `<span style="display: inline-block; padding: 1px 4px; border-radius: 3px; font-weight: 700; margin-right: 2px; font-size: 0.6rem; background: ${satisfied ? '#ecfdf5' : '#fffbeb'}; color: ${satisfied ? '#047857' : '#b45309'}; border: 1px solid ${satisfied ? '#a7f3d0' : '#fde68a'};">${b}</span>`;
+                  }).join('');
+
+                  const slotsRemaining = Math.max(15 - ap.length, unmetMandatory);
+
+                  let blockedReason = null;
+                  if ((f.squad || []).length >= 22) blockedReason = 'Squad Full (22)';
+                  else if (f.purse < nextB) blockedReason = 'No Purse';
+                  else if (!checkSlotProtection(f.id, cur.bucket).eligible) blockedReason = 'Slot Locked';
+                  else if (nextB > maxB) blockedReason = 'MaxBid Exceeded';
+
+                  return `
+                    <div style="background: #ffffff; border: 1px solid ${isLeader ? '#f59e0b' : '#e2e8f0'}; border-left: 4px solid ${isLeader ? '#f59e0b' : blockedReason ? '#ef4444' : '#10b981'}; border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
+                      <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div style="display: flex; align-items: center; gap: 6px; overflow: hidden; min-width: 0;">
+                          ${getTeamEmblem(f.id, 20)}
+                          <span style="font-weight: 800; font-size: 0.8rem; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${f.name}</span>
+                        </div>
+                        <div>
+                          ${isLeader ? `
+                            <span class="status-badge" style="background: #fffbeb; color: #b45309; border: 1px solid #fde68a; font-size: 0.62rem; font-weight: 800; padding: 2px 6px; border-radius: 4px;">👑 LEADING</span>
+                          ` : blockedReason ? `
+                            <span class="status-badge" style="background: #fff1f2; color: #be123c; border: 1px solid #fecdd3; font-size: 0.62rem; font-weight: 800; padding: 2px 6px; border-radius: 4px;">${blockedReason}</span>
+                          ` : isPassed ? `
+                            <span class="status-badge" style="background: #f1f5f9; color: #64748b; border: 1px solid #cbd5e1; font-size: 0.62rem; font-weight: 700; padding: 2px 6px; border-radius: 4px;">PASSED</span>
+                          ` : `
+                            <span class="status-badge" style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; font-size: 0.62rem; font-weight: 800; padding: 2px 6px; border-radius: 4px;">IN-PLAY</span>
+                          `}
+                        </div>
+                      </div>
+
+                      <div style="display: flex; justify-content: space-between; align-items: center; background: #f8fafc; padding: 5px 8px; border-radius: 6px; font-size: 0.72rem;">
+                        <div>Purse: <strong class="font-mono" style="color: #047857;">${f.purse}C</strong></div>
+                        <div>Max Bid: <strong class="font-mono" style="color: ${blockedReason ? '#dc2626' : '#047857'};">${maxB}C</strong></div>
+                        <div>Squad: <strong>${ap.length}/15</strong> (Rem: <strong>${slotsRemaining}</strong>)</div>
+                      </div>
+
+                      <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                        <div style="display: flex; align-items: center; gap: 2px; flex-wrap: wrap;">
+                          <span style="font-size: 0.62rem; color: #64748b; margin-right: 2px;">Quotas:</span>
+                          ${bStatus}
+                        </div>
+                        <div>
+                          <button class="btn btn-secondary" style="font-size: 0.75rem; font-weight: 800; padding: 4px 14px; border-radius: 6px; min-height: 32px; background: ${isLeader ? '#fffbeb' : '#ecfdf5'}; color: ${isLeader ? '#b45309' : '#047857'}; border: 1.5px solid ${isLeader ? '#fde68a' : '#10b981'}; cursor: ${blockedReason || isLeader ? 'not-allowed' : 'pointer'};" onclick="${isLeader || blockedReason ? '' : `placeBid(${f.id})`}" ${blockedReason || isLeader ? 'disabled' : ''}>
+                            ${isLeader ? 'HOLDING LEAD' : 'BID'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
               </div>
 
               <!-- REGION 5: AUDIT STREAM (Last 15 Events, Live Append) -->
