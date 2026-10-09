@@ -51,7 +51,15 @@ export default function AdminAuctionPage() {
           const saleAgeMs = Date.now() - (sale.timestamp || 0);
           if (lastAnimatedSaleIdRef.current !== sale.lotId && saleAgeMs < 15000) {
             lastAnimatedSaleIdRef.current = sale.lotId;
-            setSoldModalData(sale);
+            setSoldModalData({ ...sale, outcome: 'SOLD' });
+            setSoldModalOpen(true);
+          }
+        } else if (data.lastUnsold && data.lastUnsold.lotId) {
+          const unsold = data.lastUnsold;
+          const unsoldAgeMs = Date.now() - (unsold.timestamp || 0);
+          if (lastAnimatedSaleIdRef.current !== unsold.lotId && unsoldAgeMs < 15000) {
+            lastAnimatedSaleIdRef.current = unsold.lotId;
+            setSoldModalData({ ...unsold, outcome: 'UNSOLD' });
             setSoldModalOpen(true);
           }
         }

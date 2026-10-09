@@ -100,6 +100,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
   const passFranchiseFn = httpsCallable(functions, 'passFranchise');
   const pauseResumeFn = httpsCallable(functions, 'pauseResumeAuction');
   const placeBidFn = httpsCallable(functions, 'placeBid');
+  const generateDrawFn = httpsCallable(functions, 'generateDraw');
 
   // Real-time Listeners
   useEffect(() => {
@@ -130,13 +131,21 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
         const data = snap.data();
         setAuctionState(data);
 
-        // Authoritative sale broadcast check
+        // Authoritative sale/unsold broadcast check
         if (data.lastSale && data.lastSale.lotId) {
           const sale = data.lastSale;
           const saleAgeMs = Date.now() - (sale.timestamp || 0);
           if (lastAnimatedSaleIdRef.current !== sale.lotId && saleAgeMs < 15000) {
             lastAnimatedSaleIdRef.current = sale.lotId;
-            setSoldModalData(sale);
+            setSoldModalData({ ...sale, outcome: 'SOLD' });
+            setSoldModalOpen(true);
+          }
+        } else if (data.lastUnsold && data.lastUnsold.lotId) {
+          const unsold = data.lastUnsold;
+          const unsoldAgeMs = Date.now() - (unsold.timestamp || 0);
+          if (lastAnimatedSaleIdRef.current !== unsold.lotId && unsoldAgeMs < 15000) {
+            lastAnimatedSaleIdRef.current = unsold.lotId;
+            setSoldModalData({ ...unsold, outcome: 'UNSOLD' });
             setSoldModalOpen(true);
           }
         }
@@ -430,29 +439,38 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
         franchiseId: highestBid?.franchiseId || currentLot?.highestBidderId || '1',
         franchiseName: highestBid?.franchiseName || winningFranchise?.name || 'Franchise',
         soldPrice: currentBidPrice,
+        outcome: isSold ? 'SOLD' : 'UNSOLD',
       };
 
-      await hammerLotFn({ editionId: EDITION_ID, lotId: currentLot.id });
+      await hammerLotFn({
+        editionId: EDITION_ID,
+        lotId: currentLot.id,
+        expectedOutcome: isSold ? 'SOLD' : 'UNSOLD',
+      });
       await recordAudit(
         'HAMMER',
         `Committed lot #${currentLot.drawNumber} (${currentLot.playerName}) for ${currentBidPrice} Cr to ${highestBid?.franchiseName || 'UNSOLD'}`
       );
       setHammerModalOpen(false);
 
-      if (isSold) {
-        lastAnimatedSaleIdRef.current = currentLot.id;
-        setSoldModalData(soldDataToAnimate);
-        setSoldModalOpen(true);
-      } else {
-        // If unsold, advance to next unsold lot in auto mode or wait for operator
-        if (auctionState?.drawMode === 'AUTO') {
-          setTimeout(() => {
-            handleAdvanceLotAuto();
-          }, 800);
-        }
-      }
+      lastAnimatedSaleIdRef.current = currentLot.id;
+      setSoldModalData(soldDataToAnimate);
+      setSoldModalOpen(true);
     } catch (err: any) {
       setActionError(err.message || 'Failed to hammer lot');
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  const handleActivateRound2 = async () => {
+    try {
+      setIsActionLoading(true);
+      setActionError(null);
+      const res: any = await generateDrawFn({ editionId: EDITION_ID, round: 2 });
+      await recordAudit('ROUND2_START', `Activated Round 2 Recall with ${res.data?.count || 0} unsold players`);
+    } catch (err: any) {
+      setActionError(err.message || 'Failed to activate Round 2 Recall');
     } finally {
       setIsActionLoading(false);
     }
@@ -1190,10 +1208,17 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
 
               {/* Timer Pill */}
               <div className={`border rounded-xl px-4 py-2 text-center flex flex-col items-center justify-center font-mono min-w-28 shadow-sm ${getTimerStyles()}`}>
-                <span className="text-[9px] uppercase tracking-wider block font-bold">TIMER</span>
+                <span className="text-[9px] uppercase tracking-wider block font-bold">{timeLeft <= 0 && currentLot?.status === 'LIVE' ? 'EXPIRED' : 'TIMER'}</span>
                 <span className="text-4xl font-black tabular-nums leading-none">{timeLeft.toFixed(1)}<small className="ml-1 text-sm">s</small></span>
               </div>
             </div>
+
+            {/* Time Expired Notice */}
+            {timeLeft <= 0 && currentLot?.status === 'LIVE' && (
+              <div className="mt-2 py-1.5 px-3 rounded-lg bg-amber-500/15 border border-amber-500/50 text-amber-800 text-xs font-mono font-bold text-center flex items-center justify-center gap-2 animate-pulse shadow-xs">
+                <span>⏱️ TIME EXPIRED — AWAITING HAMMER CONFIRMATION</span>
+              </div>
+            )}
 
             {/* Leading Franchise Display */}
             <div className="mt-3 pt-2.5 border-t border-slate-200/80 flex items-center justify-between">
@@ -1256,9 +1281,13 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
               <button
                 onClick={handleHammer}
                 disabled={!capabilities.canHammer || !currentLot || isActionLoading}
-                className="min-h-[44px] py-1.5 bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] disabled:opacity-40 text-slate-900 rounded font-bold shadow-sm shadow-emerald-950/50 transition-all flex flex-col items-center justify-center cursor-pointer"
+                className={`min-h-[44px] py-1.5 active:scale-[0.98] disabled:opacity-40 text-slate-900 rounded font-bold shadow-sm transition-all flex flex-col items-center justify-center cursor-pointer ${
+                  highestBid
+                    ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-950/50'
+                    : 'bg-amber-600 hover:bg-amber-500 shadow-amber-950/50'
+                }`}
               >
-                <span>HAMMER</span>
+                <span className="text-[11px] leading-tight">{highestBid ? 'HAMMER (SOLD)' : 'HAMMER (CONFIRM UNSOLD)'}</span>
                 <span className="text-[9px] opacity-80">[ H ]</span>
               </button>
 
@@ -1358,8 +1387,21 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
                   )}
                 </div>
               ) : (
-                <div className="text-[11px] text-slate-500 italic">
-                  All eligible players in Round 1 processed. Unsold players queued for Round 2 recall.
+                <div className="flex flex-col gap-2 pt-0.5">
+                  <div className="text-[11px] text-slate-500 italic">
+                    {auctionState?.status === 'ROUND2' || auctionState?.round === 2
+                      ? 'Round 2 Recall in progress. All remaining eligible unsold players queued.'
+                      : 'All eligible players in Round 1 processed. Unsold players queued for Round 2 recall.'}
+                  </div>
+                  {capabilities.isSuperAdmin && auctionState?.status !== 'ROUND2' && (
+                    <button
+                      onClick={handleActivateRound2}
+                      disabled={isActionLoading}
+                      className="w-full py-1.5 px-3 bg-amber-600 hover:bg-amber-500 active:scale-[0.98] disabled:opacity-40 text-slate-900 rounded font-mono font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm shadow-amber-950/20 transition-all cursor-pointer"
+                    >
+                      <span>⚡ ACTIVATE ROUND 2 RECALL</span>
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -1637,11 +1679,15 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white border border-amber-500/60 rounded-xl p-5 w-full max-w-md shadow-2xl font-mono space-y-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-amber-500/20 text-amber-500 flex items-center justify-center text-xl font-bold">
+              <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-xl font-bold ${
+                highestBid ? 'bg-emerald-500/20 text-emerald-600' : 'bg-amber-500/20 text-amber-600'
+              }`}>
                 HAMMER
               </div>
               <div>
-                <h3 className="font-bold text-slate-900 text-base">COMMIT LOT SALE (HAMMER)</h3>
+                <h3 className="font-bold text-slate-900 text-base">
+                  {highestBid ? 'COMMIT LOT SALE (HAMMER — SOLD)' : 'CONFIRM UNSOLD (HAMMER)'}
+                </h3>
                 <p className="text-[11px] text-slate-600">Two-Step Authority Verification</p>
               </div>
             </div>
@@ -1653,15 +1699,15 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Draw Number:</span>
-                <span className="font-bold text-slate-300">#{currentLot?.drawNumber}</span>
+                <span className="font-bold text-slate-700">#{currentLot?.drawNumber}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Committed Price:</span>
-                <span className="font-bold text-amber-400">{currentBidPrice} Credits</span>
+                <span className="font-bold text-amber-600">{currentBidPrice} Credits</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Winning Franchise:</span>
-                <span className="font-bold text-emerald-400">
+                <span className={`font-bold ${highestBid ? 'text-emerald-600' : 'text-amber-600'}`}>
                   {highestBid?.franchiseName || currentLot?.highestBidderName || 'NO BIDS (MARK UNSOLD)'}
                 </span>
               </div>
@@ -1670,22 +1716,30 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
             <p className="text-[11px] text-slate-600">
               {highestBid
                 ? 'Committing hammer will atomically deduct purse credits, add player to franchise squad roster, and log an immutable transaction.'
-                : 'No bids placed. Committing hammer will record this player as UNSOLD.'}
+                : 'No bids placed. Committing hammer will record this player as UNSOLD and eligible for Round 2 recall.'}
             </p>
 
             <div className="flex justify-end gap-2 pt-2">
               <button
                 onClick={() => setHammerModalOpen(false)}
-                className="px-4 py-2 border border-slate-300 hover:bg-slate-800 text-slate-300 rounded font-bold text-xs"
+                className="px-4 py-2 border border-slate-300 hover:bg-slate-100 text-slate-700 rounded font-bold text-xs"
               >
                 CANCEL
               </button>
               <button
                 onClick={confirmHammer}
                 disabled={isActionLoading}
-                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-slate-900 rounded font-bold text-xs shadow-md shadow-amber-600/30"
+                className={`px-4 py-2 text-slate-900 rounded font-bold text-xs shadow-md ${
+                  highestBid
+                    ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/30'
+                    : 'bg-amber-600 hover:bg-amber-500 shadow-amber-600/30'
+                }`}
               >
-                {isActionLoading ? 'COMMITTING...' : '[ CONFIRM HAMMER ]'}
+                {isActionLoading
+                  ? 'COMMITTING...'
+                  : highestBid
+                    ? '[ CONFIRM SOLD HAMMER ]'
+                    : '[ CONFIRM UNSOLD ]'}
               </button>
             </div>
           </div>

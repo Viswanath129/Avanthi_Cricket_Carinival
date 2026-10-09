@@ -43,26 +43,57 @@ exports.registerPlayer = (0, https_1.onCall)(async (request) => {
     if (!data.rollNumber || !data.name || !data.mobile || !data.editionId) {
         throw new https_1.HttpsError('invalid-argument', 'rollNumber, name, mobile, and editionId are required.');
     }
+    const normalizedRoll = data.rollNumber.trim().toUpperCase();
+    const cleanMobile = data.mobile.trim().replace(/\D/g, '');
     // Check for duplicate roll number
     const existingRoll = await auth_1.db.collection('players')
-        .where('rollNumber', '==', data.rollNumber.trim().toUpperCase())
+        .where('rollNumber', '==', normalizedRoll)
         .where('editionId', '==', data.editionId)
         .limit(1)
         .get();
+    let playerRef;
+    let isExistingRecord = false;
+    let previousData = null;
     if (!existingRoll.empty) {
-        throw new https_1.HttpsError('already-exists', 'A player with this roll number already exists.');
+        const existingDoc = existingRoll.docs[0];
+        const existingData = existingDoc.data();
+        const isOwner = existingData.uid === caller.uid || existingData.authUid === caller.uid;
+        if (!isOwner) {
+            throw new https_1.HttpsError('already-exists', 'A player with this roll number already exists and belongs to another account.');
+        }
+        playerRef = existingDoc.ref;
+        isExistingRecord = true;
+        previousData = existingData;
+    }
+    else {
+        // Check if caller already has a player doc by uid
+        const existingPlayerByUid = await auth_1.db.collection('players')
+            .where('uid', '==', caller.uid)
+            .where('editionId', '==', data.editionId)
+            .limit(1)
+            .get();
+        if (!existingPlayerByUid.empty) {
+            playerRef = existingPlayerByUid.docs[0].ref;
+            isExistingRecord = true;
+            previousData = existingPlayerByUid.docs[0].data();
+        }
+        else {
+            playerRef = auth_1.db.collection('players').doc(normalizedRoll);
+        }
     }
     // Check for duplicate mobile
     const existingMobile = await auth_1.db.collection('players')
-        .where('mobilePrivate', '==', data.mobile.trim())
+        .where('mobilePrivate', '==', cleanMobile)
         .where('editionId', '==', data.editionId)
         .limit(1)
         .get();
     if (!existingMobile.empty) {
-        throw new https_1.HttpsError('already-exists', 'A player with this mobile number already exists.');
+        const match = existingMobile.docs[0];
+        const isOwner = match.id === playerRef.id || match.data().uid === caller.uid;
+        if (!isOwner) {
+            throw new https_1.HttpsError('already-exists', 'A player with this mobile number already exists and belongs to another account.');
+        }
     }
-    // Create player document
-    const playerRef = auth_1.db.collection('players').doc();
     const playerData = {
         editionId: data.editionId,
         uid: caller.uid,
@@ -91,16 +122,18 @@ exports.registerPlayer = (0, https_1.onCall)(async (request) => {
             battingAverage: 0, bowlingAverage: 0, catches: 0, stumpings: 0,
         },
         registration: {
-            status: 'SUBMITTED',
-            paid: false,
-            editingBlocked: false,
+            status: previousData?.registration?.status || 'SUBMITTED',
+            paid: previousData?.registration?.paid ?? false,
+            editingBlocked: previousData?.registration?.editingBlocked ?? false,
         },
-        auctionable: false,
-        basePrice: data.basePrice || 20,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        accountStatus: previousData?.accountStatus || 'PENDING',
+        approvalStatus: previousData?.approvalStatus || 'PENDING_APPROVAL',
+        auctionable: previousData?.auctionable ?? false,
+        basePrice: data.basePrice || previousData?.basePrice || 20,
+        createdAt: previousData?.createdAt || admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
-    await playerRef.set(playerData);
+    await playerRef.set(playerData, { merge: true });
     // Create public projection
     await auth_1.db.collection('playersPublic').doc(playerRef.id).set({
         playerId: playerRef.id,

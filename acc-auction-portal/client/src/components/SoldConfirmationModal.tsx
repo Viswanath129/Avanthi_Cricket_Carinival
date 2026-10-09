@@ -15,8 +15,9 @@ export interface SoldPlayerDetails {
   playerType?: string;
   photoUrl?: string | null;
   franchiseId?: string | number;
-  franchiseName: string;
-  soldPrice: number;
+  franchiseName?: string;
+  soldPrice?: number;
+  outcome?: 'SOLD' | 'UNSOLD';
 }
 
 export interface SoldConfirmationModalProps {
@@ -43,6 +44,10 @@ export default function SoldConfirmationModal({
 
   if (!isOpen || !soldData) return null;
 
+  const isUnsold = soldData.outcome === 'UNSOLD' || 
+    soldData.franchiseName === 'UNSOLD' || 
+    (!soldData.franchiseId && (!soldData.soldPrice || soldData.soldPrice === 0));
+
   const initials = (soldData.playerName || 'P')
     .split(' ')
     .map((n) => n[0])
@@ -59,21 +64,21 @@ export default function SoldConfirmationModal({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Sold Confirmation"
+      aria-label={isUnsold ? 'Unsold Confirmation' : 'Sold Confirmation'}
       className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-sm sm:max-w-md bg-white border border-emerald-500/40 rounded-3xl p-6 sm:p-7 shadow-2xl text-center relative overflow-hidden animate-in zoom-in-95 duration-200"
+        className={`w-full max-w-sm sm:max-w-md bg-white border ${isUnsold ? 'border-amber-500/40' : 'border-emerald-500/40'} rounded-3xl p-6 sm:p-7 shadow-2xl text-center relative overflow-hidden animate-in zoom-in-95 duration-200`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Subtle decorative radial glow */}
-        <div className="absolute -top-24 left-1/2 -translate-x-1/2 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className={`absolute -top-24 left-1/2 -translate-x-1/2 w-64 h-64 ${isUnsold ? 'bg-amber-500/10' : 'bg-emerald-500/10'} rounded-full blur-3xl pointer-events-none`} />
 
         {/* Top Header Badge */}
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-500/30 text-emerald-700 text-xs font-mono font-bold uppercase tracking-wider mb-3">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          Hammer Sale Confirmed
+        <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full ${isUnsold ? 'bg-amber-50 border border-amber-500/30 text-amber-700' : 'bg-emerald-50 border border-emerald-500/30 text-emerald-700'} text-xs font-mono font-bold uppercase tracking-wider mb-3`}>
+          <span className={`w-2 h-2 rounded-full ${isUnsold ? 'bg-amber-500' : 'bg-emerald-500'} animate-pulse`} />
+          {isUnsold ? 'HAMMER CONFIRMED — UNSOLD' : 'Hammer Sale Confirmed'}
         </div>
 
         {/* Player Photo / Default Avatar */}
@@ -82,22 +87,21 @@ export default function SoldConfirmationModal({
             <img
               src={soldData.photoUrl}
               alt={soldData.playerName}
-              className="w-full h-full object-cover rounded-full border-4 border-emerald-500 shadow-xl shadow-emerald-500/20"
+              className={`w-full h-full object-cover rounded-full border-4 ${isUnsold ? 'border-amber-500 shadow-amber-500/20' : 'border-emerald-500 shadow-emerald-500/20'} shadow-xl`}
             />
           ) : (
-            <div className="w-full h-full rounded-full bg-gradient-to-br from-emerald-50 to-emerald-100 border-4 border-emerald-500 flex items-center justify-center text-emerald-700 font-display font-extrabold text-3xl sm:text-4xl shadow-xl shadow-emerald-500/20">
+            <div className={`w-full h-full rounded-full bg-gradient-to-br ${isUnsold ? 'from-amber-50 to-amber-100 border-4 border-amber-500 text-amber-700 shadow-amber-500/20' : 'from-emerald-50 to-emerald-100 border-4 border-emerald-500 text-emerald-700 shadow-emerald-500/20'} flex items-center justify-center font-display font-extrabold text-3xl sm:text-4xl shadow-xl`}>
               {initials}
             </div>
           )}
 
           {/* Gavel icon overlay */}
-          <div className="absolute -bottom-2 -right-1 w-10 h-10 rounded-full bg-white border-2 border-emerald-500 shadow-md flex items-center justify-center overflow-hidden">
+          <div className={`absolute -bottom-2 -right-1 w-10 h-10 rounded-full bg-white border-2 ${isUnsold ? 'border-amber-500' : 'border-emerald-500'} shadow-md flex items-center justify-center overflow-hidden`}>
             <img
               src="/auction-hammer.svg"
               alt="Gavel"
               className="w-7 h-7 object-contain"
               onError={(e) => {
-                // If svg fails to load, show unicode gavel
                 (e.currentTarget as HTMLElement).style.display = 'none';
                 if (e.currentTarget.parentElement) {
                   e.currentTarget.parentElement.innerText = '🔨';
@@ -107,9 +111,9 @@ export default function SoldConfirmationModal({
           </div>
         </div>
 
-        {/* SOLD Indicator */}
-        <div className="text-3xl sm:text-4xl font-display font-black text-emerald-600 tracking-tight leading-none mt-2">
-          SOLD!
+        {/* SOLD / UNSOLD Indicator */}
+        <div className={`text-3xl sm:text-4xl font-display font-black ${isUnsold ? 'text-amber-600' : 'text-emerald-600'} tracking-tight leading-none mt-2`}>
+          {isUnsold ? 'UNSOLD' : 'SOLD!'}
         </div>
 
         {/* Player Name & Identifier */}
@@ -124,40 +128,51 @@ export default function SoldConfirmationModal({
             {soldData.bucket ? ` · ${soldData.bucket}` : ''}
           </p>
           {bucketLabel && (
-            <span className="inline-block text-[11px] font-mono text-emerald-600 font-semibold">
+            <span className={`inline-block text-[11px] font-mono ${isUnsold ? 'text-amber-600' : 'text-emerald-600'} font-semibold`}>
               {bucketLabel}
             </span>
           )}
         </div>
 
-        {/* Winning Franchise & Price Card */}
-        <div className="mt-4 p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-2.5 text-left min-w-0">
-            <TeamEmblemBadge
-              franchiseId={soldData.franchiseId || '1'}
-              name={soldData.franchiseName}
-              size={36}
-            />
-            <div className="min-w-0">
+        {/* Outcome Card: Franchise & Price for SOLD, Round 2 status for UNSOLD */}
+        {!isUnsold ? (
+          <div className="mt-4 p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2.5 text-left min-w-0">
+              <TeamEmblemBadge
+                franchiseId={soldData.franchiseId || '1'}
+                name={soldData.franchiseName}
+                size={36}
+              />
+              <div className="min-w-0">
+                <span className="text-[10px] font-mono uppercase text-slate-400 block">
+                  Acquired By
+                </span>
+                <span className="font-display font-bold text-sm sm:text-base text-slate-900 truncate block">
+                  {soldData.franchiseName}
+                </span>
+              </div>
+            </div>
+
+            <div className="text-right shrink-0">
               <span className="text-[10px] font-mono uppercase text-slate-400 block">
-                Acquired By
+                Final Price
               </span>
-              <span className="font-display font-bold text-sm sm:text-base text-slate-900 truncate block">
-                {soldData.franchiseName}
+              <span className="font-mono font-black text-lg sm:text-xl text-emerald-600">
+                {soldData.soldPrice}{' '}
+                <span className="text-xs font-bold text-slate-500">Credits</span>
               </span>
             </div>
           </div>
-
-          <div className="text-right shrink-0">
-            <span className="text-[10px] font-mono uppercase text-slate-400 block">
-              Final Price
+        ) : (
+          <div className="mt-4 p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200 text-center">
+            <span className="text-xs font-mono text-amber-800 font-bold block">
+              LOT CONCLUDED WITHOUT BIDS
             </span>
-            <span className="font-mono font-black text-lg sm:text-xl text-emerald-600">
-              {soldData.soldPrice}{' '}
-              <span className="text-xs font-bold text-slate-500">Credits</span>
+            <span className="text-[11px] text-slate-600 block mt-0.5">
+              Player moved to Round 2 recall queue. No purse credits deducted.
             </span>
           </div>
-        </div>
+        )}
 
         {/* Dismiss prompt button */}
         <div className="mt-4">

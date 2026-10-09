@@ -7,7 +7,7 @@ export const hammerLot = onCall({ maxInstances: 5 }, async (request) => {
   // Super Admin or Operator can hammer
   const caller = await verifyCaller(request.auth?.uid, ['SUPER_ADMIN', 'ADMIN']);
   
-  const { lotId } = request.data || {};
+  const { lotId, expectedOutcome } = request.data || {};
   if (!lotId) throw new HttpsError('invalid-argument', 'lotId is required.');
   
   const result = await db.runTransaction(async (txn) => {
@@ -21,6 +21,15 @@ export const hammerLot = onCall({ maxInstances: 5 }, async (request) => {
     }
     
     const hasHighestBidder = !!lot.highestBidderFranchiseId;
+
+    // Strict validation of operator intent
+    if (expectedOutcome === 'UNSOLD' && hasHighestBidder) {
+      throw new HttpsError('failed-precondition', 'Cannot confirm UNSOLD: A valid bid exists on this lot.');
+    }
+    if (expectedOutcome === 'SOLD' && !hasHighestBidder) {
+      throw new HttpsError('failed-precondition', 'Cannot confirm SOLD: No winning bid was placed on this lot.');
+    }
+
     const newStatus = hasHighestBidder ? 'SOLD' : 'UNSOLD';
     
     // Update lot status and clear timer
@@ -81,15 +90,21 @@ export const hammerLot = onCall({ maxInstances: 5 }, async (request) => {
           soldFranchiseId: lot.highestBidderFranchiseId,
           soldFranchiseName: winningFranchiseName,
           auctionable: false,
+          round: lot.round || 1,
+          soldAt: admin.firestore.FieldValue.serverTimestamp(),
         });
       }
     } else {
-      // Mark player as UNSOLD
+      // Mark player as UNSOLD (eligible for Round 2 recall)
       if (lot.playerId) {
         const playerRef = db.collection('players').doc(lot.playerId);
         txn.update(playerRef, {
           status: 'UNSOLD',
           auctionStatus: 'UNSOLD',
+          auctionable: false,
+          round1Unsold: (lot.round || 1) === 1,
+          round: lot.round || 1,
+          unsoldAt: admin.firestore.FieldValue.serverTimestamp(),
         });
       }
     }
@@ -112,11 +127,30 @@ export const hammerLot = onCall({ maxInstances: 5 }, async (request) => {
       franchiseName: winningFranchiseName,
       soldPrice: lot.currentPrice,
       timestamp: Date.now(),
+      round: lot.round || 1,
+    } : null;
+
+    const lastUnsoldData = !hasHighestBidder ? {
+      lotId,
+      drawNumber: lot.drawNumber || null,
+      lotNumber: lot.lotNumber || null,
+      playerId: lot.playerId || null,
+      playerName: lot.playerName || 'Player',
+      rollNumber: lot.rollNumber || null,
+      branch: lot.branch || null,
+      year: lot.year || null,
+      bucket: lot.bucket || lot.bucketId || null,
+      playerType: lot.playerType || null,
+      photoUrl: lot.photoUrl || null,
+      timestamp: Date.now(),
+      round: lot.round || 1,
+      outcome: 'UNSOLD',
     } : null;
 
     txn.set(auctionRef, {
       status: hasHighestBidder ? 'SOLD' : 'UNSOLD',
       lastSale: lastSaleData,
+      lastUnsold: lastUnsoldData,
       lastCompletedLotId: lotId,
       pausedRemainingMs: null,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),

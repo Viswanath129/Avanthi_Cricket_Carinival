@@ -27,6 +27,7 @@ import { ActionBar } from '@/components/registration/ActionBar';
 import { derivePlayerType } from '@shared/engine/playerType';
 import { parseCricHeroesUrl } from '@shared/engine/cricheroes';
 import { CheckCircle2, ShieldCheck, AlertCircle, RefreshCw, ArrowRight, User } from 'lucide-react';
+import { resolvePlayerProfile, checkRollOwnership, checkMobileOwnership } from '@/services/playerProfileService';
 
 const STEP_LABELS = [
   'Identity',
@@ -39,7 +40,7 @@ const STEP_LABELS = [
 
 export default function PlayerRegistrationPage() {
   const [, setLocation] = useLocation();
-  const { user, unregisteredGoogleUser, switchGoogleAccount, refreshUserDoc } = useAuth();
+  const { user, userDoc, unregisteredGoogleUser, switchGoogleAccount, refreshUserDoc } = useAuth();
 
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -91,6 +92,66 @@ export default function PlayerRegistrationPage() {
     referringFranchiseId: null as number | null,
     basePrice: 20,
   });
+
+  const [existingPlayerRecord, setExistingPlayerRecord] = useState<any | null>(null);
+  const [loadingExistingRecord, setLoadingExistingRecord] = useState(false);
+
+  // Authoritative existing player resolution & pre-fill on login
+  useEffect(() => {
+    let isMounted = true;
+    async function checkExisting() {
+      if (!user) return;
+      try {
+        setLoadingExistingRecord(true);
+        const resolved = await resolvePlayerProfile(user.uid, (user as any).playerId);
+        if (isMounted && resolved.exists && resolved.playerData) {
+          const p = resolved.playerData;
+          setExistingPlayerRecord(p);
+          setFormData((prev) => ({
+            ...prev,
+            rollNumber: p.rollNumber || p.rollNumberNormalized || p.id || prev.rollNumber,
+            name: p.name || prev.name,
+            mobileNumber: p.mobilePrivate || p.mobile || prev.mobileNumber,
+            email: p.emailPrivate || p.email || user.email || prev.email,
+            photoPreview: p.photoUrl || user.photoURL || prev.photoPreview,
+            isDetained: p.academic?.isDetainedFlag || false,
+            detainedNote: p.academic?.detainedNote || '',
+            isWk: p.cricket?.isWicketKeeper || false,
+            isBatter: p.cricket?.battingStyle ? true : prev.isBatter,
+            battingArm: p.cricket?.battingArm || 'RIGHT',
+            battingStyle: p.cricket?.battingStyle || 'ROTATOR',
+            battingPosition: p.cricket?.battingPosition || 'MIDDLE_ORDER',
+            isBowler: p.cricket?.bowlingType ? true : prev.isBowler,
+            bowlingArm: p.cricket?.bowlingStyle || 'RIGHT',
+            bowlingType: p.cricket?.bowlingType || 'FAST',
+            cricHeroesUrl: p.cricheroes?.profileUrl || p.cricheroes?.url || prev.cricHeroesUrl,
+            cricHeroesMobile: p.cricheroes?.registeredMobilePrivate || prev.cricHeroesMobile,
+            cricHeroesPending: p.cricheroes?.status === 'PROFILE_CREATION_PENDING',
+            matchesPlayed: p.stats?.matches || 0,
+            runsScored: p.stats?.runs || 0,
+            highestScore: p.stats?.highestScore || 0,
+            battingAverage: p.stats?.battingAverage || 0,
+            strikeRate: p.stats?.strikeRate || 0,
+            wicketsTaken: p.stats?.wickets || 0,
+            bowlingAverage: p.stats?.bowlingAverage || 0,
+            economyRate: p.stats?.economyRate || 0,
+            bestBowling: p.stats?.bestBowling || '',
+            catches: p.stats?.catches || 0,
+            stumpings: p.stats?.stumpings || 0,
+            referenceClaimed: Boolean(p.reference?.playerDeclaration || p.reference?.claimed),
+            referringFranchiseId: p.reference?.franchiseId ? Number(p.reference.franchiseId) : null,
+            basePrice: p.basePrice || 20,
+          }));
+        }
+      } catch (err) {
+        console.warn('[PlayerRegistration] Failed to load existing player record:', err);
+      } finally {
+        if (isMounted) setLoadingExistingRecord(false);
+      }
+    }
+    checkExisting();
+    return () => { isMounted = false; };
+  }, [user]);
 
   const rollParser = useRollParser(formData.rollNumber, 2026);
   const imageProcessor = useImageProcessor();
@@ -177,20 +238,32 @@ export default function PlayerRegistrationPage() {
 
   const handleContinue = async () => {
     if (currentStep === 1) {
-      // Real uniqueness check for Roll Number & Mobile before continuing
+      // Authoritative uniqueness check for Roll Number & Mobile before continuing
       const normalizedRoll = formData.rollNumber.trim().toUpperCase();
       try {
-        const pSnap = await getDoc(doc(db, 'players', normalizedRoll));
-        if (pSnap.exists()) {
-          setFormError(`ROLL NUMBER ALREADY REGISTERED. A player with roll ${normalizedRoll} already exists in the ACC registry.`);
+        const rollCheck = await checkRollOwnership(
+          normalizedRoll,
+          user?.uid,
+          (userDoc as any)?.playerId || existingPlayerRecord?.id
+        );
+        if (!rollCheck.allowed) {
+          setFormError(rollCheck.error || `ROLL NUMBER ALREADY REGISTERED. A player with roll ${normalizedRoll} already exists in the ACC registry.`);
           return;
         }
 
-        const cleanMobile = formData.mobileNumber.trim().replace(/\D/g, '');
-        const mobQuery = query(collection(db, 'players'), where('mobilePrivate', '==', cleanMobile), limit(1));
-        const mobSnap = await getDocs(mobQuery);
-        if (!mobSnap.empty) {
-          setFormError(`MOBILE NUMBER ALREADY REGISTERED. A player with mobile number ${formData.mobileNumber} already exists in the ACC registry.`);
+        // If the roll belongs to the current player, remember their existing record
+        if (rollCheck.isOwnRecord && rollCheck.existingData && !existingPlayerRecord) {
+          setExistingPlayerRecord(rollCheck.existingData);
+        }
+
+        const mobCheck = await checkMobileOwnership(
+          formData.mobileNumber,
+          normalizedRoll,
+          user?.uid,
+          (userDoc as any)?.playerId || existingPlayerRecord?.id
+        );
+        if (!mobCheck.allowed) {
+          setFormError(mobCheck.error || `MOBILE NUMBER ALREADY REGISTERED. A player with mobile number ${formData.mobileNumber} already exists in the ACC registry.`);
           return;
         }
       } catch (err) {
@@ -224,23 +297,26 @@ export default function PlayerRegistrationPage() {
       const cleanMobile = formData.mobileNumber.trim().replace(/\D/g, '');
 
       // 1. Roll Uniqueness & Mobile Uniqueness Check (Point 5)
-      const pDocRef = doc(db, 'players', normalizedRoll);
-      const existingRollSnap = await getDoc(pDocRef);
-      if (existingRollSnap.exists()) {
-        const existingData = existingRollSnap.data();
-        if (existingData.uid && existingData.uid !== user?.uid) {
-          throw new Error(`ROLL NUMBER ALREADY REGISTERED. Roll ${normalizedRoll} is already registered. Another user cannot claim this player record.`);
-        }
+      const rollCheck = await checkRollOwnership(
+        normalizedRoll,
+        user?.uid,
+        (userDoc as any)?.playerId || existingPlayerRecord?.id
+      );
+      if (!rollCheck.allowed) {
+        throw new Error(rollCheck.error || `ROLL NUMBER ALREADY REGISTERED.`);
       }
 
-      const mobQuery = query(collection(db, 'players'), where('mobilePrivate', '==', cleanMobile), limit(1));
-      const existingMobSnap = await getDocs(mobQuery);
-      if (!existingMobSnap.empty) {
-        const match = existingMobSnap.docs[0];
-        if (match.id !== normalizedRoll) {
-          throw new Error(`MOBILE NUMBER ALREADY REGISTERED. A player with mobile number ${formData.mobileNumber} is already registered.`);
-        }
+      const mobCheck = await checkMobileOwnership(
+        formData.mobileNumber,
+        normalizedRoll,
+        user?.uid,
+        (userDoc as any)?.playerId || existingPlayerRecord?.id
+      );
+      if (!mobCheck.allowed) {
+        throw new Error(mobCheck.error || `MOBILE NUMBER ALREADY REGISTERED.`);
       }
+
+      const pDocRef = doc(db, 'players', normalizedRoll);
 
       // 2. Resolve Google Account Authentication (Point 4 & 6)
       let activeGoogleUser = user;
@@ -345,15 +421,15 @@ export default function PlayerRegistrationPage() {
           adminVerified: false,
         },
         registration: {
-          status: 'SUBMITTED',
-          paid: false,
-          editingBlocked: false,
+          status: existingPlayerRecord?.registration?.status || 'SUBMITTED',
+          paid: existingPlayerRecord?.registration?.paid ?? false,
+          editingBlocked: existingPlayerRecord?.registration?.editingBlocked ?? false,
         },
-        accountStatus: 'PENDING',
-        approvalStatus: 'PENDING_APPROVAL',
-        auctionable: false,
+        accountStatus: existingPlayerRecord?.accountStatus || 'PENDING',
+        approvalStatus: existingPlayerRecord?.approvalStatus || 'PENDING_APPROVAL',
+        auctionable: existingPlayerRecord?.auctionable ?? false,
         basePrice: formData.basePrice,
-        createdAt: serverTimestamp(),
+        createdAt: existingPlayerRecord?.createdAt || serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
 
@@ -497,6 +573,27 @@ export default function PlayerRegistrationPage() {
           <div className="p-4 rounded-2xl bg-rose-950/60 border border-rose-800/80 text-rose-200 text-xs font-semibold flex items-center gap-2.5 animate-in fade-in duration-200 shadow-lg">
             <AlertCircle className="w-5 h-5 shrink-0 text-rose-400" />
             <span>{formError}</span>
+          </div>
+        )}
+
+        {/* Existing Registration Banner */}
+        {existingPlayerRecord && (
+          <div className="p-4 rounded-2xl bg-emerald-950/40 border border-emerald-500/40 text-emerald-200 text-xs flex items-center justify-between gap-4 animate-in fade-in duration-200 shadow-lg">
+            <div className="flex items-center gap-3">
+              <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-400" />
+              <div>
+                <span className="font-bold text-white">Existing Registration Found:</span>{' '}
+                <span>{existingPlayerRecord.name} (Roll #{existingPlayerRecord.rollNumber || existingPlayerRecord.id})</span>
+                <div className="text-emerald-400/80 text-[11px] mt-0.5">
+                  Registration status: <strong className="text-white">{existingPlayerRecord.registration?.status || 'SUBMITTED'}</strong> · {existingPlayerRecord.registration?.paid ? 'Payment Verified' : 'Payment Pending'}
+                </div>
+              </div>
+            </div>
+            <Link href="/player/dashboard">
+              <button className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shrink-0 shadow-md">
+                View Dashboard
+              </button>
+            </Link>
           </div>
         )}
 

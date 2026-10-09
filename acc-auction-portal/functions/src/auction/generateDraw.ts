@@ -12,22 +12,55 @@ export const generateDraw = onCall({ maxInstances: 2 }, async (request) => {
   if (!editionId) throw new HttpsError('invalid-argument', 'editionId is required.');
   const roundNum = round || 1;
   
-  // Get all auctionable players for this edition
-  const playersSnap = await db.collection('players')
-    .where('editionId', '==', editionId)
-    .where('auctionable', '==', true)
-    .get();
-  
-  if (playersSnap.empty) {
-    throw new HttpsError('failed-precondition', 'No auctionable players found.');
+  let candidatePlayers: Array<{ id: string; data: any }> = [];
+
+  if (roundNum === 2) {
+    // Round 2 re-auctions ONLY players confirmed UNSOLD in Round 1
+    const unsoldSnap = await db.collection('players')
+      .where('editionId', '==', editionId)
+      .where('status', '==', 'UNSOLD')
+      .get();
+    
+    const seenPlayerIds = new Set<string>();
+    unsoldSnap.docs.forEach((doc) => {
+      const data = doc.data();
+      // Safety filter: Permanently exclude all players marked SOLD or already acquired
+      if (data.status !== 'SOLD' && data.auctionStatus !== 'SOLD' && !seenPlayerIds.has(doc.id)) {
+        seenPlayerIds.add(doc.id);
+        candidatePlayers.push({ id: doc.id, data });
+      }
+    });
+
+    if (candidatePlayers.length === 0) {
+      throw new HttpsError('failed-precondition', 'No eligible UNSOLD players found for Round 2 recall.');
+    }
+  } else {
+    // Round 1: Initial auctionable players
+    const playersSnap = await db.collection('players')
+      .where('editionId', '==', editionId)
+      .where('auctionable', '==', true)
+      .get();
+    
+    if (playersSnap.empty) {
+      throw new HttpsError('failed-precondition', 'No auctionable players found for Round 1.');
+    }
+
+    const seenPlayerIds = new Set<string>();
+    playersSnap.docs.forEach((doc) => {
+      const data = doc.data();
+      if (data.status !== 'SOLD' && data.auctionStatus !== 'SOLD' && !seenPlayerIds.has(doc.id)) {
+        seenPlayerIds.add(doc.id);
+        candidatePlayers.push({ id: doc.id, data });
+      }
+    });
   }
   
   // Group by bucket
   const bucketGroups: Record<string, Array<{id: string; data: any}>> = {};
-  playersSnap.docs.forEach(doc => {
-    const bucket = doc.data().academic?.bucket || 'M6';
+  candidatePlayers.forEach(player => {
+    const bucket = player.data.academic?.bucket || player.data.bucket || 'M6';
     if (!bucketGroups[bucket]) bucketGroups[bucket] = [];
-    bucketGroups[bucket].push({ id: doc.id, data: doc.data() });
+    bucketGroups[bucket].push(player);
   });
   
   // Generate draw numbers and lots
@@ -69,7 +102,7 @@ export const generateDraw = onCall({ maxInstances: 2 }, async (request) => {
   // Update edition auction state
   await db.collection('editions').doc(editionId).collection('auction').doc('state').set({
     editionId,
-    status: 'NOT_STARTED',
+    status: roundNum === 2 ? 'ROUND2' : 'NOT_STARTED',
     currentRound: roundNum,
     currentBucketIndex: 0,
     currentLotId: null,

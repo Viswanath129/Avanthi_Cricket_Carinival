@@ -87,7 +87,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (userSnap.exists()) {
         setAuthState('ROLE_RESOLVING');
-        const data = userSnap.data() as UserDoc;
+        let data = userSnap.data() as UserDoc;
+
+        // If player user has no playerId linked, look up players collection
+        if ((!data.playerId || data.role === 'PLAYER') && !data.playerId) {
+          try {
+            const pQuery = query(collection(db, 'players'), where('uid', '==', firebaseUser.uid), limit(1));
+            let pSnap = await getDocs(pQuery);
+            if (pSnap.empty) {
+              const pAuthQuery = query(collection(db, 'players'), where('authUid', '==', firebaseUser.uid), limit(1));
+              pSnap = await getDocs(pAuthQuery);
+            }
+            if (!pSnap.empty) {
+              const matchedPlayer = pSnap.docs[0];
+              data = { ...data, playerId: matchedPlayer.id, role: data.role || 'PLAYER' };
+              await updateDoc(userRef, { playerId: matchedPlayer.id, role: data.role || 'PLAYER', updatedAt: serverTimestamp() });
+            }
+          } catch (linkErr) {
+            console.warn('[ACC Auth] Player lookup by UID fallback:', linkErr);
+          }
+        }
+
         setUserDoc(data);
         setUnregisteredGoogleUser(null);
 
@@ -102,7 +122,51 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         return data;
       } else {
-        // Authenticated with Google/Firebase, but no ACC record exists in /users/{uid}
+        // Check if an existing player record exists in /players with uid or authUid
+        try {
+          const pQuery = query(collection(db, 'players'), where('uid', '==', firebaseUser.uid), limit(1));
+          let pSnap = await getDocs(pQuery);
+          if (pSnap.empty) {
+            const pAuthQuery = query(collection(db, 'players'), where('authUid', '==', firebaseUser.uid), limit(1));
+            pSnap = await getDocs(pAuthQuery);
+          }
+
+          if (!pSnap.empty) {
+            const matchedPlayer = pSnap.docs[0];
+            const pData = matchedPlayer.data();
+            const healedUserDoc: any = {
+              uid: firebaseUser.uid,
+              role: 'PLAYER',
+              playerId: matchedPlayer.id,
+              email: firebaseUser.email,
+              displayName: pData.name || firebaseUser.displayName,
+              photoURL: pData.photoUrl || firebaseUser.photoURL || null,
+              accountStatus: pData.accountStatus || (pData.registration?.status === 'APPROVED' ? 'ACTIVE' : 'PENDING'),
+              approvalStatus: pData.approvalStatus || (pData.registration?.status === 'APPROVED' ? 'APPROVED' : 'PENDING_APPROVAL'),
+              status: 'ACTIVE',
+              createdAt: pData.createdAt || serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            };
+
+            await setDoc(userRef, healedUserDoc, { merge: true });
+            setUserDoc(healedUserDoc);
+            setUnregisteredGoogleUser(null);
+
+            const accStatus = healedUserDoc.accountStatus;
+            if (accStatus === 'BLOCKED' || accStatus === 'DISABLED') {
+              setAuthState('BLOCKED');
+            } else if (accStatus === 'PENDING' || healedUserDoc.approvalStatus === 'PENDING_APPROVAL') {
+              setAuthState('PENDING_APPROVAL');
+            } else {
+              setAuthState('READY');
+            }
+            return healedUserDoc;
+          }
+        } catch (healErr) {
+          console.warn('[ACC Auth] Auto-healing player user doc fallback:', healErr);
+        }
+
+        // Authenticated with Google/Firebase, but no ACC record exists in /users/{uid} or /players
         setUserDoc(null);
         setUnregisteredGoogleUser({
           uid: firebaseUser.uid,

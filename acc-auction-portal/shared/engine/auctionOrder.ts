@@ -6,14 +6,19 @@ import { AUCTION_ORDER, type BucketId } from '../types';
  */
 export function getNextEligibleUnsoldLot(
   lots: any[],
-  currentLotId?: string | null
+  currentLotId?: string | null,
+  targetRound?: number | null
 ): any | null {
   if (!Array.isArray(lots) || lots.length === 0) return null;
 
-  // Eligible unsold lots (status AVAILABLE or CALLED, excluding current lot)
-  const available = lots.filter(
-    (l) => l && (l.status === 'AVAILABLE' || l.status === 'CALLED') && l.id !== currentLotId
-  );
+  // Eligible unsold lots: strictly exclude SOLD, ARCHIVED, or current lot
+  const available = lots.filter((l) => {
+    if (!l || l.id === currentLotId) return false;
+    if (l.status === 'SOLD' || l.status === 'ARCHIVED' || l.status === 'DELETED') return false;
+    if (l.status !== 'AVAILABLE' && l.status !== 'CALLED') return false;
+    if (typeof targetRound === 'number' && typeof l.round === 'number' && l.round !== targetRound) return false;
+    return true;
+  });
   if (available.length === 0) return null;
 
   // Iterate buckets in strict AUCTION_ORDER

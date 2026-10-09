@@ -6,6 +6,7 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '@/lib/firebase';
 import { BUCKET_LABELS, BucketId } from '@shared/types';
 import { parseCricHeroesUrl } from '@shared/engine/cricheroes';
+import { resolvePlayerProfile } from '@/services/playerProfileService';
 
 export default function PlayerDashboardPage() {
   const { user, userDoc, signOut } = useAuth();
@@ -70,32 +71,57 @@ export default function PlayerDashboardPage() {
 
   // Realtime Firestore subscription for player record (Point 8 & 45)
   useEffect(() => {
-    if (!userDoc?.playerId) return;
-    const unsub = onSnapshot(doc(db, 'players', userDoc.playerId), (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setPlayer((prev: any) => ({
-          ...prev,
-          ...data,
-          id: docSnap.id,
-          rollNumber: data.rollNumber || data.rollNumberNormalized || userDoc.playerId,
-          name: data.name || user?.displayName || prev.name,
-          branch: data.academic?.branch || prev.branch,
-          studyYear: data.academic?.studyYear || prev.studyYear,
-          bucket: data.academic?.bucket || prev.bucket,
-          auctionStatus: data.auctionStatus || (data.status === 'AVAILABLE' ? 'AVAILABLE' : (data.approvalStatus || 'SUBMITTED')),
-          photoUrl: data.photoUrl || user?.photoURL || prev.photoUrl,
-          basePrice: data.basePrice || prev.basePrice,
-          paymentStatus: data.registration?.paid ? 'PAID' : (data.paymentStatus || 'UNPAID'),
-          cricHeroesStatus: data.cricheroes?.status || prev.cricHeroesStatus,
-          cricHeroesUrl: data.cricheroes?.profileUrl || data.cricheroes?.url || prev.cricHeroesUrl,
-          cricHeroesMobile: data.cricheroes?.registeredMobilePrivate || prev.cricHeroesMobile,
-        }));
+    let unsubSnapshot = () => {};
+    let isMounted = true;
+
+    async function initSubscription() {
+      let targetPlayerId = userDoc?.playerId;
+
+      if (!targetPlayerId && user?.uid) {
+        try {
+          const resolved = await resolvePlayerProfile(user.uid);
+          if (resolved.exists && resolved.playerId) {
+            targetPlayerId = resolved.playerId;
+          }
+        } catch (resErr) {
+          console.warn('[PlayerDashboard] Dynamic player resolution error:', resErr);
+        }
       }
-    }, (err) => {
-      console.warn("Player profile subscription fallback:", err);
-    });
-    return () => unsub();
+
+      if (!targetPlayerId || !isMounted) return;
+
+      unsubSnapshot = onSnapshot(doc(db, 'players', targetPlayerId), (docSnap) => {
+        if (docSnap.exists() && isMounted) {
+          const data = docSnap.data();
+          setPlayer((prev: any) => ({
+            ...prev,
+            ...data,
+            id: docSnap.id,
+            rollNumber: data.rollNumber || data.rollNumberNormalized || targetPlayerId,
+            name: data.name || user?.displayName || prev.name,
+            branch: data.academic?.branch || prev.branch,
+            studyYear: data.academic?.studyYear || prev.studyYear,
+            bucket: data.academic?.bucket || prev.bucket,
+            auctionStatus: data.auctionStatus || (data.status === 'AVAILABLE' ? 'AVAILABLE' : (data.approvalStatus || 'SUBMITTED')),
+            photoUrl: data.photoUrl || user?.photoURL || prev.photoUrl,
+            basePrice: data.basePrice || prev.basePrice,
+            paymentStatus: data.registration?.paid ? 'PAID' : (data.paymentStatus || 'UNPAID'),
+            cricHeroesStatus: data.cricheroes?.status || prev.cricHeroesStatus,
+            cricHeroesUrl: data.cricheroes?.profileUrl || data.cricheroes?.url || prev.cricHeroesUrl,
+            cricHeroesMobile: data.cricheroes?.registeredMobilePrivate || prev.cricHeroesMobile,
+          }));
+        }
+      }, (err) => {
+        console.warn("Player profile subscription fallback:", err);
+      });
+    }
+
+    initSubscription();
+
+    return () => {
+      isMounted = false;
+      unsubSnapshot();
+    };
   }, [userDoc?.playerId, user]);
 
   // Sync edits when player updates
