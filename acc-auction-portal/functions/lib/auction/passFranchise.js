@@ -42,9 +42,15 @@ exports.passFranchise = (0, https_1.onCall)({ maxInstances: 10 }, async (request
     const caller = await (0, auth_1.verifyCaller)(request.auth?.uid, [
         'SUPER_ADMIN', 'ADMIN', 'FRANCHISE_COORDINATOR', 'FRANCHISE_TEAM_LEADER',
     ]);
-    const { lotId, franchiseId: targetFranchiseId, action: passAction } = request.data;
+    let { lotId, editionId, franchiseId: targetFranchiseId, action: passAction, pass } = request.data || {};
+    if (!lotId && editionId) {
+        const aSnap = await auth_1.db.collection('editions').doc(editionId).collection('auction').doc('state').get();
+        if (aSnap.exists) {
+            lotId = aSnap.data()?.currentLotId;
+        }
+    }
     if (!lotId)
-        throw new https_1.HttpsError('invalid-argument', 'lotId is required.');
+        throw new https_1.HttpsError('invalid-argument', 'lotId is required, or editionId with a live lot.');
     // Determine which franchise
     let franchiseId;
     if (caller.role === 'SUPER_ADMIN' || caller.role === 'ADMIN') {
@@ -55,7 +61,7 @@ exports.passFranchise = (0, https_1.onCall)({ maxInstances: 10 }, async (request
     else {
         franchiseId = await (0, auth_1.resolveFranchiseId)(caller);
     }
-    const actionType = passAction || 'PASS'; // 'PASS' or 'UNPASS'
+    const actionType = passAction || (pass === false ? 'UNPASS' : (pass === true ? 'PASS' : 'PASS'));
     const result = await auth_1.db.runTransaction(async (txn) => {
         const lotRef = auth_1.db.collection('lots').doc(lotId);
         const lotSnap = await txn.get(lotRef);

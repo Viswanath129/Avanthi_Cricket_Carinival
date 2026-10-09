@@ -81,13 +81,20 @@ export default function ProjectorPage() {
           }
         }
       }
-    });
+    }, (err) => console.warn('[Projector] state listener fallback:', err));
 
     const franchQ = query(collection(db, 'franchises'), where('editionId', '==', EDITION_ID));
     const franchUnsub = onSnapshot(franchQ, (snap) => {
       if (!snap.empty) {
         setFranchises(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       }
+    }, (err) => {
+      console.warn('[Projector] franchises listener fallback:', err);
+      onSnapshot(query(collection(db, 'franchisesPublic'), where('editionId', '==', EDITION_ID)), (snapPub) => {
+        if (!snapPub.empty) {
+          setFranchises(snapPub.docs.map(d => ({ id: d.id, ...d.data() })));
+        }
+      }, () => {});
     });
 
     const allLotsQ = query(collection(db, 'lots'), where('editionId', '==', EDITION_ID));
@@ -95,7 +102,7 @@ export default function ProjectorPage() {
       if (!snap.empty) {
         setAllLots(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       }
-    });
+    }, (err) => console.warn('[Projector] allLots listener fallback:', err));
 
     return () => {
       unsubConn();

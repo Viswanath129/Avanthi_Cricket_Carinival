@@ -54,8 +54,18 @@ exports.skipLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => {
         }
         txn.update(lotRef, {
             status: 'SKIPPED',
+            timerRunning: false,
+            timerDeadline: null,
+            pausedRemainingMs: null,
             version: admin.firestore.FieldValue.increment(1),
         });
+        const auctionStateRef = auth_1.db.collection('editions').doc(lot.editionId).collection('auction').doc('state');
+        txn.set(auctionStateRef, {
+            status: 'SKIPPED',
+            lastCompletedLotId: lotId,
+            pausedRemainingMs: null,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
         (0, audit_1.writeAuditEvent)({ actor: caller, action: 'SKIP', targetType: 'LOT', targetId: lotId, editionId: lot.editionId,
             before: { status: lot.status }, after: { status: 'SKIPPED' }, transaction: txn });
         return { success: true, lotId };

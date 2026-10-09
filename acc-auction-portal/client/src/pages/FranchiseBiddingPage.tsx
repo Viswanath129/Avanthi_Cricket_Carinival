@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, collection, onSnapshot, query, where, orderBy, limit } from 'firebase/firestore';
+import { ref as rtdbRef, onValue } from 'firebase/database';
 import { httpsCallable } from 'firebase/functions';
-import { db, functions } from '@/lib/firebase';
+import { db, functions, rtdb } from '@/lib/firebase';
 import { useAuth } from '@/contexts/AuthContext';
 import { calculateMaxBid, calculateBidIncrement, calculateNextBid } from '@shared/engine/bidEngine';
 import { checkBucketEligibility } from '@shared/engine/bucketEligibility';
 import { BucketId, DEFAULT_SQUAD_RULES, MANDATORY_BUCKETS, BUCKET_LABELS } from '@shared/types';
-import { useServerTime } from '@/hooks/useServerTime';
+import SoldConfirmationModal, { type SoldPlayerDetails } from '@/components/SoldConfirmationModal';
 import { nanoid } from 'nanoid';
 
 const EDITION_ID = 'acc-2026';
@@ -23,64 +24,65 @@ export default function FranchiseBiddingPage() {
 
   // Active Franchise state
   const [franchiseId, setFranchiseId] = useState<string>('1');
-  const [franchiseName, setFranchiseName] = useState<string>('CSE Champions');
+  const [franchiseName, setFranchiseName] = useState<string>('Franchise');
 
-  // Live Auction State
-  const [lot, setLot] = useState<any>({
-    lotNumber: 1,
-    playerId: 'p101',
-    playerName: 'S. Sai Teja',
-    rollNumber: '25811A0403',
-    bucket: 'B2' as BucketId,
-    basePrice: 20,
-    currentBid: 40,
-    leadingFranchiseId: '2',
-    leadingFranchiseName: 'ECE Electro Kings',
-    status: 'IN_PLAY', // 'IN_PLAY' | 'PAUSED' | 'HAMMERED'
-    timerDeadline: Date.now() + 20000,
-    photoUrl: null,
-  });
+  // Realtime Connection & Server Clock Offset
+  const [isOnline, setIsOnline] = useState<boolean>(true);
+  const [serverOffset, setServerOffset] = useState<number>(0);
 
+  // Authoritative Auction State
+  const [auctionState, setAuctionState] = useState<any>(null);
+
+  // Live Auction Lot State
+  const [lot, setLot] = useState<any>(null);
+
+  // Own Franchise State
   const [ownFranchise, setOwnFranchise] = useState<any>({
-    purseRemaining: 880,
-    auctionPurchases: 3,
-    bucketCounts: { B1: 1, B2: 0, B3: 1, B4: 1, D5: 0, M6: 0 } as Record<BucketId, number>,
+    purseRemaining: 2500,
+    auctionPurchases: 0,
+    bucketCounts: { B1: 0, B2: 0, B3: 0, B4: 0, D5: 0, M6: 0 } as Record<BucketId, number>,
     isPassed: false,
   });
 
-  const [bidHistory, setBidHistory] = useState<BidEntry[]>([
-    { franchiseId: '1', franchiseName: 'CSE Champions', amount: 20, timestamp: Date.now() - 14000 },
-    { franchiseId: '3', franchiseName: 'Mechanical Warriors', amount: 30, timestamp: Date.now() - 9000 },
-    { franchiseId: '2', franchiseName: 'ECE Electro Kings', amount: 40, timestamp: Date.now() - 3000 },
-  ]);
+  const [bidHistory, setBidHistory] = useState<BidEntry[]>([]);
 
-  // Teams live status list
-  const [allTeamsStatus, setAllTeamsStatus] = useState<Array<{ id: string; name: string; status: 'IN_PLAY' | 'PASSED' | 'BLOCKED'; reason?: string }>>([
-    { id: '1', name: 'CSE Champions', status: 'IN_PLAY' },
-    { id: '2', name: 'ECE Electro Kings', status: 'IN_PLAY' },
-    { id: '3', name: 'Mechanical Warriors', status: 'IN_PLAY' },
-    { id: '4', name: 'Civil Gladiators', status: 'PASSED' },
-    { id: '5', name: 'EEE Spark Royals', status: 'BLOCKED', reason: 'MAX_BID_EXCEEDED' },
-    { id: '6', name: 'CSM Cyber Knights', status: 'IN_PLAY' },
-    { id: '7', name: 'CSD Data Strikers', status: 'IN_PLAY' },
-    { id: '8', name: 'Diploma Dynamic Titans', status: 'IN_PLAY' },
-    { id: '9', name: 'Pharmacy Phoenix', status: 'PASSED' },
-    { id: '10', name: 'MBA Mavericks', status: 'IN_PLAY' },
-    { id: '11', name: 'Staff Super Kings', status: 'IN_PLAY' },
-  ]);
+  // Teams live status list (all 11 teams)
+  const [allTeamsStatus, setAllTeamsStatus] = useState<Array<{ id: string; name: string; status: 'IN_PLAY' | 'PASSED' | 'BLOCKED'; reason?: string }>>([]);
 
-  const { isOnline, computeRemainingSeconds } = useServerTime();
-  const [timeLeft, setTimeLeft] = useState<number>(20);
+  const [timeLeft, setTimeLeft] = useState<number>(0);
   const [showReconnectBanner, setShowReconnectBanner] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  // Initialize franchise session exclusively from userDoc (Point 1 & 51 & 52)
+  // Sold modal state
+  const [soldModalOpen, setSoldModalOpen] = useState(false);
+  const [soldModalData, setSoldModalData] = useState<SoldPlayerDetails | null>(null);
+  const lastAnimatedSaleIdRef = useRef<string | null>(null);
+
+  // 1. RTDB presence & server time offset
+  useEffect(() => {
+    let unsubConn = () => {};
+    let unsubOffset = () => {};
+    try {
+      const connectedRef = rtdbRef(rtdb, '.info/connected');
+      const offsetRef = rtdbRef(rtdb, '.info/serverTimeOffset');
+      unsubConn = onValue(connectedRef, (snap) => setIsOnline(snap.val() === true));
+      unsubOffset = onValue(offsetRef, (snap) => setServerOffset(snap.val() || 0));
+    } catch (err) {
+      console.warn('RTDB sync fallback:', err);
+    }
+    return () => {
+      unsubConn();
+      unsubOffset();
+    };
+  }, []);
+
+  // 2. Initialize franchise session from userDoc
   useEffect(() => {
     if (userDoc?.franchiseId) {
       const fId = String(userDoc.franchiseId);
       setFranchiseId(fId);
-      
+
       const fRef = doc(db, 'franchises', fId);
       const unsub = onSnapshot(fRef, (snap) => {
         if (snap.exists()) {
@@ -94,11 +96,129 @@ export default function FranchiseBiddingPage() {
           }));
         }
       }, (err) => {
-        console.warn("Franchise doc listen fallback:", err);
+        console.warn('Franchise doc listen fallback:', err);
       });
       return () => unsub();
     }
   }, [userDoc]);
+
+  // 3. Listen to authoritative auction state
+  useEffect(() => {
+    const stateUnsub = onSnapshot(doc(db, 'editions', EDITION_ID, 'auction', 'state'), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setAuctionState(data);
+
+        // Detect sold or unsold completion animation
+        if (data.lastSale && data.lastSale.lotId) {
+          const sale = data.lastSale;
+          const saleAgeMs = Date.now() - (sale.timestamp || 0);
+          if (lastAnimatedSaleIdRef.current !== sale.lotId && saleAgeMs < 15000) {
+            lastAnimatedSaleIdRef.current = sale.lotId;
+            setSoldModalData({ ...sale, outcome: 'SOLD' });
+            setSoldModalOpen(true);
+          }
+        } else if (data.lastUnsold && data.lastUnsold.lotId) {
+          const unsold = data.lastUnsold;
+          const unsoldAgeMs = Date.now() - (unsold.timestamp || 0);
+          if (lastAnimatedSaleIdRef.current !== unsold.lotId && unsoldAgeMs < 15000) {
+            lastAnimatedSaleIdRef.current = unsold.lotId;
+            setSoldModalData({ ...unsold, outcome: 'UNSOLD' });
+            setSoldModalOpen(true);
+          }
+        }
+
+        // Sync pass status
+        if (data.franchiseStatuses && franchiseId) {
+          const myStatus = data.franchiseStatuses[franchiseId];
+          setOwnFranchise((prev: any) => ({
+            ...prev,
+            isPassed: myStatus === 'PASSED',
+          }));
+        }
+      }
+    });
+
+    // Listen to all franchises in edition to maintain live 11 teams arena status
+    const allFranchisesQ = query(collection(db, 'franchises'), where('editionId', '==', EDITION_ID));
+    const allFranchisesUnsub = onSnapshot(allFranchisesQ, (snap) => {
+      if (!snap.empty) {
+        setAllTeamsStatus(snap.docs.map((d) => {
+          const fData = d.data();
+          const liveStatus = auctionState?.franchiseStatuses?.[d.id] || (fData.isPassed ? 'PASSED' : 'IN_PLAY');
+          return {
+            id: d.id,
+            name: fData.name || `Franchise ${d.id}`,
+            status: liveStatus,
+          };
+        }));
+      }
+    });
+
+    return () => {
+      stateUnsub();
+      allFranchisesUnsub();
+    };
+  }, [franchiseId, auctionState?.franchiseStatuses]);
+
+  // 4. Listen to current lot & bids
+  useEffect(() => {
+    if (!auctionState?.currentLotId) {
+      setLot(null);
+      setBidHistory([]);
+      return;
+    }
+
+    const lotUnsub = onSnapshot(doc(db, 'lots', auctionState.currentLotId), (snap) => {
+      if (snap.exists()) {
+        const d = snap.data();
+        setLot({
+          id: snap.id,
+          lotNumber: d.lotNumber || d.drawNumber || 1,
+          playerId: d.playerId,
+          playerName: d.playerName || 'Player',
+          rollNumber: d.rollNumber || '',
+          bucket: (d.bucket || d.bucketId || 'B1') as BucketId,
+          basePrice: d.basePrice || 20,
+          currentBid: d.currentPrice || d.basePrice || 20,
+          leadingFranchiseId: d.highestBidderFranchiseId || d.highestBidderId || null,
+          leadingFranchiseName: d.highestBidderName || null,
+          status: d.status || 'LIVE',
+          timerDeadline: d.timerDeadline || null,
+          timerRunning: d.timerRunning !== false,
+          pausedRemainingMs: d.pausedRemainingMs ?? null,
+          photoUrl: d.photoUrl || d.playerPhoto || null,
+        });
+      } else {
+        setLot(null);
+      }
+    });
+
+    const bidsQ = query(
+      collection(db, 'bids'),
+      where('lotId', '==', auctionState.currentLotId),
+      orderBy('timestamp', 'desc'),
+      limit(15)
+    );
+    const bidsUnsub = onSnapshot(bidsQ, (snap) => {
+      setBidHistory(
+        snap.docs.map((docSnap) => {
+          const b = docSnap.data();
+          return {
+            franchiseId: b.franchiseId,
+            franchiseName: b.franchiseName || 'Franchise',
+            amount: b.amount,
+            timestamp: b.timestamp || (b.createdAt?.toMillis ? b.createdAt.toMillis() : Date.now()),
+          };
+        })
+      );
+    });
+
+    return () => {
+      lotUnsub();
+      bidsUnsub();
+    };
+  }, [auctionState?.currentLotId]);
 
   // Network connection monitor & reconnect banner
   const prevOnlineRef = useRef<boolean>(isOnline);
@@ -111,23 +231,62 @@ export default function FranchiseBiddingPage() {
     prevOnlineRef.current = isOnline;
   }, [isOnline]);
 
-  // Authoritative server timer loop
+  // 5. Authoritative countdown timer
   useEffect(() => {
-    if (lot?.status === 'PAUSED') {
-      const pausedSec = typeof lot?.pausedRemainingMs === 'number'
-        ? Math.max(0, Math.ceil(lot.pausedRemainingMs / 1000))
-        : timeLeft;
-      setTimeLeft(pausedSec);
+    if (!lot || lot.status !== 'LIVE') {
+      setTimeLeft(0);
       return;
     }
-    const tick = () => {
-      const remaining = computeRemainingSeconds(lot?.timerDeadline, false);
-      setTimeLeft(remaining);
+
+    if (auctionState?.status === 'PAUSED' || lot.timerRunning === false) {
+      const pausedMs = typeof lot.pausedRemainingMs === 'number'
+        ? lot.pausedRemainingMs
+        : (typeof auctionState?.pausedRemainingMs === 'number' ? auctionState.pausedRemainingMs : 0);
+      setTimeLeft(Math.max(0, Math.ceil(pausedMs / 1000)));
+      return;
+    }
+
+    const deadlineMs = lot.timerDeadline
+      ? (lot.timerDeadline.toMillis
+        ? lot.timerDeadline.toMillis()
+        : (typeof lot.timerDeadline.seconds === 'number'
+          ? lot.timerDeadline.seconds * 1000
+          : Number(lot.timerDeadline)))
+      : null;
+
+    if (!deadlineMs) {
+      setTimeLeft(0);
+      return;
+    }
+
+    const calcRemaining = () => {
+      const serverNow = Date.now() + serverOffset;
+      const rem = Math.max(0, Math.ceil((deadlineMs - serverNow) / 1000));
+      setTimeLeft(rem);
+      return rem;
     };
-    tick();
-    const interval = setInterval(tick, 100);
+
+    const initial = calcRemaining();
+    if (initial <= 0) return;
+
+    const interval = setInterval(() => {
+      const rem = calcRemaining();
+      if (rem <= 0) {
+        clearInterval(interval);
+      }
+    }, 100);
+
     return () => clearInterval(interval);
-  }, [lot?.timerDeadline, lot?.status, lot?.pausedRemainingMs, computeRemainingSeconds]);
+  }, [
+    lot?.id,
+    lot?.status,
+    lot?.timerRunning,
+    lot?.pausedRemainingMs,
+    lot?.timerDeadline?.seconds || lot?.timerDeadline,
+    auctionState?.status,
+    auctionState?.pausedRemainingMs,
+    serverOffset,
+  ]);
 
   // Calculate Next Legal Bid
   const currentBid = lot?.currentBid || lot?.basePrice || 20;
@@ -140,32 +299,34 @@ export default function FranchiseBiddingPage() {
       purseRemaining: ownFranchise.purseRemaining,
       auctionPurchasesSoFar: ownFranchise.auctionPurchases,
       bucketCounts: ownFranchise.bucketCounts,
-      currentPlayerBucket: lot.bucket,
+      currentPlayerBucket: (lot?.bucket || 'B1') as BucketId,
       minAuctionPurchases: DEFAULT_SQUAD_RULES.minAuctionPurchases, // 15
       bucketMinimums: DEFAULT_SQUAD_RULES.bucketMinimums,
     });
-  }, [ownFranchise, lot.bucket]);
+  }, [ownFranchise, lot?.bucket]);
 
   const bucketEligibility = useMemo(() => {
     return checkBucketEligibility({
       purseRemaining: ownFranchise.purseRemaining,
       auctionPurchasesSoFar: ownFranchise.auctionPurchases,
       bucketCounts: ownFranchise.bucketCounts,
-      currentPlayerBucket: lot.bucket,
+      currentPlayerBucket: (lot?.bucket || 'B1') as BucketId,
       currentPrice: nextBid,
       minAuctionPurchases: DEFAULT_SQUAD_RULES.minAuctionPurchases,
       bucketMinimums: DEFAULT_SQUAD_RULES.bucketMinimums,
     });
-  }, [ownFranchise, lot.bucket, nextBid]);
+  }, [ownFranchise, lot?.bucket, nextBid]);
 
   // Determine if bidding is legally blocked
   const isSquadCapped = ownFranchise.auctionPurchases >= 15;
   const isLeading = lot?.leadingFranchiseId === franchiseId;
   const isTimerExpired = timeLeft <= 0;
-  const isPaused = lot?.status === 'PAUSED';
+  const isPaused = auctionState?.status === 'PAUSED' || lot?.status === 'PAUSED';
 
   let blockedReason: string | null = null;
-  if (isPaused) blockedReason = 'AUCTION_PAUSED';
+  if (!lot) blockedReason = 'AWAITING_NEXT_LOT';
+  else if (lot.status !== 'LIVE') blockedReason = `LOT_${lot.status}`;
+  else if (isPaused) blockedReason = 'AUCTION_PAUSED';
   else if (isTimerExpired) blockedReason = 'TIMER_EXPIRED';
   else if (isLeading) blockedReason = 'CURRENTLY_LEADING';
   else if (isSquadCapped) blockedReason = 'SQUAD_CAP';
@@ -174,11 +335,11 @@ export default function FranchiseBiddingPage() {
   else if (!bucketEligibility.eligible) blockedReason = 'SLOT_PROTECTION';
   else if (ownFranchise.purseRemaining < nextBid) blockedReason = 'NO_PURSE';
 
-  const canBid = !blockedReason && isOnline && !isSubmitting;
+  const canBid = !blockedReason && isOnline && !isSubmitting && Boolean(lot?.id);
 
-  // Handle Bid
+  // Handle Bid - Routes through Cloud Function
   const handleBid = async () => {
-    if (!canBid) return;
+    if (!canBid || !lot?.id) return;
 
     if (navigator.vibrate) navigator.vibrate(40);
     setIsSubmitting(true);
@@ -187,59 +348,43 @@ export default function FranchiseBiddingPage() {
     const clientActionId = nanoid();
 
     try {
-      // Call Firebase function if connected
       const placeBidFn = httpsCallable(functions, 'placeBid');
       await placeBidFn({
         editionId: EDITION_ID,
+        lotId: lot.id,
         franchiseId,
-        playerId: lot.playerId,
-        bidAmount: nextBid,
         clientActionId,
       });
-    } catch (err) {
-      // Fallback local simulated update:
-      setLot((prev: any) => ({
-        ...prev,
-        currentBid: nextBid,
-        leadingFranchiseId: franchiseId,
-        leadingFranchiseName: franchiseName,
-        timerDeadline: Date.now() + 20000, // Reset to full 20s
-      }));
-
-      setBidHistory((prev) => [
-        {
-          franchiseId,
-          franchiseName,
-          amount: nextBid,
-          timestamp: Date.now(),
-        },
-        ...prev,
-      ]);
-
-      // Re-enter play if previously passed
-      if (ownFranchise.isPassed) {
-        setOwnFranchise((f: any) => ({ ...f, isPassed: false }));
-      }
+    } catch (err: any) {
+      console.error('[FranchiseBidding] Place bid failed:', err);
+      setActionError(err.message || 'Bid rejected by server. Please retry.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Handle Pass
+  // Handle Pass - Routes through passFranchise Cloud Function
   const handleTogglePass = async () => {
+    if (!lot?.id) return;
     if (isLeading) {
       setActionError('Cannot pass while currently holding the leading bid.');
       return;
     }
 
     const nextPassed = !ownFranchise.isPassed;
-    setOwnFranchise((f: any) => ({ ...f, isPassed: nextPassed }));
+    setActionError(null);
 
     try {
-      const passFn = httpsCallable(functions, nextPassed ? 'passLot' : 'reenterLot');
-      await passFn({ editionId: EDITION_ID, franchiseId, lotNumber: lot.lotNumber });
-    } catch {
-      // local state already toggled
+      const passFranchiseFn = httpsCallable(functions, 'passFranchise');
+      await passFranchiseFn({
+        editionId: EDITION_ID,
+        lotId: lot.id,
+        franchiseId,
+        action: nextPassed ? 'PASS' : 'UNPASS',
+      });
+    } catch (err: any) {
+      console.error('[FranchiseBidding] Pass toggle failed:', err);
+      setActionError(err.message || 'Failed to update pass status.');
     }
   };
 
@@ -305,45 +450,61 @@ export default function FranchiseBiddingPage() {
         <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
           {/* CURRENT LOT PANEL (Section 3.3) */}
           <div className="md:col-span-5 backdrop-blur-2xl bg-white/80 dark:bg-slate-900/85 border border-white/60 dark:border-white/10 rounded-3xl p-5 shadow-lg flex flex-col justify-between space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
-              <span className="text-xs font-mono font-bold text-slate-500 uppercase tracking-wider">
-                LOT #{lot.lotNumber}
-              </span>
-              <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-mono text-xs font-bold border border-emerald-500/30">
-                Bucket {lot.bucket}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-4">
-              <div className="w-20 h-20 rounded-2xl bg-slate-200 dark:bg-slate-800 border-2 border-emerald-500/40 flex items-center justify-center font-bold text-slate-400 overflow-hidden shadow-md">
-                {lot.photoUrl ? (
-                  <img src={lot.photoUrl} alt={lot.playerName} className="w-full h-full object-cover" />
-                ) : (
-                  <span className="text-2xl font-serif text-emerald-500">
-                    {lot.playerName.charAt(0)}
+            {lot ? (
+              <>
+                <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
+                  <span className="text-xs font-mono font-bold text-slate-500 uppercase tracking-wider">
+                    LOT #{lot.lotNumber}
                   </span>
-                )}
-              </div>
-              <div className="flex-1">
-                <h2 className="font-serif font-bold text-lg md:text-xl text-slate-900 dark:text-slate-100 leading-snug">
-                  {lot.playerName}
-                </h2>
-                <p className="font-mono text-xs text-slate-500 dark:text-slate-400">{lot.rollNumber}</p>
-                <div className="mt-1 flex items-center gap-2">
-                  <span className="text-xs text-slate-600 dark:text-slate-400 font-medium">Base Price:</span>
-                  <span className="font-mono font-bold text-xs text-emerald-600 dark:text-emerald-400">
-                    {lot.basePrice} Credits
+                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-mono text-xs font-bold border border-emerald-500/30">
+                    Bucket {lot.bucket}
                   </span>
                 </div>
-              </div>
-            </div>
 
-            <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/60 text-xs text-slate-600 dark:text-slate-300 flex justify-between font-mono">
-              <span>Category:</span>
-              <span className="font-bold text-slate-900 dark:text-slate-100">
-                {BUCKET_LABELS[lot.bucket as BucketId] || lot.bucket}
-              </span>
-            </div>
+                <div className="flex items-center gap-4">
+                  <div className="w-20 h-20 rounded-2xl bg-slate-200 dark:bg-slate-800 border-2 border-emerald-500/40 flex items-center justify-center font-bold text-slate-400 overflow-hidden shadow-md">
+                    {lot.photoUrl ? (
+                      <img src={lot.photoUrl} alt={lot.playerName} className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-2xl font-serif text-emerald-500">
+                        {lot.playerName?.charAt(0) || 'P'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <h2 className="font-serif font-bold text-lg md:text-xl text-slate-900 dark:text-slate-100 leading-snug">
+                      {lot.playerName}
+                    </h2>
+                    <p className="font-mono text-xs text-slate-500 dark:text-slate-400">{lot.rollNumber}</p>
+                    <div className="mt-1 flex items-center gap-2">
+                      <span className="text-xs text-slate-600 dark:text-slate-400 font-medium">Base Price:</span>
+                      <span className="font-mono font-bold text-xs text-emerald-600 dark:text-emerald-400">
+                        {lot.basePrice} Credits
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/60 text-xs text-slate-600 dark:text-slate-300 flex justify-between font-mono">
+                  <span>Category:</span>
+                  <span className="font-bold text-slate-900 dark:text-slate-100">
+                    {BUCKET_LABELS[lot.bucket as BucketId] || lot.bucket}
+                  </span>
+                </div>
+              </>
+            ) : (
+              <div className="py-12 text-center space-y-3">
+                <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mx-auto text-2xl font-mono">
+                  ⏱️
+                </div>
+                <h3 className="font-serif font-bold text-slate-800 dark:text-slate-200 text-base">
+                  Awaiting Next Lot
+                </h3>
+                <p className="text-xs text-slate-500 font-mono">
+                  Auctioneer is preparing the next player. This view will update automatically.
+                </p>
+              </div>
+            )}
           </div>
 
           {/* LIVE BIDDING PANEL (Section 3.4) */}
@@ -377,7 +538,7 @@ export default function FranchiseBiddingPage() {
               </span>
               <span className="font-bold text-sm text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                {lot.leadingFranchiseName} {isLeading && '(YOU)'}
+                {lot?.leadingFranchiseName || 'No Bids Placed'} {isLeading && '(YOU)'}
               </span>
             </div>
           </div>
@@ -510,6 +671,12 @@ export default function FranchiseBiddingPage() {
           </div>
         </div>
       </main>
+
+      <SoldConfirmationModal
+        isOpen={soldModalOpen}
+        onClose={() => setSoldModalOpen(false)}
+        soldData={soldModalData}
+      />
     </div>
   );
 }

@@ -42,7 +42,7 @@ export const undoSale = onCall({ maxInstances: 5 }, async (request) => {
     if (!lotSnap.exists) throw new HttpsError('failed-precondition', 'Auction lot is missing; sale cannot be safely undone.');
     const lot = lotSnap.data()!;
     if (lot.status !== 'SOLD') throw new HttpsError('failed-precondition', 'Auction lot is not in the SOLD state.');
-    const bucketId = lot.bucketId;
+    const bucketId = lot.bucketId || lot.bucket;
     if (!bucketId) throw new HttpsError('failed-precondition', 'Auction lot has no bucket; sale cannot be safely undone.');
     
     const currentBucketCountForBucket = franchise.squad?.bucketCounts?.[bucketId] || 0;
@@ -59,6 +59,11 @@ export const undoSale = onCall({ maxInstances: 5 }, async (request) => {
       status: 'AVAILABLE',
       currentPrice: lot.basePrice,
       highestBidderFranchiseId: null,
+      highestBidderId: null,
+      highestBidderName: null,
+      timerRunning: false,
+      timerDeadline: null,
+      pausedRemainingMs: null,
       version: admin.firestore.FieldValue.increment(1),
     });
     
@@ -67,7 +72,25 @@ export const undoSale = onCall({ maxInstances: 5 }, async (request) => {
       const playerRef = db.collection('players').doc(acq.playerId);
       txn.update(playerRef, {
         auctionable: true,
+        status: 'AVAILABLE',
+        auctionStatus: 'AVAILABLE',
+        soldPrice: null,
+        soldFranchiseId: null,
+        soldFranchiseName: null,
       });
+    }
+
+    // Clean up auction state if this was the last sale
+    const auctionStateRef = db.collection('editions').doc(acq.editionId).collection('auction').doc('state');
+    const aSnap = await txn.get(auctionStateRef);
+    if (aSnap.exists) {
+      const aData = aSnap.data()!;
+      if (aData.lastSale?.lotId === acq.lotId) {
+        txn.update(auctionStateRef, {
+          lastSale: null,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
     }
     
     // Audit log

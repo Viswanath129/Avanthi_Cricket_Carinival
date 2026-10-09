@@ -84,13 +84,14 @@ export const hammerLot = onCall({ maxInstances: 5 }, async (request) => {
         undoReason: null,
       });
       
-      const currentBucketCount = franchise.squad?.bucketCounts?.[lot.bucketId] || 0;
+      const winningBucket = lot.bucket || lot.bucketId || 'B1';
+      const currentBucketCount = franchise.squad?.bucketCounts?.[winningBucket] || 0;
       
       txn.update(franchiseRef, {
         purseRemaining: admin.firestore.FieldValue.increment(-lot.currentPrice),
         'squad.count': admin.firestore.FieldValue.increment(1),
         'squad.auctionPurchases': admin.firestore.FieldValue.increment(1),
-        [`squad.bucketCounts.${lot.bucketId}`]: currentBucketCount + 1,
+        [`squad.bucketCounts.${winningBucket}`]: currentBucketCount + 1,
       });
       
       // Update player as acquired

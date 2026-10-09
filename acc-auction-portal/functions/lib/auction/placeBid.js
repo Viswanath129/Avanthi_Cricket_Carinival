@@ -119,8 +119,9 @@ exports.placeBid = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => 
         const editionSnap = await txn.get(editionRef);
         const edition = editionSnap.data();
         const bucketMinimums = edition.bucketMinimums || { B1: 2, B2: 2, B3: 2, B4: 2, D5: 2, M6: 0 };
-        // Check bucket eligibility
-        const eligibility = (0, bidLogic_1.checkBucketEligibility)(franchise.squad?.bucketCounts || {}, lot.bucketId, franchise.squad?.auctionPurchases || 0, edition.bucketMinimums ? 15 : 15, bucketMinimums);
+        // Check bucket eligibility with fallback
+        const lotBucket = lot.bucket || lot.bucketId || 'B1';
+        const eligibility = (0, bidLogic_1.checkBucketEligibility)(franchise.squad?.bucketCounts || {}, lotBucket, franchise.squad?.auctionPurchases || 0, edition.bucketMinimums ? 15 : 15, bucketMinimums);
         if (!eligibility.eligible) {
             throw new https_1.HttpsError('failed-precondition', eligibility.reason || 'Bucket eligibility check failed.');
         }
@@ -129,7 +130,7 @@ exports.placeBid = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => 
             purseRemaining: franchise.purseRemaining,
             auctionPurchasesSoFar: franchise.squad?.auctionPurchases || 0,
             bucketCounts: franchise.squad?.bucketCounts || {},
-            currentPlayerBucket: lot.bucketId,
+            currentPlayerBucket: lotBucket,
             minAuctionPurchases: 15,
             bucketMinimums,
         });
@@ -149,6 +150,7 @@ exports.placeBid = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => 
             editionId: lot.editionId,
             lotId,
             franchiseId,
+            franchiseName: franchise.name || 'Franchise',
             amount: nextBid,
             previousAmount: lot.currentPrice,
             sequenceNumber,
@@ -171,6 +173,15 @@ exports.placeBid = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => 
             pausedRemainingMs: null,
             version: admin.firestore.FieldValue.increment(1),
         });
+        // Synchronize auction/state directly
+        txn.set(auctionRef, {
+            currentPrice: nextBid,
+            highestBidderFranchiseId: franchiseId,
+            highestBidderId: franchiseId,
+            highestBidderName: franchise.name || 'Franchise',
+            timerDeadline: newTimerDeadline,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
         return {
             alreadyProcessed: false,
             bidId: bidRef.id,

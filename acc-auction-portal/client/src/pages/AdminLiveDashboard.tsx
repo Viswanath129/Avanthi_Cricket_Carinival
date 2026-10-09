@@ -150,13 +150,13 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
           }
         }
       }
-    });
+    }, (err) => console.warn('[AdminDashboard] state listener fallback:', err));
 
     // 4. Franchises
     const franchQ = query(collection(db, 'franchises'), where('editionId', '==', EDITION_ID));
     const franchUnsub = onSnapshot(franchQ, (snap) => {
       setFranchises(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
+    }, (err) => console.warn('[AdminDashboard] franchises listener fallback:', err));
 
     // 5. Acquisitions (recent 50)
     const acqQ = query(
@@ -167,13 +167,13 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
     );
     const acqUnsub = onSnapshot(acqQ, (snap) => {
       setAcquisitions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
+    }, (err) => console.warn('[AdminDashboard] acquisitions listener fallback:', err));
 
     // 6. All Lots (for scarcity and draw queue)
     const allLotsQ = query(collection(db, 'lots'), where('editionId', '==', EDITION_ID));
     const allLotsUnsub = onSnapshot(allLotsQ, (snap) => {
       setAllLots(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
+    }, (err) => console.warn('[AdminDashboard] allLots listener fallback:', err));
 
     // Read both historical streams, display one chronological timeline.
     const auditRows = new Map<string, any>();

@@ -8,8 +8,16 @@ export const passFranchise = onCall({ maxInstances: 10 }, async (request) => {
     'SUPER_ADMIN', 'ADMIN', 'FRANCHISE_COORDINATOR', 'FRANCHISE_TEAM_LEADER',
   ]);
   
-  const { lotId, franchiseId: targetFranchiseId, action: passAction } = request.data;
-  if (!lotId) throw new HttpsError('invalid-argument', 'lotId is required.');
+  let { lotId, editionId, franchiseId: targetFranchiseId, action: passAction, pass } = request.data || {};
+  
+  if (!lotId && editionId) {
+    const aSnap = await db.collection('editions').doc(editionId).collection('auction').doc('state').get();
+    if (aSnap.exists) {
+      lotId = aSnap.data()?.currentLotId;
+    }
+  }
+  
+  if (!lotId) throw new HttpsError('invalid-argument', 'lotId is required, or editionId with a live lot.');
   
   // Determine which franchise
   let franchiseId: string;
@@ -20,7 +28,7 @@ export const passFranchise = onCall({ maxInstances: 10 }, async (request) => {
     franchiseId = await resolveFranchiseId(caller);
   }
   
-  const actionType = passAction || 'PASS'; // 'PASS' or 'UNPASS'
+  const actionType = passAction || (pass === false ? 'UNPASS' : (pass === true ? 'PASS' : 'PASS'));
   
   const result = await db.runTransaction(async (txn) => {
     const lotRef = db.collection('lots').doc(lotId);

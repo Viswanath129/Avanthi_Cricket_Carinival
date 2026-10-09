@@ -63,34 +63,6 @@ export default function AdminAuctionPage() {
             setSoldModalOpen(true);
           }
         }
-        
-        // Listen to current lot if active
-        if (data.currentLotId) {
-          const lotUnsub = onSnapshot(doc(db, 'lots', data.currentLotId), (lotDoc: any) => {
-            if (lotDoc.exists()) {
-              setCurrentLot({ id: lotDoc.id, ...lotDoc.data() });
-            }
-          });
-          
-          // Listen to bids for current lot
-          const bidsQ = query(
-            collection(db, 'bids'), 
-            where('lotId', '==', data.currentLotId),
-            orderBy('timestamp', 'desc'),
-            limit(10)
-          );
-          const bidsUnsub = onSnapshot(bidsQ, (snapshot) => {
-            setBids(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-          });
-
-          return () => {
-            lotUnsub();
-            bidsUnsub();
-          };
-        } else {
-          setCurrentLot(null);
-          setBids([]);
-        }
       }
     });
 
@@ -112,6 +84,38 @@ export default function AdminAuctionPage() {
       acqUnsub();
     };
   }, []);
+
+  // Dedicated current lot & bids subscription with clean teardown
+  useEffect(() => {
+    if (!auctionState?.currentLotId) {
+      setCurrentLot(null);
+      setBids([]);
+      return;
+    }
+
+    const lotUnsub = onSnapshot(doc(db, 'lots', auctionState.currentLotId), (lotDoc: any) => {
+      if (lotDoc.exists()) {
+        setCurrentLot({ id: lotDoc.id, ...lotDoc.data() });
+      } else {
+        setCurrentLot(null);
+      }
+    });
+
+    const bidsQ = query(
+      collection(db, 'bids'), 
+      where('lotId', '==', auctionState.currentLotId),
+      orderBy('timestamp', 'desc'),
+      limit(10)
+    );
+    const bidsUnsub = onSnapshot(bidsQ, (snapshot) => {
+      setBids(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+
+    return () => {
+      lotUnsub();
+      bidsUnsub();
+    };
+  }, [auctionState?.currentLotId]);
 
   // Timer effect (Authoritative server deadline derivation)
   useEffect(() => {

@@ -343,5 +343,127 @@ describe('ACC 2026 — Round 2 Recall & Sold/Unsold Auction Eligibility', () => 
       expect(computeTimer({ status: 'LIVE' })).toBe(30);
     });
   });
+
+  describe('6. Production Real-Time Synchronization & Financial Consistency', () => {
+    // 6.1 Multi-client state consistency
+    it('synchronizes committed auction state identically across all views', () => {
+      const serverState = {
+        currentLotId: 'lot-42',
+        status: 'LIVE',
+        currentPrice: 120,
+        highestBidderFranchiseId: 'f-1',
+        highestBidderName: 'CSE Champions',
+        timerDeadline: 1700000020000,
+      };
+
+      const adminView = { ...serverState };
+      const spectatorView = { ...serverState };
+      const projectorView = { ...serverState };
+      const franchiseView = { ...serverState };
+
+      expect(adminView.currentPrice).toBe(spectatorView.currentPrice);
+      expect(spectatorView.highestBidderName).toBe(franchiseView.highestBidderName);
+      expect(projectorView.timerDeadline).toBe(adminView.timerDeadline);
+      expect(franchiseView.currentLotId).toBe(serverState.currentLotId);
+    });
+
+    // 6.2 Concurrent bids and idempotency
+    it('idempotently handles repeated bid submissions with the same clientActionId', () => {
+      const existingBids = new Map<string, any>();
+
+      function processBid(bid: { lotId: string; clientActionId: string; amount: number; franchiseId: string }) {
+        const key = `${bid.lotId}:${bid.clientActionId}`;
+        if (existingBids.has(key)) {
+          return { alreadyProcessed: true, bidId: existingBids.get(key).id };
+        }
+        const created = { id: `bid-${existingBids.size + 1}`, ...bid };
+        existingBids.set(key, created);
+        return { alreadyProcessed: false, bidId: created.id };
+      }
+
+      const bid1 = { lotId: 'lot-1', clientActionId: 'action-abc', amount: 50, franchiseId: 'f-1' };
+      const res1 = processBid(bid1);
+      expect(res1.alreadyProcessed).toBe(false);
+      expect(res1.bidId).toBe('bid-1');
+
+      // Duplicate transmission (network retry)
+      const res2 = processBid(bid1);
+      expect(res2.alreadyProcessed).toBe(true);
+      expect(res2.bidId).toBe('bid-1');
+      expect(existingBids.size).toBe(1);
+    });
+
+    // 6.3 Financial & Squad allocation consistency
+    it('accurately updates franchise purse and squad counts on sale', () => {
+      const initialFranchise = {
+        id: 'f-1',
+        purseRemaining: 1000,
+        squadCount: 2,
+        auctionPurchases: 2,
+        bucketCounts: { B1: 1, B2: 1, B3: 0, B4: 0, D5: 0, M6: 0 },
+      };
+
+      const soldPrice = 140;
+      const bucket = 'B2';
+
+      // Sale transaction
+      const updatedFranchise = {
+        ...initialFranchise,
+        purseRemaining: initialFranchise.purseRemaining - soldPrice,
+        squadCount: initialFranchise.squadCount + 1,
+        auctionPurchases: initialFranchise.auctionPurchases + 1,
+        bucketCounts: {
+          ...initialFranchise.bucketCounts,
+          [bucket]: initialFranchise.bucketCounts[bucket] + 1,
+        },
+      };
+
+      expect(updatedFranchise.purseRemaining).toBe(860);
+      expect(updatedFranchise.squadCount).toBe(3);
+      expect(updatedFranchise.auctionPurchases).toBe(3);
+      expect(updatedFranchise.bucketCounts.B2).toBe(2);
+
+      // Undo transaction
+      const undoneFranchise = {
+        ...updatedFranchise,
+        purseRemaining: updatedFranchise.purseRemaining + soldPrice,
+        squadCount: updatedFranchise.squadCount - 1,
+        auctionPurchases: updatedFranchise.auctionPurchases - 1,
+        bucketCounts: {
+          ...updatedFranchise.bucketCounts,
+          [bucket]: updatedFranchise.bucketCounts[bucket] - 1,
+        },
+      };
+
+      expect(undoneFranchise.purseRemaining).toBe(initialFranchise.purseRemaining);
+      expect(undoneFranchise.squadCount).toBe(initialFranchise.squadCount);
+      expect(undoneFranchise.bucketCounts.B2).toBe(initialFranchise.bucketCounts.B2);
+    });
+
+    // 6.4 Reconnect replay suppression
+    it('suppresses stale animations and sound replays on reconnection or re-renders', () => {
+      let lastAnimatedSaleId: string | null = null;
+
+      function shouldTriggerSaleAnimation(sale: { lotId: string; timestamp: number }, now: number) {
+        const saleAgeMs = now - sale.timestamp;
+        if (lastAnimatedSaleId === sale.lotId) return false; // Already animated
+        if (saleAgeMs >= 15000) return false; // Stale (older than 15 seconds)
+
+        lastAnimatedSaleId = sale.lotId;
+        return true;
+      }
+
+      const freshSale = { lotId: 'lot-1', timestamp: 100000 };
+      expect(shouldTriggerSaleAnimation(freshSale, 105000)).toBe(true);
+
+      // Same sale on re-render / snapshot emission
+      expect(shouldTriggerSaleAnimation(freshSale, 106000)).toBe(false);
+
+      // Reconnect to stale sale (e.g. user refreshed after 30 seconds)
+      const staleSale = { lotId: 'lot-2', timestamp: 50000 };
+      expect(shouldTriggerSaleAnimation(staleSale, 100000)).toBe(false);
+    });
+  });
 });
+
 

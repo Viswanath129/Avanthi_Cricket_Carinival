@@ -76,7 +76,7 @@ exports.undoSale = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => {
         const lot = lotSnap.data();
         if (lot.status !== 'SOLD')
             throw new https_1.HttpsError('failed-precondition', 'Auction lot is not in the SOLD state.');
-        const bucketId = lot.bucketId;
+        const bucketId = lot.bucketId || lot.bucket;
         if (!bucketId)
             throw new https_1.HttpsError('failed-precondition', 'Auction lot has no bucket; sale cannot be safely undone.');
         const currentBucketCountForBucket = franchise.squad?.bucketCounts?.[bucketId] || 0;
@@ -91,6 +91,11 @@ exports.undoSale = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => {
             status: 'AVAILABLE',
             currentPrice: lot.basePrice,
             highestBidderFranchiseId: null,
+            highestBidderId: null,
+            highestBidderName: null,
+            timerRunning: false,
+            timerDeadline: null,
+            pausedRemainingMs: null,
             version: admin.firestore.FieldValue.increment(1),
         });
         // Return player to auctionable state
@@ -98,7 +103,24 @@ exports.undoSale = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => {
             const playerRef = auth_1.db.collection('players').doc(acq.playerId);
             txn.update(playerRef, {
                 auctionable: true,
+                status: 'AVAILABLE',
+                auctionStatus: 'AVAILABLE',
+                soldPrice: null,
+                soldFranchiseId: null,
+                soldFranchiseName: null,
             });
+        }
+        // Clean up auction state if this was the last sale
+        const auctionStateRef = auth_1.db.collection('editions').doc(acq.editionId).collection('auction').doc('state');
+        const aSnap = await txn.get(auctionStateRef);
+        if (aSnap.exists) {
+            const aData = aSnap.data();
+            if (aData.lastSale?.lotId === acq.lotId) {
+                txn.update(auctionStateRef, {
+                    lastSale: null,
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                });
+            }
         }
         // Audit log
         (0, audit_1.writeAuditEvent)({ actor: caller, action: 'AUCTION_UNDO', targetType: 'ACQUISITION', targetId: acquisitionId,

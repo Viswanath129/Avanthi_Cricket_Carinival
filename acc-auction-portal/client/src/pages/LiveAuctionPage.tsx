@@ -124,13 +124,20 @@ export default function LiveAuctionPage() {
           }
         }
       }
-    });
+    }, (err) => console.warn('[LiveAuction] state listener fallback:', err));
 
     const franchQ = query(collection(db, 'franchises'), where('editionId', '==', EDITION_ID));
     const franchUnsub = onSnapshot(franchQ, (snap) => {
       if (!snap.empty) {
         setFranchises(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       }
+    }, (err) => {
+      console.warn('[LiveAuction] franchises listener fallback:', err);
+      onSnapshot(query(collection(db, 'franchisesPublic'), where('editionId', '==', EDITION_ID)), (snapPub) => {
+        if (!snapPub.empty) {
+          setFranchises(snapPub.docs.map(d => ({ id: d.id, ...d.data() })));
+        }
+      }, () => {});
     });
 
     const allLotsQ = query(collection(db, 'lots'), where('editionId', '==', EDITION_ID));
@@ -138,7 +145,7 @@ export default function LiveAuctionPage() {
       if (!snap.empty) {
         setAllLots(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       }
-    });
+    }, (err) => console.warn('[LiveAuction] allLots listener fallback:', err));
 
     const acqQ = query(
       collection(db, 'acquisitions'),
@@ -150,7 +157,7 @@ export default function LiveAuctionPage() {
       if (!snap.empty) {
         setAcquisitions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       }
-    });
+    }, (err) => console.warn('[LiveAuction] acquisitions listener fallback:', err));
 
     return () => {
       unsubConn();
