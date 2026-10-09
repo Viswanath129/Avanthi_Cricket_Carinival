@@ -49,7 +49,8 @@ exports.skipLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => {
         if (!lotSnap.exists)
             throw new https_1.HttpsError('not-found', 'Lot not found.');
         const lot = lotSnap.data();
-        if (lot.status !== 'LIVE' && lot.status !== 'CALLED') {
+        const eligibleStatuses = new Set(['LIVE', 'CALLED', 'READY', 'PENDING', 'BIDDING', 'TIME_EXPIRED']);
+        if (!eligibleStatuses.has(lot.status)) {
             throw new https_1.HttpsError('failed-precondition', `Cannot skip. Lot status: ${lot.status}`);
         }
         txn.update(lotRef, {
@@ -63,6 +64,8 @@ exports.skipLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => {
         txn.set(auctionStateRef, {
             status: 'SKIPPED',
             lastCompletedLotId: lotId,
+            timerRunning: false,
+            timerDeadline: null,
             pausedRemainingMs: null,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         }, { merge: true });

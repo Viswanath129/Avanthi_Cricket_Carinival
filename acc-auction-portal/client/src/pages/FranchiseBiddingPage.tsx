@@ -233,25 +233,34 @@ export default function FranchiseBiddingPage() {
 
   // 5. Authoritative countdown timer
   useEffect(() => {
-    if (!lot || lot.status !== 'LIVE') {
+    const isBidding = lot && (
+      lot.status === 'LIVE' || 
+      lot.status === 'BIDDING' || 
+      lot.status === 'AVAILABLE' ||
+      auctionState?.status === 'LIVE' || 
+      auctionState?.status === 'BIDDING'
+    );
+
+    if (!isBidding) {
       setTimeLeft(0);
       return;
     }
 
-    if (auctionState?.status === 'PAUSED' || lot.timerRunning === false) {
-      const pausedMs = typeof lot.pausedRemainingMs === 'number'
+    if (auctionState?.status === 'PAUSED' || lot?.timerRunning === false) {
+      const pausedMs = typeof lot?.pausedRemainingMs === 'number'
         ? lot.pausedRemainingMs
         : (typeof auctionState?.pausedRemainingMs === 'number' ? auctionState.pausedRemainingMs : 0);
       setTimeLeft(Math.max(0, Math.ceil(pausedMs / 1000)));
       return;
     }
 
-    const deadlineMs = lot.timerDeadline
-      ? (lot.timerDeadline.toMillis
-        ? lot.timerDeadline.toMillis()
-        : (typeof lot.timerDeadline.seconds === 'number'
-          ? lot.timerDeadline.seconds * 1000
-          : Number(lot.timerDeadline)))
+    const deadlineRaw = lot?.timerDeadline || auctionState?.timerDeadline;
+    const deadlineMs = deadlineRaw
+      ? (deadlineRaw.toMillis
+        ? deadlineRaw.toMillis()
+        : (typeof deadlineRaw.seconds === 'number'
+          ? deadlineRaw.seconds * 1000
+          : Number(deadlineRaw)))
       : null;
 
     if (!deadlineMs) {
@@ -285,6 +294,7 @@ export default function FranchiseBiddingPage() {
     lot?.timerDeadline?.seconds || lot?.timerDeadline,
     auctionState?.status,
     auctionState?.pausedRemainingMs,
+    auctionState?.timerDeadline?.seconds || auctionState?.timerDeadline,
     serverOffset,
   ]);
 

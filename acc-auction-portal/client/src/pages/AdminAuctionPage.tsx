@@ -119,25 +119,34 @@ export default function AdminAuctionPage() {
 
   // Timer effect (Authoritative server deadline derivation)
   useEffect(() => {
-    if (!currentLot || currentLot.status !== 'LIVE') {
+    const isBidding = currentLot && (
+      currentLot.status === 'LIVE' || 
+      currentLot.status === 'BIDDING' || 
+      currentLot.status === 'AVAILABLE' ||
+      auctionState?.status === 'LIVE' || 
+      auctionState?.status === 'BIDDING'
+    );
+
+    if (!isBidding) {
       setTimeLeft(0);
       return;
     }
 
-    if (auctionState?.status === 'PAUSED' || currentLot.timerRunning === false) {
-      const pausedMs = typeof currentLot.pausedRemainingMs === 'number'
+    if (auctionState?.status === 'PAUSED' || currentLot?.timerRunning === false) {
+      const pausedMs = typeof currentLot?.pausedRemainingMs === 'number'
         ? currentLot.pausedRemainingMs
         : (typeof auctionState?.pausedRemainingMs === 'number' ? auctionState.pausedRemainingMs : 0);
       setTimeLeft(Math.max(0, Math.ceil(pausedMs / 1000)));
       return;
     }
 
-    const deadlineMs = currentLot.timerDeadline
-      ? (currentLot.timerDeadline.toMillis
-        ? currentLot.timerDeadline.toMillis()
-        : (typeof currentLot.timerDeadline.seconds === 'number'
-          ? currentLot.timerDeadline.seconds * 1000
-          : Number(currentLot.timerDeadline)))
+    const deadlineRaw = currentLot?.timerDeadline || auctionState?.timerDeadline;
+    const deadlineMs = deadlineRaw
+      ? (deadlineRaw.toMillis
+        ? deadlineRaw.toMillis()
+        : (typeof deadlineRaw.seconds === 'number'
+          ? deadlineRaw.seconds * 1000
+          : Number(deadlineRaw)))
       : null;
 
     if (!deadlineMs) {
@@ -171,6 +180,7 @@ export default function AdminAuctionPage() {
     currentLot?.timerDeadline?.seconds || currentLot?.timerDeadline,
     auctionState?.status,
     auctionState?.pausedRemainingMs,
+    auctionState?.timerDeadline?.seconds || auctionState?.timerDeadline,
     serverOffset,
   ]);
 
@@ -187,7 +197,12 @@ export default function AdminAuctionPage() {
   };
   const confirmHammerLot = async () => {
     try {
-      await hammerLotFn({ editionId: EDITION_ID, lotId: currentLot?.id });
+      const isSold = !!(highestBid || currentLot?.highestBidderFranchiseId || currentLot?.highestBidderId);
+      await hammerLotFn({
+        editionId: EDITION_ID,
+        lotId: currentLot?.id,
+        expectedOutcome: isSold ? 'SOLD' : 'UNSOLD',
+      });
       setHammerModalOpen(false);
     } catch (e) {
       console.error(e);

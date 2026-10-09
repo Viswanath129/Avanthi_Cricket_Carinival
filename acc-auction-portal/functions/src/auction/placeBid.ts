@@ -35,8 +35,8 @@ export const placeBid = onCall({ maxInstances: 10 }, async (request) => {
     if (!lotSnap.exists) throw new HttpsError('not-found', 'Lot not found.');
     const lot = lotSnap.data()!;
     
-    // Verify lot is LIVE
-    if (lot.status !== 'LIVE') {
+    // Verify lot is in active bidding
+    if (lot.status !== 'LIVE' && lot.status !== 'BIDDING') {
       throw new HttpsError('failed-precondition', `Lot is not live. Current status: ${lot.status}`);
     }
 

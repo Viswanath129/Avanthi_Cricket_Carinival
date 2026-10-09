@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { getNextEligibleUnsoldLot } from '@shared/engine/auctionOrder';
+import { 
+  formatAuditTime, 
+  formatAuditAction, 
+  formatAuditDetails, 
+  extractAuditTimestamp, 
+  mergeAuditTimeline 
+} from '../services/auditTimeline';
 
 describe('ACC 2026 — Round 2 Recall & Sold/Unsold Auction Eligibility', () => {
   const sampleLots = [
@@ -229,19 +236,21 @@ describe('ACC 2026 — Round 2 Recall & Sold/Unsold Auction Eligibility', () => 
         timerDeadline?: number | null;
         highestBidderFranchiseId?: string | null;
       },
-      expectedOutcome: 'SOLD' | 'UNSOLD',
+      expectedOutcome: 'SOLD' | 'UNSOLD' | undefined,
       serverNow: number
     ) {
-      if (lot.status !== 'LIVE') {
-        return { allowed: false, error: `Cannot hammer. Lot status is ${lot.status}, expected LIVE.` };
+      const eligibleStatuses = new Set(['LIVE', 'BIDDING', 'TIME_EXPIRED']);
+      if (!eligibleStatuses.has(lot.status)) {
+        return { allowed: false, error: `Cannot hammer. Lot status is ${lot.status}, expected LIVE, BIDDING, or TIME_EXPIRED.` };
       }
 
       const hasHighestBidder = Boolean(lot.highestBidderFranchiseId);
+      const effectiveOutcome = expectedOutcome || (hasHighestBidder ? 'SOLD' : 'UNSOLD');
 
-      if (expectedOutcome === 'UNSOLD' && hasHighestBidder) {
+      if (effectiveOutcome === 'UNSOLD' && hasHighestBidder) {
         return { allowed: false, error: 'Cannot confirm UNSOLD: A valid bid exists on this lot.' };
       }
-      if (expectedOutcome === 'SOLD' && !hasHighestBidder) {
+      if (effectiveOutcome === 'SOLD' && !hasHighestBidder) {
         return { allowed: false, error: 'Cannot confirm SOLD: No winning bid was placed on this lot.' };
       }
 
@@ -252,7 +261,7 @@ describe('ACC 2026 — Round 2 Recall & Sold/Unsold Auction Eligibility', () => 
         }
       }
 
-      return { allowed: true, outcome: hasHighestBidder ? 'SOLD' : 'UNSOLD' };
+      return { allowed: true, outcome: effectiveOutcome };
     }
 
     it('server rejects UNSOLD hammer if timer has not expired yet', () => {
@@ -462,6 +471,211 @@ describe('ACC 2026 — Round 2 Recall & Sold/Unsold Auction Eligibility', () => 
       // Reconnect to stale sale (e.g. user refreshed after 30 seconds)
       const staleSale = { lotId: 'lot-2', timestamp: 50000 };
       expect(shouldTriggerSaleAnimation(staleSale, 100000)).toBe(false);
+    });
+  });
+
+  describe('7. ACC 2026 — Authoritative Timer Start, Hammer UNSOLD & Audit Stream Normalization', () => {
+    // 7.1 Authoritative 30s timer initialization upon player selection
+    it('initializes a fresh 30-second deadline when lot is opened or drawn', () => {
+      const now = 1700000000000;
+      function openLotSim(lot: { id: string; status: string; basePrice: number }) {
+        const eligibleStatuses = new Set(['AVAILABLE', 'CALLED', 'READY', 'PENDING', 'LIVE', 'BIDDING', 'UNSOLD', 'ROUND_2', 'TIME_EXPIRED']);
+        if (!eligibleStatuses.has(lot.status)) {
+          throw new Error(`Cannot open lot. Current status: ${lot.status}`);
+        }
+        const timerDeadline = now + 30000;
+        return {
+          lot: {
+            ...lot,
+            status: 'LIVE',
+            auctionStatus: 'BIDDING',
+            timerDeadline,
+            timerDurationMs: 30000,
+            timerRunning: true,
+            pausedRemainingMs: null,
+          },
+          auctionState: {
+            currentLotId: lot.id,
+            status: 'LIVE',
+            auctionStatus: 'BIDDING',
+            timerDeadline,
+            timerDurationMs: 30000,
+            timerRunning: true,
+            pausedRemainingMs: null,
+          },
+        };
+      }
+
+      // Can open from AVAILABLE
+      const openedFromAvail = openLotSim({ id: 'lot-1', status: 'AVAILABLE', basePrice: 20 });
+      expect(openedFromAvail.lot.timerDurationMs).toBe(30000);
+      expect(openedFromAvail.lot.timerDeadline).toBe(now + 30000);
+      expect(openedFromAvail.auctionState.timerDeadline).toBe(now + 30000);
+
+      // Can open/recall from UNSOLD in Round 2
+      const openedFromUnsold = openLotSim({ id: 'lot-2', status: 'UNSOLD', basePrice: 20 });
+      expect(openedFromUnsold.lot.timerDurationMs).toBe(30000);
+      expect(openedFromUnsold.auctionState.currentLotId).toBe('lot-2');
+
+      // Rejects ARCHIVED
+      expect(() => openLotSim({ id: 'lot-3', status: 'ARCHIVED', basePrice: 20 })).toThrow('Cannot open lot');
+    });
+
+    // 7.2 Multi-client timer derivation fallback
+    it('derives countdown correctly from either lot.timerDeadline or auctionState.timerDeadline', () => {
+      const now = 1700000000000;
+      function computeRemaining(
+        currentLot: { status: string; timerRunning?: boolean; pausedRemainingMs?: number | null; timerDeadline?: any } | null,
+        auctionState: { status?: string; pausedRemainingMs?: number | null; timerDeadline?: any } | null,
+        serverOffset = 0
+      ) {
+        const isBidding = currentLot && (
+          currentLot.status === 'LIVE' ||
+          currentLot.status === 'BIDDING' ||
+          currentLot.status === 'AVAILABLE' ||
+          auctionState?.status === 'LIVE' ||
+          auctionState?.status === 'BIDDING'
+        );
+        if (!isBidding) return 0;
+
+        if (auctionState?.status === 'PAUSED' || currentLot?.timerRunning === false) {
+          const pausedMs = typeof currentLot?.pausedRemainingMs === 'number'
+            ? currentLot.pausedRemainingMs
+            : (typeof auctionState?.pausedRemainingMs === 'number' ? auctionState.pausedRemainingMs : 0);
+          return Math.max(0, Math.ceil(pausedMs / 1000));
+        }
+
+        const raw = currentLot?.timerDeadline ?? auctionState?.timerDeadline;
+        const deadlineMs = typeof raw === 'number'
+          ? raw
+          : (raw?.seconds ? raw.seconds * 1000 : null);
+        if (!deadlineMs) return 0;
+
+        const serverNow = now + serverOffset;
+        return Math.max(0, Math.ceil((deadlineMs - serverNow) / 1000));
+      }
+
+      // Lot has deadline, auctionState doesn't
+      expect(computeRemaining(
+        { status: 'BIDDING', timerDeadline: now + 30000, timerRunning: true },
+        { status: 'LIVE' }
+      )).toBe(30);
+
+      // AuctionState has deadline, lot doesn't yet (snapshot race condition)
+      expect(computeRemaining(
+        { status: 'BIDDING', timerRunning: true },
+        { status: 'LIVE', timerDeadline: now + 25000 }
+      )).toBe(25);
+
+      // Paused state preserves exact remaining seconds
+      expect(computeRemaining(
+        { status: 'BIDDING', timerRunning: false, pausedRemainingMs: 14200 },
+        { status: 'PAUSED', pausedRemainingMs: 14200 }
+      )).toBe(15);
+
+      // Inactive lot
+      expect(computeRemaining(
+        { status: 'SOLD', timerDeadline: now + 30000 },
+        { status: 'SOLD' }
+      )).toBe(0);
+    });
+
+    // 7.3 Hammer confirmation on expired 0-bid lot confirms UNSOLD without "No active bid" error
+    it('allows confirming UNSOLD when zero bids exist after timer expiry', () => {
+      const expiredLot = {
+        status: 'TIME_EXPIRED',
+        timerDeadline: 1000,
+        highestBidderFranchiseId: null,
+      };
+
+      function hammer(lot: typeof expiredLot, expectedOutcome: string | undefined, serverNow: number) {
+        const eligibleStatuses = new Set(['LIVE', 'BIDDING', 'TIME_EXPIRED']);
+        if (!eligibleStatuses.has(lot.status)) {
+          return { error: `Cannot hammer. Lot status is ${lot.status}` };
+        }
+        const hasHighestBidder = Boolean(lot.highestBidderFranchiseId);
+        const effectiveOutcome = expectedOutcome || (hasHighestBidder ? 'SOLD' : 'UNSOLD');
+
+        if (effectiveOutcome === 'UNSOLD' && hasHighestBidder) {
+          return { error: 'Cannot confirm UNSOLD: A valid bid exists on this lot.' };
+        }
+        if (effectiveOutcome === 'SOLD' && !hasHighestBidder) {
+          return { error: 'Cannot confirm SOLD: No winning bid was placed on this lot.' };
+        }
+        if (!hasHighestBidder && lot.timerDeadline && serverNow < lot.timerDeadline) {
+          return { error: 'Cannot confirm UNSOLD: Auction countdown timer has not expired yet.' };
+        }
+        return { success: true, outcome: effectiveOutcome };
+      }
+
+      // Expired, 0 bids, explicit UNSOLD
+      const resUnsold = hammer(expiredLot, 'UNSOLD', 5000);
+      expect(resUnsold.success).toBe(true);
+      expect(resUnsold.outcome).toBe('UNSOLD');
+
+      // Expired, 0 bids, auto-derived outcome
+      const resAuto = hammer(expiredLot, undefined, 5000);
+      expect(resAuto.success).toBe(true);
+      expect(resAuto.outcome).toBe('UNSOLD');
+
+      // Not expired yet (serverNow < deadline) -> rejects with clear reason
+      const resEarly = hammer({ ...expiredLot, status: 'BIDDING', timerDeadline: 10000 }, 'UNSOLD', 5000);
+      expect(resEarly.error).toContain('Auction countdown timer has not expired yet');
+
+      // Bids present -> cannot confirm UNSOLD
+      const bidLot = { ...expiredLot, highestBidderFranchiseId: 'f-1' };
+      const resBid = hammer(bidLot, 'UNSOLD', 5000);
+      expect(resBid.error).toContain('A valid bid exists on this lot');
+    });
+
+    // 7.4 Audit stream normalization eliminates [Invalid Date] and undefined
+    it('normalizes audit timestamps and actions without ever returning Invalid Date or undefined', () => {
+      // 1. Timestamp object with toDate
+      const row1 = {
+        action: 'OPEN_LOT',
+        timestamp: { toDate: () => new Date('2026-10-09T16:00:00Z') },
+        targetId: 'lot-1',
+      };
+      expect(formatAuditTime(row1)).not.toBe('Invalid Date');
+      expect(formatAuditTime(row1)).not.toBe('now');
+      expect(formatAuditAction(row1)).toBe('OPEN_LOT');
+
+      // 2. Firestore seconds/nanoseconds object
+      const row2 = {
+        action: 'BID_PLACED',
+        timestamp: { seconds: 1760000000, nanoseconds: 0 },
+        targetId: 'lot-1',
+      };
+      expect(formatAuditTime(row2)).not.toBe('Invalid Date');
+      expect(formatAuditAction(row2)).toBe('BID_PLACED');
+
+      // 3. ISO string date in createdAt
+      const row3 = {
+        createdAt: '2026-10-09T16:05:00.000Z',
+        type: 'HAMMER',
+      };
+      expect(formatAuditTime(row3)).not.toBe('Invalid Date');
+      expect(formatAuditAction(row3)).toBe('HAMMER');
+
+      // 4. Missing timestamp & missing action
+      const row4 = {};
+      expect(formatAuditTime(row4)).toBe('now');
+      expect(formatAuditAction(row4)).toBe('ACTION');
+      expect(formatAuditDetails(row4)).toBe('System event');
+
+      // 5. Corrupted timestamp string
+      const row5 = { timestamp: 'not-a-valid-date', action: 'GUEST_DRAW' };
+      expect(formatAuditTime(row5)).toBe('now');
+      expect(formatAuditAction(row5)).toBe('GUEST_DRAW');
+
+      // 6. Merge timeline sorts cleanly
+      const merged = mergeAuditTimeline([row1], [row2, row3, row4, row5]);
+      expect(merged.length).toBe(5);
+      merged.forEach(item => {
+        expect(formatAuditTime(item)).not.toContain('Invalid Date');
+        expect(formatAuditAction(item)).not.toBe('undefined');
+        expect(formatAuditAction(item)).not.toBe('');
+      });
     });
   });
 });

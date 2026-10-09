@@ -162,14 +162,22 @@ export default function ProjectorPage() {
   // Synchronized countdown timer (Authoritative server deadline derivation)
   useEffect(() => {
     // 1. If no lot active or lot is not live/available, timer is inactive (0)
-    if (!currentLot || (currentLot.status !== 'LIVE' && currentLot.status !== 'AVAILABLE')) {
+    const isBidding = currentLot && (
+      currentLot.status === 'LIVE' || 
+      currentLot.status === 'BIDDING' || 
+      currentLot.status === 'AVAILABLE' ||
+      auctionState?.status === 'LIVE' || 
+      auctionState?.status === 'BIDDING'
+    );
+
+    if (!isBidding) {
       setTimeLeft(0);
       return;
     }
 
     // 2. If auction is paused, derive fixed remaining seconds
-    if (auctionState?.status === 'PAUSED' || currentLot.timerRunning === false) {
-      const pausedMs = typeof currentLot.pausedRemainingMs === 'number'
+    if (auctionState?.status === 'PAUSED' || currentLot?.timerRunning === false) {
+      const pausedMs = typeof currentLot?.pausedRemainingMs === 'number'
         ? currentLot.pausedRemainingMs
         : (typeof auctionState?.pausedRemainingMs === 'number' ? auctionState.pausedRemainingMs : 0);
       setTimeLeft(Math.max(0, Math.ceil(pausedMs / 1000)));
@@ -177,12 +185,13 @@ export default function ProjectorPage() {
     }
 
     // 3. Live countdown from authoritative deadline
-    const deadlineMs = currentLot.timerDeadline
-      ? (currentLot.timerDeadline.toMillis
-        ? currentLot.timerDeadline.toMillis()
-        : (typeof currentLot.timerDeadline.seconds === 'number'
-          ? currentLot.timerDeadline.seconds * 1000
-          : Number(currentLot.timerDeadline)))
+    const deadlineRaw = currentLot?.timerDeadline || auctionState?.timerDeadline;
+    const deadlineMs = deadlineRaw
+      ? (deadlineRaw.toMillis
+        ? deadlineRaw.toMillis()
+        : (typeof deadlineRaw.seconds === 'number'
+          ? deadlineRaw.seconds * 1000
+          : Number(deadlineRaw)))
       : null;
 
     if (!deadlineMs) {
@@ -216,6 +225,7 @@ export default function ProjectorPage() {
     currentLot?.timerDeadline?.seconds || currentLot?.timerDeadline,
     auctionState?.status,
     auctionState?.pausedRemainingMs,
+    auctionState?.timerDeadline?.seconds || auctionState?.timerDeadline,
     serverOffset,
   ]);
 

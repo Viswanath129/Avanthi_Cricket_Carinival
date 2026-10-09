@@ -49,7 +49,8 @@ exports.openLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => {
         if (!lotSnap.exists)
             throw new https_1.HttpsError('not-found', 'Lot not found.');
         const lot = lotSnap.data();
-        if (lot.status !== 'CALLED' && lot.status !== 'AVAILABLE') {
+        const eligibleStatuses = new Set(['AVAILABLE', 'CALLED', 'READY', 'PENDING', 'LIVE', 'BIDDING', 'UNSOLD', 'ROUND_2', 'TIME_EXPIRED']);
+        if (!eligibleStatuses.has(lot.status)) {
             throw new https_1.HttpsError('failed-precondition', `Cannot open lot. Current status: ${lot.status}`);
         }
         // Set initial timer to 30 seconds
@@ -76,7 +77,8 @@ exports.openLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => {
         }
         txn.update(lotRef, {
             status: 'LIVE',
-            currentPrice: lot.basePrice,
+            auctionStatus: 'BIDDING',
+            currentPrice: lot.basePrice || 20,
             highestBidderFranchiseId: null,
             highestBidderId: null,
             highestBidderName: null,
@@ -91,11 +93,15 @@ exports.openLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => {
             pausedRemainingMs: null,
             version: admin.firestore.FieldValue.increment(1),
         });
-        // Update auction state to point to this lot
+        // Update auction state to point to this lot with authoritative deadline
         const auctionRef = auth_1.db.collection('editions').doc(lot.editionId).collection('auction').doc('state');
         txn.set(auctionRef, {
             currentLotId: lotId,
             status: 'LIVE',
+            auctionStatus: 'BIDDING',
+            timerDeadline,
+            timerDurationMs: 30000,
+            timerRunning: true,
             pausedRemainingMs: null,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         }, { merge: true });

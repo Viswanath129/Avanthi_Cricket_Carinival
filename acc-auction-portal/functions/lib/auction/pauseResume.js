@@ -75,6 +75,7 @@ exports.pauseResumeAuction = (0, https_1.onCall)({ maxInstances: 5 }, async (req
             }
             txn.set(auctionRef, {
                 status: 'PAUSED',
+                timerRunning: false,
                 pausedRemainingMs: remainingMs,
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             }, { merge: true });
@@ -110,6 +111,10 @@ exports.pauseResumeAuction = (0, https_1.onCall)({ maxInstances: 5 }, async (req
             const newDeadline = admin.firestore.Timestamp.fromMillis(Date.now() + remainingMs);
             txn.set(auctionRef, {
                 status: 'LIVE',
+                auctionStatus: 'BIDDING',
+                timerDeadline: newDeadline,
+                timerDurationMs: remainingMs,
+                timerRunning: true,
                 pausedRemainingMs: null,
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             }, { merge: true });

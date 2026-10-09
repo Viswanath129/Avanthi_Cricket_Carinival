@@ -14,7 +14,7 @@ import {
 } from 'firebase/firestore';
 import { db, functions } from '@/lib/firebase';
 import { httpsCallable } from 'firebase/functions';
-import { mergeAuditTimeline } from '@/services/auditTimeline';
+import { mergeAuditTimeline, formatAuditTime, formatAuditAction, formatAuditDetails } from '@/services/auditTimeline';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocation } from 'wouter';
 import { BUCKET_LABELS, type BucketId, type PlayerDoc, type FranchiseDoc } from '@shared/types';
@@ -1484,7 +1484,7 @@ export default function AdminDashboardPage() {
 
               {dataView === 'CORRECTIONS' && <section className="rounded-2xl border border-slate-200 bg-white p-4"><h2 className="mb-3 text-lg font-bold">AUCTION CORRECTIONS</h2><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-blue-50"><tr>{['LOT','PLAYER','FRANCHISE','PRICE','TIME','STATUS','ACTION'].map(x=><th key={x} className="p-3">{x}</th>)}</tr></thead><tbody className="divide-y">{saleAcquisitions.map(a=><tr key={a.id}><td className="p-3">LOT #{a.drawNumber||a.lotNumber||a.lotId||'—'}</td><td className="p-3 font-semibold">{a.playerName||a.playerId}</td><td className="p-3">{a.franchiseName||a.franchiseId}</td><td className="p-3">{a.price} Credits</td><td className="p-3">{a.createdAt?.toDate?a.createdAt.toDate().toLocaleString():a.createdAt?new Date(a.createdAt).toLocaleString():'—'}</td><td className="p-3">SOLD</td><td className="p-3">{isSuperAdmin?<button disabled={managementBusy} onClick={()=>undoAcquisition(a)} className="rounded bg-red-50 px-3 py-1 text-xs font-bold text-red-700 disabled:opacity-50">{managementBusy?'PROCESSING…':'UNDO SALE'}</button>:<span className="text-xs text-slate-500">Super Admin only</span>}</td></tr>)}{saleAcquisitions.length===0&&<tr><td colSpan={7} className="p-8 text-center text-slate-500">No completed sales found.</td></tr>}</tbody></table></div></section>}
 
-              {dataView === 'AUDIT' && <section className="rounded-2xl border border-slate-200 bg-white p-4"><h2 className="mb-3 text-lg font-bold">AUDIT TIMELINE</h2><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-blue-50"><tr>{['TIME','ACTOR','ACTION','TARGET','RESULT'].map(x=><th key={x} className="p-3">{x}</th>)}</tr></thead><tbody className="divide-y">{auditLogs.map((log,i)=><tr key={log.id||i}><td className="p-3">{log.timestamp?.toDate?log.timestamp.toDate().toLocaleString():'—'}</td><td className="p-3">{log.actorName||log.actorUid||log.actor||'—'}</td><td className="p-3 font-semibold">{log.action}</td><td className="p-3">{log.targetId||log.entityId||'—'}</td><td className="p-3">{log.result||'SUCCESS'}</td></tr>)}</tbody></table></div></section>}
+              {dataView === 'AUDIT' && <section className="rounded-2xl border border-slate-200 bg-white p-4"><h2 className="mb-3 text-lg font-bold">AUDIT TIMELINE</h2><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-blue-50"><tr>{['TIME','ACTOR','ACTION','TARGET','RESULT'].map(x=><th key={x} className="p-3">{x}</th>)}</tr></thead><tbody className="divide-y">{auditLogs.map((log,i)=><tr key={log.id||i}><td className="p-3">{formatAuditTime(log)}</td><td className="p-3">{log.actorName||log.actorUid||log.actor||'—'}</td><td className="p-3 font-semibold">{formatAuditAction(log)}</td><td className="p-3">{log.targetId||log.entityId||'—'}</td><td className="p-3">{log.result||'SUCCESS'}</td></tr>)}</tbody></table></div></section>}
 
               {dataView === 'CRICHEROES_AUDIT' && (
                 <section className="rounded-2xl border border-slate-200 bg-white p-5 space-y-6">
@@ -1812,11 +1812,11 @@ export default function AdminDashboardPage() {
                     <tbody className="divide-y divide-white/[0.05] font-mono">
                       {auditLogs.map((log, idx) => (
                         <tr key={log.id || idx} className="hover:bg-white/[0.02]">
-                          <td className="p-3 text-slate-400">{log.timestamp?.toDate ? log.timestamp.toDate().toLocaleTimeString() : log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : 'N/A'}</td>
-                          <td className="p-3 font-bold text-emerald-400">{log.action}</td>
+                          <td className="p-3 text-slate-400">{formatAuditTime(log)}</td>
+                          <td className="p-3 font-bold text-emerald-400">{formatAuditAction(log)}</td>
                           <td className="p-3 text-white">{log.targetId || '-'}</td>
                           <td className="p-3 text-slate-400">{log.actorRole || log.role || '—'} · {log.actorUid || ''}</td>
-                          <td className="p-3 text-slate-300 font-sans">{log.details || log.metadata?.details || log.reason || '-'}</td>
+                          <td className="p-3 text-slate-300 font-sans">{formatAuditDetails(log)}</td>
                         </tr>
                       ))}
                     </tbody>

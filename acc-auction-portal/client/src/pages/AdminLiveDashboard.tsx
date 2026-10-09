@@ -32,7 +32,7 @@ import {
 } from '@shared/types';
 import { checkScarcity } from '@shared/engine/scarcity';
 import { checkBucketEligibility } from '@shared/engine/bucketEligibility';
-import { mergeAuditTimeline, auditTimestampValue } from '@/services/auditTimeline';
+import { mergeAuditTimeline, auditTimestampValue, formatAuditTime, formatAuditAction, formatAuditDetails } from '@/services/auditTimeline';
 import SoldConfirmationModal, { type SoldPlayerDetails } from '@/components/SoldConfirmationModal';
 import { getNextEligibleUnsoldLot } from '@shared/engine/auctionOrder';
 
@@ -236,28 +236,37 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
 
   // Synchronized countdown timer (Authoritative server deadline derivation)
   useEffect(() => {
-    // 1. If no lot active or lot is not live, timer is inactive (0)
-    if (!currentLot || currentLot.status !== 'LIVE') {
+    // 1. Check if lot or auction session is in active bidding
+    const isBidding = currentLot && (
+      currentLot.status === 'LIVE' || 
+      currentLot.status === 'BIDDING' ||
+      currentLot.status === 'AVAILABLE' ||
+      auctionState?.status === 'LIVE' || 
+      auctionState?.status === 'BIDDING'
+    );
+
+    if (!isBidding) {
       setTimeLeft(0);
       return;
     }
 
     // 2. If auction is paused, derive fixed remaining seconds
-    if (auctionState?.status === 'PAUSED' || currentLot.timerRunning === false) {
-      const pausedMs = typeof currentLot.pausedRemainingMs === 'number'
+    if (auctionState?.status === 'PAUSED' || currentLot?.timerRunning === false) {
+      const pausedMs = typeof currentLot?.pausedRemainingMs === 'number'
         ? currentLot.pausedRemainingMs
         : (typeof auctionState?.pausedRemainingMs === 'number' ? auctionState.pausedRemainingMs : 0);
       setTimeLeft(Math.max(0, Math.ceil(pausedMs / 1000)));
       return;
     }
 
-    // 3. Live countdown from authoritative deadline
-    const deadlineMs = currentLot.timerDeadline
-      ? (currentLot.timerDeadline.toMillis
-        ? currentLot.timerDeadline.toMillis()
-        : (typeof currentLot.timerDeadline.seconds === 'number'
-          ? currentLot.timerDeadline.seconds * 1000
-          : Number(currentLot.timerDeadline)))
+    // 3. Live countdown from authoritative deadline (prefer lot deadline, fallback to auctionState)
+    const deadlineRaw = currentLot?.timerDeadline || auctionState?.timerDeadline;
+    const deadlineMs = deadlineRaw
+      ? (deadlineRaw.toMillis
+        ? deadlineRaw.toMillis()
+        : (typeof deadlineRaw.seconds === 'number'
+          ? deadlineRaw.seconds * 1000
+          : Number(deadlineRaw)))
       : null;
 
     if (!deadlineMs) {
@@ -291,6 +300,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
     currentLot?.timerDeadline?.seconds || currentLot?.timerDeadline,
     auctionState?.status,
     auctionState?.pausedRemainingMs,
+    auctionState?.timerDeadline?.seconds || auctionState?.timerDeadline,
     serverOffset,
   ]);
 
@@ -443,7 +453,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
     try {
       setIsActionLoading(true);
       setActionError(null);
-      const isSold = !!highestBid;
+      const isSold = !!(highestBid || currentLot?.highestBidderFranchiseId || currentLot?.highestBidderId);
       const winningFranchise = franchises.find(f => f.id === (highestBid?.franchiseId || currentLot?.highestBidderId || currentLot?.highestBidderFranchiseId));
       const soldDataToAnimate: SoldPlayerDetails = {
         lotId: currentLot.id,
@@ -688,15 +698,24 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
         const deadline = Timestamp.fromMillis(Date.now() + 30000);
         await updateDoc(doc(db, 'lots', target.id), {
           status: 'LIVE',
+          auctionStatus: 'BIDDING',
           currentPrice: target.basePrice || 20,
           highestBidderId: null,
           highestBidderName: null,
+          highestBidderFranchiseId: null,
           timerDeadline: deadline,
           timerDurationMs: 30000,
+          timerRunning: true,
+          pausedRemainingMs: null,
         });
         await setDoc(doc(db, 'editions', EDITION_ID, 'auction', 'state'), {
           currentLotId: target.id,
           status: 'LIVE',
+          auctionStatus: 'BIDDING',
+          timerDeadline: deadline,
+          timerDurationMs: 30000,
+          timerRunning: true,
+          pausedRemainingMs: null,
           updatedAt: serverTimestamp(),
         }, { merge: true });
       }
@@ -727,9 +746,11 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
         const deadline = Timestamp.fromMillis(Date.now() + 30000);
         await updateDoc(doc(db, 'lots', nextLot.id), {
           status: 'LIVE',
+          auctionStatus: 'BIDDING',
           currentPrice: nextLot.basePrice || 20,
           highestBidderId: null,
           highestBidderName: null,
+          highestBidderFranchiseId: null,
           timerDeadline: deadline,
           timerDurationMs: 30000,
           timerRunning: true,
@@ -738,6 +759,10 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
         await setDoc(doc(db, 'editions', EDITION_ID, 'auction', 'state'), {
           currentLotId: nextLot.id,
           status: 'LIVE',
+          auctionStatus: 'BIDDING',
+          timerDeadline: deadline,
+          timerDurationMs: 30000,
+          timerRunning: true,
           pausedRemainingMs: null,
           updatedAt: serverTimestamp(),
         }, { merge: true });
@@ -1667,13 +1692,13 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
               {auditLogs.map((log, idx) => (
                 <div key={log.id || idx} className="p-1 rounded bg-white/60 border border-slate-200/70 text-slate-300">
                   <div className="flex justify-between items-center text-[9px] text-slate-500">
-                    <span className="font-bold text-amber-500/90">{log.action}</span>
+                    <span className="font-bold text-amber-500/90">{formatAuditAction(log)}</span>
                     <span>
-                      {log.timestamp ? new Date(auditTimestampValue(log.timestamp)).toLocaleTimeString() : 'now'}
+                      {formatAuditTime(log)}
                     </span>
                   </div>
                   <div className="text-[10px] text-slate-300 truncate mt-0.5">
-                    {log.details || log.metadata?.details || log.reason || `${log.targetType || log.entityType || ''} ${log.targetId || log.entityId || ''}`}
+                    {formatAuditDetails(log)}
                   </div>
                 </div>
               ))}
@@ -1791,76 +1816,79 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
       {/* ========================================================= */}
 
       {/* 1. TWO-STEP HAMMER CONFIRMATION MODAL */}
-      {hammerModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white border border-amber-500/60 rounded-xl p-5 w-full max-w-md shadow-2xl font-mono space-y-4">
-            <div className="flex items-center gap-3">
-              <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-xl font-bold ${
-                highestBid ? 'bg-emerald-500/20 text-emerald-600' : 'bg-amber-500/20 text-amber-600'
-              }`}>
-                HAMMER
+      {hammerModalOpen && (() => {
+        const hasWinningBid = !!(highestBid || currentLot?.highestBidderFranchiseId || currentLot?.highestBidderId);
+        return (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white border border-amber-500/60 rounded-xl p-5 w-full max-w-md shadow-2xl font-mono space-y-4">
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-xl font-bold ${
+                  hasWinningBid ? 'bg-emerald-500/20 text-emerald-600' : 'bg-amber-500/20 text-amber-600'
+                }`}>
+                  HAMMER
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-base">
+                    {hasWinningBid ? 'COMMIT LOT SALE (HAMMER — SOLD)' : 'CONFIRM UNSOLD (HAMMER)'}
+                  </h3>
+                  <p className="text-[11px] text-slate-600">Two-Step Authority Verification</p>
+                </div>
               </div>
-              <div>
-                <h3 className="font-bold text-slate-900 text-base">
-                  {highestBid ? 'COMMIT LOT SALE (HAMMER — SOLD)' : 'CONFIRM UNSOLD (HAMMER)'}
-                </h3>
-                <p className="text-[11px] text-slate-600">Two-Step Authority Verification</p>
-              </div>
-            </div>
 
-            <div className="p-3 rounded-lg bg-white border border-slate-200 text-xs space-y-2">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Player:</span>
-                <span className="font-bold text-slate-900">{currentLot?.playerName}</span>
+              <div className="p-3 rounded-lg bg-white border border-slate-200 text-xs space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Player:</span>
+                  <span className="font-bold text-slate-900">{currentLot?.playerName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Draw Number:</span>
+                  <span className="font-bold text-slate-700">#{currentLot?.drawNumber}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Committed Price:</span>
+                  <span className="font-bold text-amber-600">{currentBidPrice} Credits</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Winning Franchise:</span>
+                  <span className={`font-bold ${hasWinningBid ? 'text-emerald-600' : 'text-amber-600'}`}>
+                    {highestBid?.franchiseName || currentLot?.highestBidderName || 'NO BIDS (MARK UNSOLD)'}
+                  </span>
+                </div>
               </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Draw Number:</span>
-                <span className="font-bold text-slate-700">#{currentLot?.drawNumber}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Committed Price:</span>
-                <span className="font-bold text-amber-600">{currentBidPrice} Credits</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Winning Franchise:</span>
-                <span className={`font-bold ${highestBid ? 'text-emerald-600' : 'text-amber-600'}`}>
-                  {highestBid?.franchiseName || currentLot?.highestBidderName || 'NO BIDS (MARK UNSOLD)'}
-                </span>
-              </div>
-            </div>
 
-            <p className="text-[11px] text-slate-600">
-              {highestBid
-                ? 'Committing hammer will atomically deduct purse credits, add player to franchise squad roster, and log an immutable transaction.'
-                : 'No bids placed. Committing hammer will record this player as UNSOLD and eligible for Round 2 recall.'}
-            </p>
+              <p className="text-[11px] text-slate-600">
+                {hasWinningBid
+                  ? 'Committing hammer will atomically deduct purse credits, add player to franchise squad roster, and log an immutable transaction.'
+                  : 'No bids placed. Committing hammer will record this player as UNSOLD and eligible for Round 2 recall.'}
+              </p>
 
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                onClick={() => setHammerModalOpen(false)}
-                className="px-4 py-2 border border-slate-300 hover:bg-slate-100 text-slate-700 rounded font-bold text-xs"
-              >
-                CANCEL
-              </button>
-              <button
-                onClick={confirmHammer}
-                disabled={isActionLoading}
-                className={`px-4 py-2 text-slate-900 rounded font-bold text-xs shadow-md ${
-                  highestBid
-                    ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/30'
-                    : 'bg-amber-600 hover:bg-amber-500 shadow-amber-600/30'
-                }`}
-              >
-                {isActionLoading
-                  ? 'COMMITTING...'
-                  : highestBid
-                    ? '[ CONFIRM SOLD HAMMER ]'
-                    : '[ CONFIRM UNSOLD ]'}
-              </button>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={() => setHammerModalOpen(false)}
+                  className="px-4 py-2 border border-slate-300 hover:bg-slate-100 text-slate-700 rounded font-bold text-xs"
+                >
+                  CANCEL
+                </button>
+                <button
+                  onClick={confirmHammer}
+                  disabled={isActionLoading}
+                  className={`px-4 py-2 text-slate-900 rounded font-bold text-xs shadow-md ${
+                    hasWinningBid
+                      ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/30'
+                      : 'bg-amber-600 hover:bg-amber-500 shadow-amber-600/30'
+                  }`}
+                >
+                  {isActionLoading
+                    ? 'COMMITTING...'
+                    : hasWinningBid
+                      ? '[ CONFIRM SOLD HAMMER ]'
+                      : '[ CONFIRM UNSOLD ]'}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* 2. UNDO SALE MODAL */}
       {undoModalOpen && (

@@ -50,15 +50,18 @@ exports.hammerLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => 
         if (!lotSnap.exists)
             throw new https_1.HttpsError('not-found', 'Lot not found.');
         const lot = lotSnap.data();
-        if (lot.status !== 'LIVE') {
-            throw new https_1.HttpsError('failed-precondition', `Cannot hammer. Lot status is ${lot.status}, expected LIVE.`);
+        const eligibleStatuses = new Set(['LIVE', 'BIDDING', 'TIME_EXPIRED']);
+        if (!eligibleStatuses.has(lot.status)) {
+            throw new https_1.HttpsError('failed-precondition', `Cannot hammer. Lot status is ${lot.status}, expected LIVE, BIDDING, or TIME_EXPIRED.`);
         }
         const hasHighestBidder = Boolean(lot.highestBidderFranchiseId || lot.highestBidderId);
+        // Auto-derive intent if not explicitly passed by operator
+        const effectiveOutcome = expectedOutcome || (hasHighestBidder ? 'SOLD' : 'UNSOLD');
         // Strict validation of operator intent
-        if (expectedOutcome === 'UNSOLD' && hasHighestBidder) {
+        if (effectiveOutcome === 'UNSOLD' && hasHighestBidder) {
             throw new https_1.HttpsError('failed-precondition', 'Cannot confirm UNSOLD: A valid bid exists on this lot.');
         }
-        if (expectedOutcome === 'SOLD' && !hasHighestBidder) {
+        if (effectiveOutcome === 'SOLD' && !hasHighestBidder) {
             throw new https_1.HttpsError('failed-precondition', 'Cannot confirm SOLD: No winning bid was placed on this lot.');
         }
         // UNSOLD requires expiry and zero accepted valid bids
