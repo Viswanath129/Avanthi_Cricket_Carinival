@@ -17,7 +17,8 @@ export function useAuctionTimer(
   rawDeadline: any,
   isPaused: boolean = false,
   phase: string = 'OPEN',
-  totalDurationMs: number = 20000
+  totalDurationMs: number = 30000,
+  pausedRemainingMs?: number | null
 ): AuctionTimerState {
   const deadlineMs = rawDeadline?.toMillis
     ? rawDeadline.toMillis()
@@ -26,18 +27,56 @@ export function useAuctionTimer(
     : Number(rawDeadline) || 0;
 
   const [remainingSec, setRemainingSec] = useState<number>(() => {
-    if (!deadlineMs || isPaused) return 0;
+    if (isPaused || phase === 'PAUSED') {
+      if (typeof pausedRemainingMs === 'number') {
+        return Math.max(0, Math.ceil(pausedRemainingMs / 1000));
+      }
+      return 30;
+    }
+    if (!deadlineMs) return 0;
     const now = clockSync.getServerNow();
     return Math.max(0, Math.ceil((deadlineMs - now) / 1000));
   });
 
-  const [remainingMs, setRemainingMs] = useState<number>(0);
+  const [remainingMs, setRemainingMs] = useState<number>(() => {
+    if (isPaused || phase === 'PAUSED') {
+      if (typeof pausedRemainingMs === 'number') {
+        return Math.max(0, pausedRemainingMs);
+      }
+      return 30000;
+    }
+    if (!deadlineMs) return 0;
+    const now = clockSync.getServerNow();
+    return Math.max(0, deadlineMs - now);
+  });
+
   const lastRemainingSecRef = useRef<number>(remainingSec);
   const rafIdRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!deadlineMs || isPaused || phase === 'PAUSED') {
-      if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
+    // If paused, freeze the timer and preserve remaining time
+    if (isPaused || phase === 'PAUSED') {
+      if (rafIdRef.current) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+      const frozenMs = typeof pausedRemainingMs === 'number'
+        ? Math.max(0, pausedRemainingMs)
+        : (deadlineMs > 0 ? Math.max(0, deadlineMs - clockSync.getServerNow()) : 0);
+      const frozenSec = Math.max(0, Math.ceil(frozenMs / 1000));
+      setRemainingMs(frozenMs);
+      setRemainingSec(frozenSec);
+      lastRemainingSecRef.current = frozenSec;
+      return;
+    }
+
+    if (!deadlineMs) {
+      if (rafIdRef.current) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+      setRemainingSec(0);
+      setRemainingMs(0);
       return;
     }
 
@@ -46,18 +85,11 @@ export function useAuctionTimer(
       const diffMs = Math.max(0, deadlineMs - now);
       const nextSec = Math.max(0, Math.ceil(diffMs / 1000));
 
-      // Guard: prevent backward jump flicker during normal countdown
-      const prev = lastRemainingSecRef.current;
-      if (prev > 0 && nextSec > prev && nextSec - prev > 1 && nextSec < 19) {
-        // Keep current until confirmed
-      } else {
-        lastRemainingSecRef.current = nextSec;
-        setRemainingSec(nextSec);
-      }
-
+      lastRemainingSecRef.current = nextSec;
+      setRemainingSec(nextSec);
       setRemainingMs(diffMs);
 
-      if (diffMs > 0 && !isPaused) {
+      if (diffMs > 0 && !isPaused && phase !== 'PAUSED') {
         rafIdRef.current = requestAnimationFrame(tick);
       }
     };
@@ -70,9 +102,9 @@ export function useAuctionTimer(
         rafIdRef.current = null;
       }
     };
-  }, [deadlineMs, isPaused, phase]);
+  }, [deadlineMs, isPaused, phase, pausedRemainingMs]);
 
-  // Color mapping based on exact Part 10 rules
+  // Color mapping
   let ringColor = '#10B981'; // Green (>10s)
   if (remainingSec === 0) {
     ringColor = '#6B7280'; // Grey (0s)

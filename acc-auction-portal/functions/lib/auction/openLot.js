@@ -60,6 +60,8 @@ exports.openLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => {
             highestBidderFranchiseId: null,
             timerDeadline,
             timerDurationMs: 30000,
+            timerRunning: true,
+            pausedRemainingMs: null,
             version: admin.firestore.FieldValue.increment(1),
         });
         // Update auction state to point to this lot
@@ -67,6 +69,7 @@ exports.openLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => {
         txn.set(auctionRef, {
             currentLotId: lotId,
             status: 'LIVE',
+            pausedRemainingMs: null,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         }, { merge: true });
         // Reset all franchise statuses to IN_PLAY for new lot

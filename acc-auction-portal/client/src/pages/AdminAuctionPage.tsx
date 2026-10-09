@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { doc, collection, onSnapshot, query, where, orderBy, limit } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '@/lib/firebase';
+import SoldConfirmationModal, { type SoldPlayerDetails } from '@/components/SoldConfirmationModal';
 // import { checkScarcity } from '@shared/engine/scarcity';
 // import { calculateMaxBid } from '@shared/engine/bidEngine';
 // import { checkBucketEligibility } from '@shared/engine/bucketEligibility';
@@ -26,6 +27,11 @@ export default function AdminAuctionPage() {
   const [hammerModalOpen, setHammerModalOpen] = useState(false);
   const [drawMode, setDrawMode] = useState<'GUEST' | 'AUTO'>('GUEST');
 
+  // Sold confirmation animation state
+  const [soldModalOpen, setSoldModalOpen] = useState(false);
+  const [soldModalData, setSoldModalData] = useState<SoldPlayerDetails | null>(null);
+  const lastAnimatedSaleIdRef = useRef<string | null>(null);
+
   const openLotFn = httpsCallable(functions, 'openLot');
   const skipLotFn = httpsCallable(functions, 'skipLot');
   const hammerLotFn = httpsCallable(functions, 'hammerLot');
@@ -39,6 +45,16 @@ export default function AdminAuctionPage() {
       if (stateSnap.exists()) {
         const data = stateSnap.data();
         setAuctionState(data);
+        
+        if (data.lastSale && data.lastSale.lotId) {
+          const sale = data.lastSale;
+          const saleAgeMs = Date.now() - (sale.timestamp || 0);
+          if (lastAnimatedSaleIdRef.current !== sale.lotId && saleAgeMs < 15000) {
+            lastAnimatedSaleIdRef.current = sale.lotId;
+            setSoldModalData(sale);
+            setSoldModalOpen(true);
+          }
+        }
         
         // Listen to current lot if active
         if (data.currentLotId) {
@@ -473,6 +489,17 @@ export default function AdminAuctionPage() {
           </div>
         </div>
       )}
+
+      {/* Sold Confirmation Animation Modal */}
+      <SoldConfirmationModal
+        isOpen={soldModalOpen}
+        soldData={soldModalData}
+        onClose={() => {
+          setSoldModalOpen(false);
+          setSoldModalData(null);
+        }}
+        autoCloseDurationMs={2800}
+      />
     </div>
   );
 }

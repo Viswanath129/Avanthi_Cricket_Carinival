@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { doc, onSnapshot, collection, query, where, orderBy, limit } from 'firebase/firestore';
 import { ref as rtdbRef, onValue } from 'firebase/database';
 import { db, rtdb } from '@/lib/firebase';
+import SoldConfirmationModal, { type SoldPlayerDetails } from '@/components/SoldConfirmationModal';
 import { cn } from '@/lib/utils';
 import { BUCKET_LABELS, type BucketId } from '@shared/types';
 import { checkScarcity } from '@shared/engine/scarcity';
@@ -24,6 +25,11 @@ export default function ProjectorPage() {
   const [serverOffset, setServerOffset] = useState<number>(0);
   const [timeLeft, setTimeLeft] = useState<number>(0);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+
+  // Sold confirmation animation state
+  const [soldModalOpen, setSoldModalOpen] = useState(false);
+  const [soldModalData, setSoldModalData] = useState<SoldPlayerDetails | null>(null);
+  const lastAnimatedSaleIdRef = useRef<string | null>(null);
 
   // Fullscreen helper
   const toggleFullscreen = () => {
@@ -54,7 +60,19 @@ export default function ProjectorPage() {
     }
 
     const stateUnsub = onSnapshot(doc(db, 'editions', EDITION_ID, 'auction', 'state'), (snap) => {
-      if (snap.exists()) setAuctionState(snap.data());
+      if (snap.exists()) {
+        const data = snap.data();
+        setAuctionState(data);
+        if (data.lastSale && data.lastSale.lotId) {
+          const sale = data.lastSale;
+          const saleAgeMs = Date.now() - (sale.timestamp || 0);
+          if (lastAnimatedSaleIdRef.current !== sale.lotId && saleAgeMs < 15000) {
+            lastAnimatedSaleIdRef.current = sale.lotId;
+            setSoldModalData(sale);
+            setSoldModalOpen(true);
+          }
+        }
+      }
     });
 
     const franchQ = query(collection(db, 'franchises'), where('editionId', '==', EDITION_ID));
@@ -366,6 +384,16 @@ export default function ProjectorPage() {
         </div>
       </div>
 
+      {/* Sold Confirmation Animation Modal */}
+      <SoldConfirmationModal
+        isOpen={soldModalOpen}
+        soldData={soldModalData}
+        onClose={() => {
+          setSoldModalOpen(false);
+          setSoldModalData(null);
+        }}
+        autoCloseDurationMs={2800}
+      />
     </div>
   );
 }

@@ -33,6 +33,8 @@ import {
 import { checkScarcity } from '@shared/engine/scarcity';
 import { checkBucketEligibility } from '@shared/engine/bucketEligibility';
 import { mergeAuditTimeline, auditTimestampValue } from '@/services/auditTimeline';
+import SoldConfirmationModal, { type SoldPlayerDetails } from '@/components/SoldConfirmationModal';
+import { getNextEligibleUnsoldLot } from '@shared/engine/auctionOrder';
 
 const EDITION_ID = 'acc-2026';
 
@@ -85,6 +87,11 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
   const [relaxNewMin, setRelaxNewMin] = useState<number>(1);
   const [helpModalOpen, setHelpModalOpen] = useState(false);
 
+  // Sold Confirmation Animation States
+  const [soldModalOpen, setSoldModalOpen] = useState(false);
+  const [soldModalData, setSoldModalData] = useState<SoldPlayerDetails | null>(null);
+  const lastAnimatedSaleIdRef = useRef<string | null>(null);
+
   // Cloud Functions
   const openLotFn = httpsCallable(functions, 'openLot');
   const skipLotFn = httpsCallable(functions, 'skipLot');
@@ -122,6 +129,17 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
       if (snap.exists()) {
         const data = snap.data();
         setAuctionState(data);
+
+        // Authoritative sale broadcast check
+        if (data.lastSale && data.lastSale.lotId) {
+          const sale = data.lastSale;
+          const saleAgeMs = Date.now() - (sale.timestamp || 0);
+          if (lastAnimatedSaleIdRef.current !== sale.lotId && saleAgeMs < 15000) {
+            lastAnimatedSaleIdRef.current = sale.lotId;
+            setSoldModalData(sale);
+            setSoldModalOpen(true);
+          }
+        }
       }
     });
 
@@ -209,19 +227,27 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
 
   // Synchronized countdown timer
   useEffect(() => {
-    if (currentLot?.timerRunning === false) {
-      setTimeLeft(typeof currentLot?.timerSeconds === 'number' ? currentLot.timerSeconds : 30);
-      return;
-    }
-    if (!currentLot?.timerDeadline || auctionState?.status === 'PAUSED') {
-      if (auctionState?.status === 'PAUSED') {
-        const pausedSec = typeof auctionState?.pausedRemainingMs === 'number'
-          ? Math.max(0, Math.ceil(auctionState.pausedRemainingMs / 1000))
-          : timeLeft;
+    if (currentLot?.timerRunning === false || !currentLot?.timerDeadline) {
+      if (auctionState?.status === 'PAUSED' || currentLot?.timerRunning === false) {
+        const pausedSec = typeof currentLot?.pausedRemainingMs === 'number'
+          ? Math.max(0, Math.ceil(currentLot.pausedRemainingMs / 1000))
+          : (typeof auctionState?.pausedRemainingMs === 'number'
+            ? Math.max(0, Math.ceil(auctionState.pausedRemainingMs / 1000))
+            : (typeof currentLot?.timerSeconds === 'number' ? currentLot.timerSeconds : 30));
         setTimeLeft(pausedSec);
       } else {
         setTimeLeft(0);
       }
+      return;
+    }
+
+    if (auctionState?.status === 'PAUSED') {
+      const pausedSec = typeof auctionState?.pausedRemainingMs === 'number'
+        ? Math.max(0, Math.ceil(auctionState.pausedRemainingMs / 1000))
+        : (typeof currentLot?.pausedRemainingMs === 'number'
+          ? Math.max(0, Math.ceil(currentLot.pausedRemainingMs / 1000))
+          : timeLeft);
+      setTimeLeft(pausedSec);
       return;
     }
 
@@ -231,17 +257,22 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
         : Number(currentLot.timerDeadline);
 
       const serverNow = Date.now() + serverOffset;
-      const remaining = Math.max(0, (deadline - serverNow) / 1000);
+      const remaining = Math.max(0, Math.ceil((deadline - serverNow) / 1000));
       setTimeLeft(remaining);
     }, 100);
 
     return () => clearInterval(interval);
-  }, [currentLot?.timerDeadline, auctionState?.status, auctionState?.pausedRemainingMs, serverOffset]);
+  }, [currentLot?.timerDeadline, currentLot?.timerRunning, currentLot?.pausedRemainingMs, currentLot?.timerSeconds, auctionState?.status, auctionState?.pausedRemainingMs, serverOffset]);
 
   // Current Bid & Next Bid calculation
   const highestBid = bids.length > 0 ? bids[0] : null;
   const currentBidPrice = highestBid?.amount || currentLot?.currentPrice || currentLot?.basePrice || 20;
   const nextMinBid = calculateNextBid(currentBidPrice);
+
+  // Next eligible unsold lot calculation
+  const nextEligibleLot = useMemo(() => {
+    return getNextEligibleUnsoldLot(allLots, currentLot?.id);
+  }, [allLots, currentLot?.id]);
 
   // Bucket Minimums
   const bucketMinimums: Record<BucketId, number> = useMemo(() => {
@@ -378,19 +409,62 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
   };
 
   const confirmHammer = async () => {
+    if (!currentLot) return;
     try {
       setIsActionLoading(true);
       setActionError(null);
+      const isSold = !!highestBid;
+      const winningFranchise = franchises.find(f => f.id === (highestBid?.franchiseId || currentLot?.highestBidderId));
+      const soldDataToAnimate: SoldPlayerDetails = {
+        lotId: currentLot.id,
+        drawNumber: currentLot.drawNumber,
+        lotNumber: currentLot.lotNumber,
+        playerName: currentLot.playerName,
+        rollNumber: currentLot.rollNumber,
+        department: currentLot.department || currentLot.branch,
+        branch: currentLot.branch,
+        year: currentLot.year,
+        bucket: currentLot.bucket || currentLot.bucketId,
+        playerType: currentLot.playerType,
+        photoUrl: currentLot.photoUrl,
+        franchiseId: highestBid?.franchiseId || currentLot?.highestBidderId || '1',
+        franchiseName: highestBid?.franchiseName || winningFranchise?.name || 'Franchise',
+        soldPrice: currentBidPrice,
+      };
+
       await hammerLotFn({ editionId: EDITION_ID, lotId: currentLot.id });
       await recordAudit(
         'HAMMER',
         `Committed lot #${currentLot.drawNumber} (${currentLot.playerName}) for ${currentBidPrice} Cr to ${highestBid?.franchiseName || 'UNSOLD'}`
       );
       setHammerModalOpen(false);
+
+      if (isSold) {
+        lastAnimatedSaleIdRef.current = currentLot.id;
+        setSoldModalData(soldDataToAnimate);
+        setSoldModalOpen(true);
+      } else {
+        // If unsold, advance to next unsold lot in auto mode or wait for operator
+        if (auctionState?.drawMode === 'AUTO') {
+          setTimeout(() => {
+            handleAdvanceLotAuto();
+          }, 800);
+        }
+      }
     } catch (err: any) {
       setActionError(err.message || 'Failed to hammer lot');
     } finally {
       setIsActionLoading(false);
+    }
+  };
+
+  const handleSoldAnimationComplete = () => {
+    setSoldModalOpen(false);
+    setSoldModalData(null);
+
+    // Requirement 2: Finish sold animation then prepare next eligible unsold player according to official auction order
+    if (auctionState?.drawMode === 'AUTO') {
+      handleAdvanceLotAuto();
     }
   };
 
@@ -417,7 +491,43 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
     try {
       setIsActionLoading(true);
       setActionError(null);
-      await pauseResumeFn({ editionId: EDITION_ID, action: nextStatus });
+      try {
+        await pauseResumeFn({ editionId: EDITION_ID, action: nextStatus });
+      } catch (cloudFnErr) {
+        console.warn('pauseResumeFn unavailable, applying direct Firestore update:', cloudFnErr);
+        if (nextStatus === 'PAUSE') {
+          const deadline = currentLot?.timerDeadline?.toMillis ? currentLot.timerDeadline.toMillis() : Number(currentLot?.timerDeadline || 0);
+          const remainingMs = deadline > 0 ? Math.max(0, deadline - (Date.now() + serverOffset)) : 30000;
+          await updateDoc(doc(db, 'editions', EDITION_ID, 'auction', 'state'), {
+            status: 'PAUSED',
+            pausedRemainingMs: remainingMs,
+            updatedAt: serverTimestamp(),
+          });
+          if (currentLot?.id) {
+            await updateDoc(doc(db, 'lots', currentLot.id), {
+              timerRunning: false,
+              pausedRemainingMs: remainingMs,
+            });
+          }
+        } else {
+          const remainingMs = typeof currentLot?.pausedRemainingMs === 'number'
+            ? currentLot.pausedRemainingMs
+            : (typeof auctionState?.pausedRemainingMs === 'number' ? auctionState.pausedRemainingMs : 30000);
+          const newDeadline = Timestamp.fromMillis(Date.now() + serverOffset + Math.max(1000, remainingMs));
+          await updateDoc(doc(db, 'editions', EDITION_ID, 'auction', 'state'), {
+            status: 'LIVE',
+            pausedRemainingMs: null,
+            updatedAt: serverTimestamp(),
+          });
+          if (currentLot?.id) {
+            await updateDoc(doc(db, 'lots', currentLot.id), {
+              timerDeadline: newDeadline,
+              timerRunning: true,
+              pausedRemainingMs: null,
+            });
+          }
+        }
+      }
       await recordAudit('PAUSE_RESUME', `${isLive ? 'Paused' : 'Resumed'} live auction`);
     } catch (err: any) {
       setActionError(err.message || 'Failed to toggle pause/resume');
@@ -489,23 +599,13 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
     }
   };
 
-  const handleAdvanceLotAuto = async () => {
-    // Find next available in AUCTION_ORDER
-    const available = allLots.filter(l => l.status === 'AVAILABLE');
-    if (available.length === 0) {
-      setActionError('No more available players in draw queue.');
+  const handleAdvanceLotAuto = async (overrideLot?: any) => {
+    // Find next eligible unsold lot according to official AUCTION_ORDER
+    const nextLot = overrideLot || getNextEligibleUnsoldLot(allLots, currentLot?.id);
+    if (!nextLot) {
+      setActionError('Round 1 Complete! All available players in the current round have been processed. Unsold players are queued in Round 2 Recall.');
       return;
     }
-
-    let nextLot = null;
-    for (const b of AUCTION_ORDER) {
-      const match = available.find(l => l.bucket === b || l.bucketId === b);
-      if (match) {
-        nextLot = match;
-        break;
-      }
-    }
-    if (!nextLot) nextLot = available[0];
 
     try {
       setIsActionLoading(true);
@@ -522,10 +622,13 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
           highestBidderName: null,
           timerDeadline: deadline,
           timerDurationMs: 30000,
+          timerRunning: true,
+          pausedRemainingMs: null,
         });
         await setDoc(doc(db, 'editions', EDITION_ID, 'auction', 'state'), {
           currentLotId: nextLot.id,
           status: 'LIVE',
+          pausedRemainingMs: null,
           updatedAt: serverTimestamp(),
         }, { merge: true });
       }
@@ -1226,6 +1329,41 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
               )}
             </div>
 
+            {/* Next Up in Auction Order Preview Card */}
+            <div className="p-2 rounded bg-slate-50 border border-slate-200 text-xs font-mono">
+              <div className="flex items-center justify-between text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">
+                <span>Next Up (Official Order)</span>
+                {nextEligibleLot ? (
+                  <span className="text-emerald-600 font-bold">Draw #{nextEligibleLot.drawNumber}</span>
+                ) : (
+                  <span className="text-amber-600 font-bold">Round 1 Complete</span>
+                )}
+              </div>
+              {nextEligibleLot ? (
+                <div className="flex items-center justify-between gap-2">
+                  <div className="truncate">
+                    <span className="font-bold text-slate-800">{nextEligibleLot.playerName}</span>
+                    <span className="text-[10px] text-slate-500 ml-1.5">
+                      ({nextEligibleLot.bucket || nextEligibleLot.bucketId} · Base: {nextEligibleLot.basePrice || 20} Cr)
+                    </span>
+                  </div>
+                  {(capabilities.isSuperAdmin || capabilities.isOperator) && (
+                    <button
+                      onClick={() => handleAdvanceLotAuto(nextEligibleLot)}
+                      disabled={isActionLoading}
+                      className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold rounded shrink-0 shadow-xs"
+                    >
+                      Call Next
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="text-[11px] text-slate-500 italic">
+                  All eligible players in Round 1 processed. Unsold players queued for Round 2 recall.
+                </div>
+              )}
+            </div>
+
             {/* Row 3: Lot Advance Input / Auto Advance Button */}
             <div className="pt-1 border-t border-slate-200/60 flex items-center gap-2">
               {auctionState?.drawMode === 'GUEST' ? (
@@ -1905,6 +2043,14 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
           </div>
         </div>
       )}
+
+      {/* 6. SOLD CONFIRMATION ANIMATION MODAL */}
+      <SoldConfirmationModal
+        isOpen={soldModalOpen}
+        soldData={soldModalData}
+        onClose={handleSoldAnimationComplete}
+        autoCloseDurationMs={2800}
+      />
 
     </div>
   );

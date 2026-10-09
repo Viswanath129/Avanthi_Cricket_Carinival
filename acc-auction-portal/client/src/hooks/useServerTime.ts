@@ -10,7 +10,7 @@ export interface ServerTimeState {
   synced: boolean;
   accuracy: number; // ±ms
   isOnline: boolean;
-  computeRemainingSeconds: (timerDeadline: any, isPaused?: boolean) => number;
+  computeRemainingSeconds: (timerDeadline: any, isPaused?: boolean, pausedRemainingMs?: number | null) => number;
 }
 
 export function useServerTime(): ServerTimeState {
@@ -56,8 +56,14 @@ export function useServerTime(): ServerTimeState {
   }, []);
 
   const computeRemainingSeconds = useCallback(
-    (timerDeadline: any, isPaused: boolean = false): number => {
-      if (!timerDeadline || isPaused) return 0;
+    (timerDeadline: any, isPaused: boolean = false, pausedRemainingMs?: number | null): number => {
+      if (isPaused) {
+        if (typeof pausedRemainingMs === 'number') {
+          return Math.max(0, Math.ceil(pausedRemainingMs / 1000));
+        }
+        return 0;
+      }
+      if (!timerDeadline) return 0;
 
       const deadlineMs = timerDeadline?.toMillis
         ? timerDeadline.toMillis()

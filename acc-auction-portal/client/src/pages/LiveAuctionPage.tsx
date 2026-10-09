@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { doc, onSnapshot, collection, query, where, orderBy, limit } from 'firebase/firestore';
 import { ref as rtdbRef, onValue } from 'firebase/database';
 import { db, rtdb } from '@/lib/firebase';
+import SoldConfirmationModal, { type SoldPlayerDetails } from '@/components/SoldConfirmationModal';
 import { cn } from '@/lib/utils';
 import { Link } from 'wouter';
 import { BUCKET_LABELS, type BucketId } from '@shared/types';
@@ -83,6 +84,11 @@ export default function LiveAuctionPage() {
   const [serverOffset, setServerOffset] = useState<number>(0);
   const [timeLeft, setTimeLeft] = useState<number>(0);
 
+  // Sold confirmation animation state
+  const [soldModalOpen, setSoldModalOpen] = useState(false);
+  const [soldModalData, setSoldModalData] = useState<SoldPlayerDetails | null>(null);
+  const lastAnimatedSaleIdRef = useRef<string | null>(null);
+
   // Firestore listeners
   useEffect(() => {
     let unsubConn = () => {};
@@ -97,7 +103,19 @@ export default function LiveAuctionPage() {
     }
 
     const stateUnsub = onSnapshot(doc(db, 'editions', EDITION_ID, 'auction', 'state'), (snap) => {
-      if (snap.exists()) setAuctionState(snap.data());
+      if (snap.exists()) {
+        const data = snap.data();
+        setAuctionState(data);
+        if (data.lastSale && data.lastSale.lotId) {
+          const sale = data.lastSale;
+          const saleAgeMs = Date.now() - (sale.timestamp || 0);
+          if (lastAnimatedSaleIdRef.current !== sale.lotId && saleAgeMs < 15000) {
+            lastAnimatedSaleIdRef.current = sale.lotId;
+            setSoldModalData(sale);
+            setSoldModalOpen(true);
+          }
+        }
+      }
     });
 
     const franchQ = query(collection(db, 'franchises'), where('editionId', '==', EDITION_ID));
@@ -661,6 +679,17 @@ export default function LiveAuctionPage() {
       <footer className="border-t border-slate-200/80 bg-[#090e1a] py-4 text-center text-[10px] font-mono text-slate-500 uppercase tracking-widest">
         Avanthi Cricket Carnival (ACC 2026) · Official Server-Authoritative Public Broadcast
       </footer>
+
+      {/* Sold Confirmation Animation Modal */}
+      <SoldConfirmationModal
+        isOpen={soldModalOpen}
+        soldData={soldModalData}
+        onClose={() => {
+          setSoldModalOpen(false);
+          setSoldModalData(null);
+        }}
+        autoCloseDurationMs={2800}
+      />
     </div>
   );
 }
