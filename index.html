@@ -6600,10 +6600,45 @@
             }
           }
 
-          // 5. Admin command center displays
+          // 5. Admin command center displays & subtitles
+          const formattedClock = `00:${String(sec).padStart(2, '0')}`;
           document.querySelectorAll(".admin-timer-text").forEach(el => {
-            el.textContent = `${sec}s`;
+            el.textContent = formattedClock;
             el.style.color = textColor;
+          });
+
+          // Admin circular timer subtitle
+          document.querySelectorAll(".admin-timer-subtitle").forEach(el => {
+            if (isPaused) {
+              el.textContent = 'PAUSED';
+              el.style.color = '#b45309';
+            } else if (isTimeUp) {
+              el.textContent = 'EXPIRED';
+              el.style.color = '#dc2626';
+            } else if (!leadingBidderId && !timerRunning) {
+              el.textContent = 'WAITING';
+              el.style.color = '#0284c7';
+            } else {
+              el.textContent = 'LIVE';
+              el.style.color = '#047857';
+            }
+          });
+
+          // Header STATE badge synchronization
+          document.querySelectorAll("#adminHeaderStateBadge, .admin-header-state-badge").forEach(el => {
+            if (isPaused) {
+              el.className = "status-badge status-warning";
+              el.textContent = "PAUSED";
+            } else if (isTimeUp) {
+              el.className = "status-badge status-blocked";
+              el.textContent = "TIME UP";
+            } else if (!leadingBidderId && !timerRunning) {
+              el.className = "status-badge status-pending";
+              el.textContent = "WAITING";
+            } else {
+              el.className = "status-badge status-inplay";
+              el.textContent = "LIVE";
+            }
           });
 
           // 6. Admin quickstat & floor timer widgets
@@ -9956,15 +9991,16 @@
         `;
       }
 
-      const cur = players[lotIndex] || players[0];
+      const cur = players[lotIndex] || players[0] || null;
       const leader = franchises.find(f => f.id === leadingBidderId);
       if (cur && typeof cur.basePrice === 'number' && (!leader || currentBid < cur.basePrice)) {
         currentBid = cur.basePrice;
       }
       const nextBid = currentBid + getBidIncrement(currentBid);
-      const maxLegal = calculateMaxBid(myFranchise.id, cur.bucket);
+      const curBucket = cur ? cur.bucket : 'B1';
+      const maxLegal = calculateMaxBid(myFranchise.id, curBucket);
       const isLeader = myFranchise.id === leadingBidderId;
-      const slotCheck = checkSlotProtection(myFranchise.id, cur.bucket);
+      const slotCheck = cur ? checkSlotProtection(myFranchise.id, curBucket) : { eligible: true };
       const isSlotBlocked = !slotCheck.eligible;
       const isPurseBlocked = maxLegal < nextBid;
       const isBlocked = isSlotBlocked || isPurseBlocked;
@@ -10027,6 +10063,13 @@
           </div>
 
           <!-- Current Lot Floor Card -->
+          ${!cur ? `
+            <div class="surface-card" style="padding: var(--space-4); text-align: center; border: 2px dashed var(--border-medium);">
+              <div style="font-size: 2.2rem; margin-bottom: 6px;">🏏</div>
+              <div style="font-family: var(--font-display); font-size: 1.15rem; font-weight: 800; color: var(--text-bright);">NO ACTIVE LOT ON AUCTION FLOOR</div>
+              <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">Awaiting auctioneer to draw the next player lot.</div>
+            </div>
+          ` : `
           <div class="surface-card" style="padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3);">
             <div style="display: flex; justify-content: space-between; align-items: center;">
               <span class="status-badge status-inplay">ACTIVE LOT #${cur.id}</span>
@@ -10100,6 +10143,7 @@
               <span class="label-mono font-mono" style="color: var(--text-bright);">Bucket ${cur.bucket} Count: ${(myFranchise.squad||[]).filter(p=>p.bucket===cur.bucket).length}/2</span>
             </div>
           </div>
+          `}
 
           <!-- Acquired Squad Roster -->
           <div class="surface-card" style="padding: var(--space-4);">
@@ -11719,7 +11763,7 @@
     }
     window.openDeleteAllDataModal = openDeleteAllDataModal;
 
-    function executeDeleteAllData() {
+    async function executeDeleteAllData() {
       const input = (document.getElementById("confirmDeleteAllDataInput")?.value || '').trim().toUpperCase();
       if (input !== 'DELETE ALL DATA') {
         showToast("Confirmation text did not match. Type DELETE ALL DATA exactly.", "error");
@@ -11735,36 +11779,36 @@
       // STEP 1: DELETE FROM FIRESTORE (all collections)
       // ============================================================
       if (typeof fbDb !== 'undefined' && fbDb) {
+        showToast("Purging Firestore collections...", "info");
         const collectionsToWipe = [
           'players', 'publicPlayers', 'deletedPlayers',
           'franchises', 'franchisesPublic', 'deletedFranchises',
-          'playerUniqueKeys'
+          'playerUniqueKeys', 'registrations', 'lots', 'bids', 'acquisitions'
         ];
 
-        collectionsToWipe.forEach(colName => {
+        for (const colName of collectionsToWipe) {
           try {
-            fbDb.collection(colName).get().then(snapshot => {
+            const snapshot = await fbDb.collection(colName).get();
+            if (!snapshot.empty) {
               const batch = fbDb.batch();
               snapshot.docs.forEach(doc => batch.delete(doc.ref));
-              return batch.commit();
-            }).then(() => {
-              console.log(`[DELETE ALL] Firestore collection '${colName}' wiped.`);
-            }).catch(err => {
-              console.warn(`[DELETE ALL] Error wiping '${colName}':`, err);
-            });
+              await batch.commit();
+              console.log(`[DELETE ALL] Firestore collection '${colName}' wiped (${snapshot.size} docs).`);
+            }
           } catch (e) {
-            console.warn(`[DELETE ALL] Skip collection '${colName}':`, e);
+            console.warn(`[DELETE ALL] Error wiping collection '${colName}':`, e);
           }
-        });
+        }
 
         // Wipe the main auction state document
         if (typeof auctionDocRef !== 'undefined' && auctionDocRef) {
           try {
-            auctionDocRef.set({
+            await auctionDocRef.set({
+              isFullReset: true,
               lotIndex: 0,
               currentBid: 0,
               leadingBidderId: null,
-              timerSeconds: 0,
+              timerSeconds: 30,
               timerDeadline: null,
               timerDuration: 30000,
               timerStartedAt: null,
@@ -11781,12 +11825,11 @@
               auditLog: auditLog,
               currentLot: null,
               timestamp: Date.now()
-            }).then(() => {
-              console.log("[DELETE ALL] Auction state doc reset.");
-            }).catch(err => {
-              console.warn("[DELETE ALL] Error resetting auction doc:", err);
             });
-          } catch (e) {}
+            console.log("[DELETE ALL] Auction state doc reset with isFullReset: true.");
+          } catch (err) {
+            console.warn("[DELETE ALL] Error resetting auction doc:", err);
+          }
         }
       }
 
@@ -14324,7 +14367,7 @@
                   </div>
                   <div style="display: flex; align-items: center; gap: 6px; background: #fdf4ff; border: 1px solid #f0abfc; padding: 3px 8px; border-radius: 4px;">
                     <span class="label-micro" style="color: #a21caf; font-weight: 800;">BUCKET</span>
-                    <strong style="color: #701a75; font-family: var(--font-mono);">${cur.bucket === 'NO_BUCKET' ? 'PG' : cur.bucket}</strong>
+                    <strong style="color: #701a75; font-family: var(--font-mono);">${cur ? (cur.bucket === 'NO_BUCKET' ? 'PG' : cur.bucket) : 'EMPTY'}</strong>
                   </div>
                   <div style="display: flex; align-items: center; gap: 6px; background: #fffbeb; border: 1px solid #fde68a; padding: 3px 8px; border-radius: 4px;">
                     <span class="label-micro" style="color: #b45309; font-weight: 800;">DRAW</span>
@@ -14344,8 +14387,8 @@
                 <div style="display: flex; align-items: center; gap: 10px;">
                   <div style="display: flex; align-items: center; gap: 6px;">
                     <span class="label-micro" style="color: #64748b;">STATE</span>
-                    <span class="status-badge ${auctionPaused ? 'status-warning' : timerSeconds === 0 ? 'status-blocked' : 'status-inplay'}" style="font-size: 0.72rem; font-weight: 800; padding: 3px 10px; border-radius: 4px;">
-                      ${auctionPaused ? 'PAUSED' : timerSeconds === 0 ? 'TIMER EXPIRED' : 'LIVE'}
+                    <span id="adminHeaderStateBadge" class="status-badge ${auctionPaused ? 'status-warning' : (!leadingBidderId && !timerRunning) ? 'status-pending' : timerSeconds === 0 ? 'status-blocked' : 'status-inplay'}" style="font-size: 0.72rem; font-weight: 800; padding: 3px 10px; border-radius: 4px;">
+                      ${auctionPaused ? 'PAUSED' : (!leadingBidderId && !timerRunning) ? 'WAITING' : timerSeconds === 0 ? 'TIMER EXPIRED' : 'LIVE'}
                     </span>
                   </div>
                   <div style="font-size: 0.75rem; color: #334155; background: #f8fafc; border: 1px solid #e2e8f0; padding: 3px 8px; border-radius: 4px;">
@@ -14447,20 +14490,23 @@
                       <div style="font-size: 0.62rem; color: #64748b;">11 Franchises Eligibility</div>
                     </div>
                     <span class="font-mono" style="font-size: 0.68rem; color: #047857; background: #ecfdf5; border: 1px solid #a7f3d0; padding: 2px 7px; border-radius: 4px; font-weight: 800;">
-                      ${franchises.filter(f => !passedFranchiseIds.includes(f.id) && calculateMaxBid(f.id, cur.bucket) >= (currentBid + getBidIncrement(currentBid))).length} / 11 ACTIVE
+                      ${franchises.filter(f => !passedFranchiseIds.includes(f.id) && calculateMaxBid(f.id, cur ? cur.bucket : 'B1') >= (currentBid + getBidIncrement(currentBid))).length} / ${franchises.length || 11} ACTIVE
                     </span>
                   </div>
 
                   <div style="display: flex; flex-direction: column; gap: 4px;">
-                    ${franchises.map(f => {
+                    ${franchises.length === 0 ? `
+                      <div style="padding: 16px; text-align: center; color: #94a3b8; font-size: 0.75rem;">No registered franchises.</div>
+                    ` : franchises.map(f => {
+                      const curBucket = cur ? cur.bucket : 'B1';
                       const nextB = currentBid + getBidIncrement(currentBid);
-                      const maxB = calculateMaxBid(f.id, cur.bucket);
+                      const maxB = calculateMaxBid(f.id, curBucket);
                       const isPassed = passedFranchiseIds.includes(f.id);
                       const isLeader = f.id === leadingBidderId;
                       let blockedReason = null;
                       if ((f.squad || []).length >= 22) blockedReason = 'Squad Full (22)';
                       else if (f.purse < nextB) blockedReason = 'Purse Depleted';
-                      else if (!checkSlotProtection(f.id, cur.bucket).eligible) blockedReason = 'Slot Locked';
+                      else if (!checkSlotProtection(f.id, curBucket).eligible) blockedReason = 'Slot Locked';
                       else if (nextB > maxB) blockedReason = 'MaxBid Exceeded';
 
                       let stateLabel = 'ACTIVE';
@@ -14519,38 +14565,46 @@
                 <div class="surface-elevated admin-auction-col-center" style="padding: 14px 18px; display: flex; flex-direction: column; justify-content: space-between; background: rgba(255, 255, 255, 0.90); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.95); border-top: 4px solid #10b981; border-radius: 12px; box-shadow: var(--shadow-md); gap: 10px;">
                   
                   <!-- CURRENT LOT HERO (Player Focus) -->
-                  <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; border-bottom: 1px solid #f1f5f9; padding-bottom: 10px;">
-                    <div style="display: flex; align-items: center; gap: 12px;">
-                      <!-- 92px Photo Spotlight -->
-                      <div class="admin-lot-photo-spotlight" style="width: 84px; height: 84px; border-radius: 10px; overflow: hidden; background: linear-gradient(135deg, #f1f5f9, #e2e8f0); display: flex; align-items: center; justify-content: center; border: 2px solid #cbd5e1; box-shadow: 0 2px 6px rgba(0,0,0,0.06); flex-shrink: 0;">
-                        ${cur.photo ? `<img src="${cur.photo}" style="width: 100%; height: 100%; object-fit: cover;">` : `<span style="font-size: 2.2rem; font-weight: 800; color: #64748b;">${(cur.name || 'P').charAt(0)}</span>`}
+                  ${!cur ? `
+                    <div style="padding: 24px 16px; text-align: center; background: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 10px; margin-bottom: 6px;">
+                      <div style="font-size: 2.2rem; margin-bottom: 6px;">🏏</div>
+                      <div style="font-family: var(--font-display); font-size: 1.15rem; font-weight: 800; color: #334155;">NO PLAYERS ON AUCTION FLOOR</div>
+                      <div style="font-size: 0.78rem; color: #64748b; margin-top: 4px;">The player catalog is currently empty. Register or import players to begin auction lots.</div>
+                    </div>
+                  ` : `
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; border-bottom: 1px solid #f1f5f9; padding-bottom: 10px;">
+                      <div style="display: flex; align-items: center; gap: 12px;">
+                        <!-- 92px Photo Spotlight -->
+                        <div class="admin-lot-photo-spotlight" style="width: 84px; height: 84px; border-radius: 10px; overflow: hidden; background: linear-gradient(135deg, #f1f5f9, #e2e8f0); display: flex; align-items: center; justify-content: center; border: 2px solid #cbd5e1; box-shadow: 0 2px 6px rgba(0,0,0,0.06); flex-shrink: 0;">
+                          ${cur.photo ? `<img src="${cur.photo}" style="width: 100%; height: 100%; object-fit: cover;">` : `<span style="font-size: 2.2rem; font-weight: 800; color: #64748b;">${(cur.name || 'P').charAt(0)}</span>`}
+                        </div>
+                        <div>
+                          <div style="display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-bottom: 3px;">
+                            <span class="status-badge" style="background: #eef2ff; color: #4f46e5; border: 1px solid #c7d2fe; font-size: 0.68rem; font-weight: 800; font-family: var(--font-mono); padding: 1px 8px; border-radius: 4px;">LOT #${cur.id}</span>
+                            <span class="status-badge" style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; font-size: 0.68rem; font-weight: 800; padding: 1px 8px; border-radius: 4px;">
+                              ${cur.bucket === 'NO_BUCKET' ? 'PG' : cur.bucket}
+                            </span>
+                            <span class="status-badge" style="background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; font-size: 0.65rem; font-weight: 700; padding: 1px 6px; border-radius: 4px;">${cur.derivedType || 'ALL-ROUNDER'}</span>
+                            ${cur.status === 'UNSOLD' ? '<span class="status-badge status-unsold" style="font-size: 0.65rem; font-weight: 900; padding: 1px 8px; border-radius: 4px;">UNSOLD POOL</span>' : ''}
+                            ${cur.cricHeroesStatus === 'PROFILE CREATION PENDING' ? '<span class="status-badge" style="background: #fffbeb; color: #b45309; border: 1px solid #fde68a; font-size: 0.6rem; font-weight: 700; padding: 1px 5px; border-radius: 4px;">CRICHEROES PENDING</span>' : '<span class="status-badge" style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; font-size: 0.6rem; font-weight: 700; padding: 1px 5px; border-radius: 4px;">CRICHEROES VERIFIED</span>'}
+                          </div>
+                          <div class="admin-lot-hero-name" style="font-family: var(--font-display); font-size: 1.45rem; font-weight: 800; color: #0f172a; letter-spacing: -0.02em; line-height: 1.2;">
+                            ${cur.name}
+                          </div>
+                          <div style="font-size: 0.72rem; color: #475569; margin-top: 2px;">
+                            <strong class="font-mono" style="color: #2563eb; font-weight: 800;">${cur.roll}</strong> • ${cur.program || 'B.Tech'} • ${cur.department || cur.branch || 'CSE'} • Year <strong>${cur.year}</strong>
+                          </div>
+                          <div style="font-size: 0.68rem; color: #64748b; margin-top: 1px;">
+                            Bat: <span style="color: #334155; font-weight: 600;">${cur.battingArm || 'Right Hand'}</span> • Bowl: <span style="color: #334155; font-weight: 600;">${cur.bowlingArm || 'Right Arm'}</span>
+                          </div>
+                        </div>
                       </div>
-                      <div>
-                        <div style="display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-bottom: 3px;">
-                          <span class="status-badge" style="background: #eef2ff; color: #4f46e5; border: 1px solid #c7d2fe; font-size: 0.68rem; font-weight: 800; font-family: var(--font-mono); padding: 1px 8px; border-radius: 4px;">LOT #${cur.id}</span>
-                          <span class="status-badge" style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; font-size: 0.68rem; font-weight: 800; padding: 1px 8px; border-radius: 4px;">
-                            ${cur.bucket === 'NO_BUCKET' ? 'PG' : cur.bucket}
-                          </span>
-                          <span class="status-badge" style="background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; font-size: 0.65rem; font-weight: 700; padding: 1px 6px; border-radius: 4px;">${cur.derivedType || 'ALL-ROUNDER'}</span>
-                          ${cur.status === 'UNSOLD' ? '<span class="status-badge status-unsold" style="font-size: 0.65rem; font-weight: 900; padding: 1px 8px; border-radius: 4px;">UNSOLD POOL</span>' : ''}
-                          ${cur.cricHeroesStatus === 'PROFILE CREATION PENDING' ? '<span class="status-badge" style="background: #fffbeb; color: #b45309; border: 1px solid #fde68a; font-size: 0.6rem; font-weight: 700; padding: 1px 5px; border-radius: 4px;">CRICHEROES PENDING</span>' : '<span class="status-badge" style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; font-size: 0.6rem; font-weight: 700; padding: 1px 5px; border-radius: 4px;">CRICHEROES VERIFIED</span>'}
-                        </div>
-                        <div class="admin-lot-hero-name" style="font-family: var(--font-display); font-size: 1.45rem; font-weight: 800; color: #0f172a; letter-spacing: -0.02em; line-height: 1.2;">
-                          ${cur.name}
-                        </div>
-                        <div style="font-size: 0.72rem; color: #475569; margin-top: 2px;">
-                          <strong class="font-mono" style="color: #2563eb; font-weight: 800;">${cur.roll}</strong> • ${cur.program || 'B.Tech'} • ${cur.department || cur.branch || 'CSE'} • Year <strong>${cur.year}</strong>
-                        </div>
-                        <div style="font-size: 0.68rem; color: #64748b; margin-top: 1px;">
-                          Bat: <span style="color: #334155; font-weight: 600;">${cur.battingArm || 'Right Hand'}</span> • Bowl: <span style="color: #334155; font-weight: 600;">${cur.bowlingArm || 'Right Arm'}</span>
-                        </div>
+                      <div style="text-align: right; flex-shrink: 0; background: #ecfdf5; border: 1px solid #a7f3d0; padding: 6px 12px; border-radius: 8px;">
+                        <span class="label-micro" style="color: #047857; font-weight: 800; font-size: 0.62rem;">BASE PRICE</span>
+                        <div class="font-mono" style="font-size: 1.25rem; font-weight: 900; color: #047857; font-variant-numeric: tabular-nums;">${cur.basePrice}C</div>
                       </div>
                     </div>
-                    <div style="text-align: right; flex-shrink: 0; background: #ecfdf5; border: 1px solid #a7f3d0; padding: 6px 12px; border-radius: 8px;">
-                      <span class="label-micro" style="color: #047857; font-weight: 800; font-size: 0.62rem;">BASE PRICE</span>
-                      <div class="font-mono" style="font-size: 1.25rem; font-weight: 900; color: #047857; font-variant-numeric: tabular-nums;">${cur.basePrice}C</div>
-                    </div>
-                  </div>
+                  `}
 
                   <!-- TIMER + CURRENT BID + LEADING BIDDER -->
                   <div class="admin-timer-bid-row" style="display: flex; align-items: center; justify-content: space-around; gap: 16px; margin: 4px 0;">
@@ -14564,8 +14618,8 @@
                         <span class="font-mono admin-timer-text" style="font-size: 1.85rem; font-weight: 900; color: ${timerSeconds <= 5 ? '#dc2626' : timerSeconds <= 10 ? '#b45309' : '#047857'}; font-variant-numeric: tabular-nums; line-height: 1; letter-spacing: -0.5px;">
                           00:${String(Math.max(0, timerSeconds)).padStart(2, '0')}
                         </span>
-                        <span style="font-size: 0.6rem; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; color: ${auctionPaused ? '#b45309' : timerSeconds === 0 ? '#dc2626' : (!leader && !timerRunning) ? '#0284c7' : '#64748b'}; margin-top: 2px;">
-                          ${auctionPaused ? 'PAUSED' : timerSeconds === 0 ? 'EXPIRED' : (!leader && !timerRunning) ? 'WAITING' : 'SECONDS'}
+                        <span class="admin-timer-subtitle" style="font-size: 0.6rem; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; color: ${auctionPaused ? '#b45309' : timerSeconds === 0 ? '#dc2626' : (!leader && !timerRunning) ? '#0284c7' : '#047857'}; margin-top: 2px;">
+                          ${auctionPaused ? 'PAUSED' : timerSeconds === 0 ? 'EXPIRED' : (!leader && !timerRunning) ? 'WAITING' : 'LIVE'}
                         </span>
                       </div>
                     </div>
@@ -14647,8 +14701,8 @@
                       <span class="font-mono" style="font-size: 0.65rem; color: #047857; font-weight: 700;">Floor Min: 2</span>
                     </div>
                     <div style="display: flex; align-items: baseline; gap: 8px; margin-top: 3px;">
-                      <strong class="font-display" style="font-size: 1.5rem; color: #065f46; font-weight: 900;">${cur.bucket === 'NO_BUCKET' ? 'PG' : cur.bucket}</strong>
-                      <span style="font-size: 0.72rem; color: #047857; font-weight: 600;">Base: ${cur.basePrice} Credits</span>
+                      <strong class="font-display" style="font-size: 1.5rem; color: #065f46; font-weight: 900;">${cur ? (cur.bucket === 'NO_BUCKET' ? 'PG' : cur.bucket) : (activeAuctionBucket || 'B1')}</strong>
+                      <span style="font-size: 0.72rem; color: #047857; font-weight: 600;">Base: ${cur ? cur.basePrice : 60} Credits</span>
                     </div>
                   </div>
 
@@ -14758,7 +14812,8 @@
                   <tbody>
                     ${franchises.map(f => {
                       const nextB = currentBid + getBidIncrement(currentBid);
-                      const maxB = calculateMaxBid(f.id, cur.bucket);
+                      const curB = cur ? cur.bucket : 'B1';
+                      const maxB = calculateMaxBid(f.id, curB);
                       const isPassed = passedFranchiseIds.includes(f.id);
                       const isLeader = f.id === leadingBidderId;
                       const ap = (f.squad || []).filter(p => !p.isCaptain && !p.isViceCaptain && !p.isReferred);
@@ -14778,7 +14833,7 @@
                       let blockedReason = null;
                       if ((f.squad || []).length >= 22) blockedReason = 'already at 22';
                       else if (f.purse < nextB) blockedReason = 'no purse';
-                      else if (!checkSlotProtection(f.id, cur.bucket).eligible) blockedReason = 'mandatory slot locked';
+                      else if (!checkSlotProtection(f.id, curB).eligible) blockedReason = 'mandatory slot locked';
                       else if (nextB > maxB) blockedReason = 'maxBid exceeded';
 
                       const statusBadge = isLeader 
@@ -14823,7 +14878,8 @@
                 </div>
                 ${franchises.map(f => {
                   const nextB = currentBid + getBidIncrement(currentBid);
-                  const maxB = calculateMaxBid(f.id, cur.bucket);
+                  const curB = cur ? cur.bucket : 'B1';
+                  const maxB = calculateMaxBid(f.id, curB);
                   const isPassed = passedFranchiseIds.includes(f.id);
                   const isLeader = f.id === leadingBidderId;
                   const ap = (f.squad || []).filter(p => !p.isCaptain && !p.isViceCaptain && !p.isReferred);
@@ -14843,7 +14899,7 @@
                   let blockedReason = null;
                   if ((f.squad || []).length >= 22) blockedReason = 'Squad Full (22)';
                   else if (f.purse < nextB) blockedReason = 'No Purse';
-                  else if (!checkSlotProtection(f.id, cur.bucket).eligible) blockedReason = 'Slot Locked';
+                  else if (!checkSlotProtection(f.id, curB).eligible) blockedReason = 'Slot Locked';
                   else if (nextB > maxB) blockedReason = 'MaxBid Exceeded';
 
                   return `
@@ -16239,7 +16295,7 @@
     }
 
     function renderProjectorView() {
-      const cur = players[lotIndex] || players[0];
+      const cur = players[lotIndex] || players[0] || null;
       const leader = franchises.find(f => f.id === leadingBidderId);
       if (cur && typeof cur.basePrice === 'number' && (!leader || currentBid < cur.basePrice)) {
         currentBid = cur.basePrice;
@@ -16267,6 +16323,14 @@
           </div>
 
           <!-- Main Broadcast Content -->
+          ${!cur ? `
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 16px;">
+              <div style="font-size: 5rem;">🏏</div>
+              <h1 style="font-family: var(--font-display); font-size: 3.5rem; font-weight: 800; color: var(--text-bright); margin: 0;">ACC 2026 AUCTION FLOOR</h1>
+              <div style="font-size: 1.5rem; font-weight: 700; color: var(--color-green); text-transform: uppercase; letter-spacing: 0.1em;">Awaiting Next Lot Draw</div>
+              <div style="font-size: 1rem; color: var(--text-muted); max-width: 600px;">The auction arena is active. The auctioneer will draw the next candidate shortly.</div>
+            </div>
+          ` : `
           <div style="flex: 1; display: grid; grid-template-columns: 1.1fr 1fr; gap: 48px; align-items: center; padding: 24px 0;">
             
             <!-- Left: Giant Player Photo & Identity -->
@@ -16320,6 +16384,7 @@
             </div>
 
           </div>
+          `}
 
           <!-- Bottom: 11 Teams Status Strip -->
           <div style="display: grid; grid-template-columns: repeat(11, 1fr); gap: 8px; border-top: 2px solid var(--border-medium); padding-top: 16px;">
@@ -16931,6 +16996,12 @@
                 if (typeof renderHeaderNav === 'function') renderHeaderNav();
                 if (typeof renderCurrentView === 'function') renderCurrentView();
               }
+            } else {
+              // Firestore collection is empty — clear local store
+              players = [];
+              deletedPlayers = [];
+              saveDatabase();
+              if (typeof renderCurrentView === 'function') renderCurrentView();
             }
           }, (err) => {
             console.warn("[Firestore] players directory listener note:", err);
@@ -16987,6 +17058,12 @@
                 if (typeof renderHeaderNav === 'function') renderHeaderNav();
                 if (typeof renderCurrentView === 'function') renderCurrentView();
               }
+            } else {
+              // Firestore collection is empty — clear local store
+              franchises = [];
+              deletedFranchises = [];
+              saveDatabase();
+              if (typeof renderCurrentView === 'function') renderCurrentView();
             }
           }, (err) => {
             console.warn("[Firestore] franchises directory listener note:", err);
@@ -17348,14 +17425,14 @@
         currentBid,
         leadingBidderId,
         timerSeconds: (window.AuctionTimerEngine ? window.AuctionTimerEngine.getRemainingSeconds() : timerSeconds),
-        timerDeadline: timerDeadline || (sNow + (timerSeconds * 1000)),
+        timerDeadline: (timerRunning && !auctionPaused) ? (timerDeadline || (sNow + (timerSeconds * 1000))) : null,
         timerDuration: timerDuration || (timerMode === 'BID' ? 20000 : 30000),
         timerStartedAt: timerStartedAt || sNow,
         lastBidAt: lastBidAt || null,
         timerVersion: timerVersion || 1,
         timerRunning: !!timerRunning,
         auctionPaused: !!auctionPaused,
-        pausedRemainingMs: pausedRemainingMs !== null ? pausedRemainingMs : null,
+        pausedRemainingMs: auctionPaused ? (typeof pausedRemainingMs === 'number' ? pausedRemainingMs : (timerSeconds * 1000)) : null,
         passedFranchiseIds,
         franchises,
         deletedFranchises: deletedFranchises || [],
@@ -17444,19 +17521,21 @@
       if (data.auctionPaused) {
         auctionPaused = true;
         timerRunning = false;
+        timerDeadline = null;
         pausedRemainingMs = typeof data.pausedRemainingMs === 'number'
           ? data.pausedRemainingMs
-          : (typeof data.timerSeconds === 'number' ? data.timerSeconds * 1000 : 0);
+          : (typeof data.timerSeconds === 'number' ? data.timerSeconds * 1000 : 30000);
         timerSeconds = Math.max(0, Math.ceil(pausedRemainingMs / 1000));
         if (window.AuctionTimerEngine) {
           window.AuctionTimerEngine.stopLoop();
+          window.AuctionTimerEngine.renderTick();
         }
       } else {
         auctionPaused = false;
         pausedRemainingMs = null;
         frozenRemainingSeconds = null;
 
-        if (data.timerDeadline) {
+        if (data.timerDeadline && data.timerRunning) {
           timerDeadline = data.timerDeadline;
           const sNow = (window.ClockSync && typeof window.ClockSync.getServerNow === 'function')
             ? window.ClockSync.getServerNow()
@@ -17465,27 +17544,33 @@
           const remaining = Math.max(0, Math.ceil(remainingMs / 1000));
           timerSeconds = remaining;
 
-          if (data.timerRunning && remainingMs > 0) {
+          if (remainingMs > 0) {
             timerRunning = true;
             if (window.AuctionTimerEngine) {
               window.AuctionTimerEngine.start(timerDeadline, timerDuration, timerVersion);
             }
           } else {
             timerRunning = false;
+            timerDeadline = null;
             if (window.AuctionTimerEngine) {
               window.AuctionTimerEngine.stopLoop();
+              window.AuctionTimerEngine.renderTick();
             }
           }
         } else {
-          timerSeconds = typeof data.timerSeconds === "number" ? data.timerSeconds : 0;
+          timerSeconds = typeof data.timerSeconds === "number" ? data.timerSeconds : 30;
           timerRunning = false;
+          timerDeadline = null;
           if (window.AuctionTimerEngine) {
             window.AuctionTimerEngine.stopLoop();
+            window.AuctionTimerEngine.renderTick();
           }
         }
       }
 
-      if (Array.isArray(data.deletedFranchises)) {
+      if (data.isFullReset || (Array.isArray(data.deletedFranchises) && data.deletedFranchises.length === 0)) {
+        if (data.isFullReset) deletedFranchises = [];
+      } else if (Array.isArray(data.deletedFranchises)) {
         const dfMap = new Map();
         (deletedFranchises || []).forEach(d => {
           const k = String(d.id || d.franchiseId || '').toUpperCase();
@@ -17497,7 +17582,10 @@
         });
         deletedFranchises = Array.from(dfMap.values());
       }
-      if (Array.isArray(data.franchises) && data.franchises.length > 0) {
+
+      if (data.isFullReset || (Array.isArray(data.franchises) && data.franchises.length === 0)) {
+        franchises = [];
+      } else if (Array.isArray(data.franchises) && data.franchises.length > 0) {
         const dfSet = new Set((deletedFranchises || []).map(d => String(d.id || d.franchiseId || '').toUpperCase()));
         const fMap = new Map();
         franchises.forEach(f => {
@@ -17515,7 +17603,10 @@
         });
         franchises = Array.from(fMap.values());
       }
-      if (Array.isArray(data.deletedPlayers)) {
+
+      if (data.isFullReset || (Array.isArray(data.deletedPlayers) && data.deletedPlayers.length === 0)) {
+        if (data.isFullReset) deletedPlayers = [];
+      } else if (Array.isArray(data.deletedPlayers)) {
         const dMap = new Map();
         deletedPlayers.forEach(d => {
           const k = (d.roll || d.rollNumberNormalized || d.id || '').toString().toUpperCase();
@@ -17527,7 +17618,10 @@
         });
         deletedPlayers = Array.from(dMap.values());
       }
-      if (Array.isArray(data.players)) {
+
+      if (data.isFullReset || (Array.isArray(data.players) && data.players.length === 0)) {
+        players = [];
+      } else if (Array.isArray(data.players)) {
         const dSet = new Set(deletedPlayers.map(d => (d.roll || d.rollNumberNormalized || d.id || '').toString().toUpperCase()));
         const playerMap = new Map();
         players.forEach(p => {
