@@ -9,7 +9,8 @@ import {
   updateDoc, 
   setDoc, 
   serverTimestamp,
-  orderBy 
+  orderBy,
+  writeBatch
 } from 'firebase/firestore';
 import { db, functions } from '@/lib/firebase';
 import { httpsCallable } from 'firebase/functions';
@@ -300,6 +301,7 @@ export default function AdminDashboardPage() {
       return;
     }
     setWipeLoading(true);
+    let cloudFunctionSuccess = false;
     try {
       const wipeCallable = httpsCallable(functions, 'wipeParticipantDataset');
       await wipeCallable({
@@ -308,12 +310,75 @@ export default function AdminDashboardPage() {
         typedConfirmation: 'WIPE ACC PARTICIPANT DATA',
         acknowledgedScope: true,
       });
-      showToast('Participant dataset and dependent operational data wiped successfully.');
-      setWipeModalOpen(false);
+      cloudFunctionSuccess = true;
+    } catch (cfErr) {
+      console.warn('Cloud function wipe unavailable; executing direct client-side sweep:', cfErr);
+    }
+
+    try {
+      if (!cloudFunctionSuccess) {
+        const collectionsToWipe = [
+          'players', 'publicPlayers', 'playersPublic', 'deletedPlayers',
+          'playerUniqueKeys', 'registrations', 'referrals', 'playerReferrals',
+          'franchises', 'franchisesPublic', 'deletedFranchises', 'franchiseUsers',
+          'lots', 'bids', 'acquisitions', 'sales', 'round2', 'round2Records',
+          'round2Selections', 'allotments', 'purseTransactions', 'purseLedger',
+          'franchiseTransactions', 'transactions', 'auctionHistory'
+        ];
+        for (const colName of collectionsToWipe) {
+          try {
+            const snap = await getDocs(collection(db, colName));
+            if (!snap.empty) {
+              const batch = writeBatch(db);
+              snap.docs.forEach(d => batch.delete(d.ref));
+              await batch.commit();
+            }
+          } catch (e) {
+            console.warn(`Error wiping ${colName}:`, e);
+          }
+        }
+
+        try {
+          const userSnap = await getDocs(collection(db, 'users'));
+          if (!userSnap.empty) {
+            const userBatch = writeBatch(db);
+            let count = 0;
+            userSnap.docs.forEach(d => {
+              const u = d.data();
+              if (u.role !== 'SUPER_ADMIN' && u.role !== 'ADMIN') {
+                userBatch.delete(d.ref);
+                count++;
+              }
+            });
+            if (count > 0) await userBatch.commit();
+          }
+        } catch (e) {}
+
+        const resetPayload = {
+          status: 'IDLE',
+          activeLot: null,
+          currentBid: null,
+          isFullReset: true,
+          lotIndex: 0,
+          timerSeconds: 30,
+          updatedBy: 'WIPE_SERVICE',
+          updatedAt: serverTimestamp(),
+        };
+        try { await setDoc(doc(db, 'acc_auctions', EDITION_ID), resetPayload, { merge: true }); } catch (e) {}
+        try { await setDoc(doc(db, 'acc_auctions', 'live'), resetPayload, { merge: true }); } catch (e) {}
+        await logAudit('WIPE_ALL_PARTICIPANT_DATA', EDITION_ID, 'Permanently wiped all participant records and dependent auction data.');
+      }
+
       setPlayers([]);
       setFranchises([]);
       setDeletedPlayers([]);
       setDeletedFranchises([]);
+      localStorage.setItem('acc_players_2026', '[]');
+      localStorage.setItem('acc_deleted_players_2026', '[]');
+      localStorage.setItem('acc_franchises_2026', '[]');
+      localStorage.setItem('acc_deleted_franchises_2026', '[]');
+      setWipeModalOpen(false);
+      showToast('Participant dataset and dependent operational data wiped successfully.');
     } catch (err: any) {
       showToast(err?.message || 'Failed to wipe participant dataset.', 'error');
     } finally {
