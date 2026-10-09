@@ -2420,6 +2420,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-functions-compat.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
 </head>
 <body>
@@ -11651,123 +11652,250 @@
     }
 
     // ========================================================
-    // DELETE ALL DATA — NUCLEAR WIPE (PLAYERS + FRANCHISES + LINKS)
+    // WIPE ALL PARTICIPANT DATA — 3-STEP SECURITY WIZARD (§6-8)
     // ========================================================
-    function openDeleteAllDataModal() {
+    function openWipeParticipantDatasetModal(step) {
       if (currentUser.role !== 'SUPER_ADMIN') {
-        showToast("ACCESS DENIED: Super Admin authorization required for full data wipe.", "error");
+        showToast("ACCESS DENIED: Super Admin authorization required to wipe participant data.", "error");
         return;
       }
+      step = step || 1;
+
       const totalPlayers = players.length;
-      const soldPlayers = players.filter(p => p.status === 'SOLD').length;
-      const unsoldPlayers = players.filter(p => p.status === 'UNSOLD').length;
-      const availablePlayers = players.filter(p => p.status === 'AVAILABLE').length;
-      const totalFranchises = franchises.length;
-      const totalSquadMembers = franchises.reduce((sum, f) => sum + (f.squad ? f.squad.length : 0), 0);
       const trashedPlayers = deletedPlayers.length;
+      const totalFranchises = franchises.length;
       const trashedFranchises = (deletedFranchises || []).length;
+      const regCount = (typeof registrations !== 'undefined' ? registrations.length : 0) || players.filter(p => p.registered || p.registration).length;
+      const verifCount = players.filter(p => p.verificationStatus || p.approvalStatus).length;
+      const auctionCount = (typeof lots !== 'undefined' ? lots.length : 0) + (typeof bids !== 'undefined' ? bids.length : 0) + players.filter(p => p.status === 'SOLD' || p.status === 'UNSOLD').length;
+      const mediaCount = players.filter(p => p.photo || p.photoUrl).length + franchises.filter(f => f.logo || f.logoUrl).length;
 
       const m = document.getElementById("modalContainer");
-      m.innerHTML = `
-        <div class="modal-overlay" onclick="closeModal()">
-          <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 580px;">
-            <!-- Danger Header -->
-            <div style="background: linear-gradient(135deg, #fef2f2, #fee2e2); border: 2px solid #dc2626; border-radius: var(--radius-md); padding: 16px; margin-bottom: 16px;">
-              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
-                <div style="width: 40px; height: 40px; border-radius: 50%; background: #dc2626; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-                  <svg width="22" height="22" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
-                    <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6"/>
-                  </svg>
+
+      if (step === 1) {
+        // STEP 1: SELECT SCOPE & LIVE COUNTS
+        m.innerHTML = `
+          <div class="modal-overlay" onclick="closeModal()">
+            <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 620px;">
+              <div style="background: linear-gradient(135deg, #fef2f2, #fee2e2); border: 2px solid #dc2626; border-radius: var(--radius-md); padding: 16px; margin-bottom: 16px;">
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+                  <div style="width: 36px; height: 36px; border-radius: 50%; background: #dc2626; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                    <svg width="20" height="20" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+                      <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 style="font-family: var(--font-display); font-size: 1.25rem; font-weight: 900; color: #dc2626; margin: 0;">
+                      WIPE ALL PARTICIPANT DATA
+                    </h3>
+                    <div style="font-size: 0.75rem; color: #991b1b; font-weight: 800; letter-spacing: 0.05em;">STEP 1 OF 3 — SCOPE & DATASET ENUMERATION</div>
+                  </div>
                 </div>
-                <div>
-                  <h3 style="font-family: var(--font-display); font-size: 1.25rem; font-weight: 900; color: #dc2626; margin: 0; letter-spacing: 0.04em;">
-                    DELETE ALL DATA
-                  </h3>
-                  <div style="font-size: 0.75rem; color: #991b1b; font-weight: 700; letter-spacing: 0.06em;">IRREVERSIBLE · PERMANENT · NUCLEAR</div>
+                <p style="font-size: 0.8125rem; color: #7f1d1d; margin: 0; line-height: 1.5;">
+                  Permanently remove participant records and dependent tournament data from the selected dataset. This action cannot be undone through the normal application interface.
+                </p>
+              </div>
+
+              <!-- Scope & Environment -->
+              <div style="background: var(--surface-2); padding: 12px 16px; border-radius: var(--radius-sm); margin-bottom: 14px; font-size: 0.8125rem;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                  <span style="color: var(--text-muted);">Target Edition:</span>
+                  <strong style="font-family: var(--font-mono); color: var(--text-bright);">ACC 2026 (acc-2026)</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                  <span style="color: var(--text-muted);">Environment Scope:</span>
+                  <span class="status-badge" style="background: rgba(37,99,235,0.1); color: var(--color-blue); font-weight: 800; font-size: 0.7rem;">LIVE TOURNAMENT</span>
                 </div>
               </div>
-              <p style="font-size: 0.8125rem; color: #7f1d1d; margin: 0; line-height: 1.6;">
-                This will <strong>permanently delete</strong> every player, franchise, squad, sold record, and linked data. Trash/archive will also be emptied. This action <strong>cannot be undone</strong>.
-              </p>
-            </div>
 
-            <!-- Impact Summary -->
-            <div style="background: var(--surface-2); padding: 14px; border-radius: var(--radius-sm); margin-bottom: 16px;">
-              <div style="font-family: var(--font-display); font-size: 0.75rem; font-weight: 800; color: var(--color-red); letter-spacing: 0.08em; margin-bottom: 10px;">DESTRUCTION IMPACT</div>
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-family: var(--font-mono); font-size: 0.8125rem; color: var(--text-secondary);">
-                <div style="display: flex; justify-content: space-between;">
-                  <span>Players</span>
-                  <strong style="color: var(--color-red);">${totalPlayers}</strong>
+              <!-- Live Non-Fabricated Counts -->
+              <div style="background: #ffffff; border: 1px solid var(--border-medium); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 10px;">
+                  Discovered Participant & Operational Records
                 </div>
-                <div style="display: flex; justify-content: space-between;">
-                  <span>Franchises</span>
-                  <strong style="color: var(--color-red);">${totalFranchises}</strong>
-                </div>
-                <div style="display: flex; justify-content: space-between;">
-                  <span>Sold</span>
-                  <strong>${soldPlayers}</strong>
-                </div>
-                <div style="display: flex; justify-content: space-between;">
-                  <span>Squad Members</span>
-                  <strong>${totalSquadMembers}</strong>
-                </div>
-                <div style="display: flex; justify-content: space-between;">
-                  <span>Unsold</span>
-                  <strong>${unsoldPlayers}</strong>
-                </div>
-                <div style="display: flex; justify-content: space-between;">
-                  <span>Available</span>
-                  <strong>${availablePlayers}</strong>
-                </div>
-                <div style="grid-column: span 2; border-top: 1px solid var(--border-subtle); padding-top: 8px; display: flex; justify-content: space-between;">
-                  <span>Trash (also wiped)</span>
-                  <strong style="color: var(--color-orange);">${trashedPlayers} players + ${trashedFranchises} franchises</strong>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-family: var(--font-mono); font-size: 0.8125rem;">
+                  <div style="display: flex; justify-content: space-between; padding: 6px 8px; background: var(--surface-2); border-radius: 4px;">
+                    <span>Players (Active + Trash)</span>
+                    <strong style="color: var(--color-red);">${totalPlayers + trashedPlayers}</strong>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; padding: 6px 8px; background: var(--surface-2); border-radius: 4px;">
+                    <span>Franchises (Active + Trash)</span>
+                    <strong style="color: var(--color-red);">${totalFranchises + trashedFranchises}</strong>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; padding: 6px 8px; background: var(--surface-2); border-radius: 4px;">
+                    <span>Registrations / KYC</span>
+                    <strong style="color: var(--color-red);">${regCount}</strong>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; padding: 6px 8px; background: var(--surface-2); border-radius: 4px;">
+                    <span>Verification Records</span>
+                    <strong style="color: var(--color-red);">${verifCount}</strong>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; padding: 6px 8px; background: var(--surface-2); border-radius: 4px;">
+                    <span>Auction Lots & Bids</span>
+                    <strong style="color: var(--color-red);">${auctionCount}</strong>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; padding: 6px 8px; background: var(--surface-2); border-radius: 4px;">
+                    <span>Storage Media Objects</span>
+                    <strong style="color: var(--color-red);">${mediaCount}</strong>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <!-- Preserved Items -->
-            <div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px;">
-              <div style="font-size: 0.75rem; font-weight: 800; color: #166534; letter-spacing: 0.06em; margin-bottom: 6px;">✓ PRESERVED (NOT DELETED)</div>
-              <ul style="margin: 0; padding: 0 0 0 16px; font-size: 0.75rem; color: #15803d; line-height: 1.7;">
-                <li>Admin & Operator accounts</li>
-                <li>Audit log history</li>
-                <li>Tournament configuration</li>
-              </ul>
-            </div>
-
-            <!-- Type to Confirm -->
-            <div style="margin-bottom: 16px;">
-              <label style="display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 6px; font-weight: 700;">
-                Type <strong style="color: var(--color-red); font-family: var(--font-mono);">DELETE ALL DATA</strong> to confirm:
-              </label>
-              <input type="text" id="confirmDeleteAllDataInput" class="form-input" 
-                     placeholder="DELETE ALL DATA" 
-                     style="text-transform: uppercase; border-color: var(--color-red); font-family: var(--font-mono); font-weight: 700;"
-                     autocomplete="off" spellcheck="false">
-            </div>
-
-            <!-- Actions -->
-            <div style="display: flex; gap: 10px; justify-content: flex-end;">
-              <button class="btn btn-secondary" onclick="closeModal()" style="min-height: 44px; padding: 10px 24px;">
-                CANCEL
-              </button>
-              <button class="btn btn-danger" onclick="executeDeleteAllData()" 
-                      style="min-height: 44px; padding: 10px 24px; font-weight: 900; letter-spacing: 0.06em; background: #dc2626; border-color: #991b1b;">
-                🗑️ PERMANENTLY DELETE EVERYTHING
-              </button>
+              <!-- Step Navigation -->
+              <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                <button class="btn btn-secondary" onclick="closeModal()" style="min-height: 40px; padding: 8px 20px;">
+                  CANCEL
+                </button>
+                <button class="btn btn-danger" onclick="openWipeParticipantDatasetModal(2)" style="min-height: 40px; padding: 8px 20px; font-weight: 800; background: #dc2626; border-color: #991b1b;">
+                  REVIEW DEPENDENCIES →
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      `;
-    }
-    window.openDeleteAllDataModal = openDeleteAllDataModal;
+        `;
+      } else if (step === 2) {
+        // STEP 2: PREVIEW DEPENDENCIES & PROTECTED RESOURCES
+        m.innerHTML = `
+          <div class="modal-overlay" onclick="closeModal()">
+            <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 620px;">
+              <div style="background: linear-gradient(135deg, #fef2f2, #fee2e2); border: 2px solid #dc2626; border-radius: var(--radius-md); padding: 16px; margin-bottom: 16px;">
+                <h3 style="font-family: var(--font-display); font-size: 1.25rem; font-weight: 900; color: #dc2626; margin: 0 0 4px 0;">
+                  WIPE ALL PARTICIPANT DATA
+                </h3>
+                <div style="font-size: 0.75rem; color: #991b1b; font-weight: 800; letter-spacing: 0.05em;">STEP 2 OF 3 — PREVIEW DEPENDENCIES & PROTECTED RESOURCES</div>
+              </div>
 
-    async function executeDeleteAllData() {
-      const input = (document.getElementById("confirmDeleteAllDataInput")?.value || '').trim().toUpperCase();
-      if (input !== 'DELETE ALL DATA') {
-        showToast("Confirmation text did not match. Type DELETE ALL DATA exactly.", "error");
+              <!-- Dependencies to be deleted -->
+              <div style="background: var(--surface-2); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 14px;">
+                <div style="font-size: 0.75rem; font-weight: 800; color: var(--color-red); text-transform: uppercase; margin-bottom: 8px;">
+                  ⚠️ DEPENDENT COLLECTIONS TO BE PURGED
+                </div>
+                <div style="font-size: 0.78rem; color: var(--text-secondary); line-height: 1.6;">
+                  <div>• <strong>Phase 1 (Auction Operations):</strong> bids, lots, sales, acquisitions, round2, round2Records, round2Selections, allotments, purseTransactions, purseLedger, franchiseTransactions, transactions, auctionHistory</div>
+                  <div style="margin-top: 4px;">• <strong>Phase 2 (Profiles & Registry):</strong> players, publicPlayers, deletedPlayers, playerUniqueKeys, registrations, referrals, franchises, franchisesPublic, deletedFranchises, franchiseUsers</div>
+                  <div style="margin-top: 4px;">• <strong>Phase 3 (Auth & Storage):</strong> Participant profiles in /users/{uid}, Storage paths /players/*, /franchises/*, /coordinators/*</div>
+                  <div style="margin-top: 4px;">• <strong>Phase 4 (State Reset):</strong> Live auction state in acc_auctions/acc-2026 reset to IDLE</div>
+                </div>
+              </div>
+
+              <!-- Strictly Protected Items -->
+              <div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px;">
+                <div style="font-size: 0.75rem; font-weight: 800; color: #166534; letter-spacing: 0.05em; margin-bottom: 6px;">
+                  ✓ STRICTLY PROTECTED RESOURCES (NEVER REMOVED)
+                </div>
+                <ul style="margin: 0; padding: 0 0 0 16px; font-size: 0.78rem; color: #15803d; line-height: 1.6;">
+                  <li>Authenticated Super Admin account (Current user: <strong>${currentUser.email || currentUser.uid}</strong>)</li>
+                  <li>All Floor Administrator accounts (role: ADMIN / SUPER_ADMIN)</li>
+                  <li>Tamper-evident Security Audit Log (auditLogs & auditLog — wipe is appended)</li>
+                  <li>Tournament settings & edition configuration documents</li>
+                  <li>Pre-wipe JSON snapshots and database backups</li>
+                </ul>
+              </div>
+
+              <!-- Step Navigation -->
+              <div style="display: flex; justify-content: space-between; gap: 10px;">
+                <button class="btn btn-secondary" onclick="openWipeParticipantDatasetModal(1)" style="min-height: 40px; padding: 8px 18px;">
+                  ← BACK TO SCOPE
+                </button>
+                <button class="btn btn-danger" onclick="openWipeParticipantDatasetModal(3)" style="min-height: 40px; padding: 8px 20px; font-weight: 800; background: #dc2626; border-color: #991b1b;">
+                  PROCEED TO CONFIRMATION →
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      } else if (step === 3) {
+        // STEP 3: EXPLICIT CONFIRMATION WITH PHRASE & CHECKBOX
+        m.innerHTML = `
+          <div class="modal-overlay" onclick="closeModal()">
+            <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 620px;">
+              <div style="background: linear-gradient(135deg, #fef2f2, #fee2e2); border: 2px solid #dc2626; border-radius: var(--radius-md); padding: 16px; margin-bottom: 16px;">
+                <h3 style="font-family: var(--font-display); font-size: 1.25rem; font-weight: 900; color: #dc2626; margin: 0 0 4px 0;">
+                  WIPE ALL PARTICIPANT DATA
+                </h3>
+                <div style="font-size: 0.75rem; color: #991b1b; font-weight: 800; letter-spacing: 0.05em;">STEP 3 OF 3 — EXPLICIT SECURITY CONFIRMATION</div>
+              </div>
+
+              <div style="background: #fff1f2; border: 1px solid #fda4af; border-radius: var(--radius-sm); padding: 12px; margin-bottom: 16px; font-size: 0.8125rem; color: #9f1239; line-height: 1.5;">
+                <strong>PERMANENT DELETION WARNING:</strong> This action cannot be undone through the normal application interface. All participant accounts, player cards, team rosters, and auction ledgers will be wiped from the database.
+              </div>
+
+              <!-- Mandatory Acknowledgment Checkbox -->
+              <div style="margin-bottom: 16px; background: var(--surface-2); padding: 12px; border-radius: var(--radius-sm);">
+                <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; font-size: 0.8125rem; color: var(--text-bright); line-height: 1.4;">
+                  <input type="checkbox" id="wipeScopeAcknowledge" onchange="checkWipeConfirmationReady()" style="margin-top: 2px; width: 16px; height: 16px; accent-color: #dc2626;">
+                  <span>I have verified the record counts and understand that all participant data and dependent auction records will be permanently removed.</span>
+                </label>
+              </div>
+
+              <!-- Exact Phrase Input -->
+              <div style="margin-bottom: 20px;">
+                <label style="display: block; font-size: 0.78rem; color: var(--text-muted); margin-bottom: 6px; font-weight: 700;">
+                  Type <strong style="color: var(--color-red); font-family: var(--font-mono);">WIPE ACC PARTICIPANT DATA</strong> to confirm:
+                </label>
+                <input type="text" id="confirmWipePhraseInput" class="form-input" 
+                       placeholder="WIPE ACC PARTICIPANT DATA" 
+                       oninput="checkWipeConfirmationReady()"
+                       style="text-transform: uppercase; border-color: var(--color-red); font-family: var(--font-mono); font-weight: 700;"
+                       autocomplete="off" spellcheck="false">
+              </div>
+
+              <!-- Action Buttons -->
+              <div style="display: flex; justify-content: space-between; gap: 10px;">
+                <button class="btn btn-secondary" onclick="openWipeParticipantDatasetModal(2)" style="min-height: 42px; padding: 10px 18px;">
+                  ← BACK
+                </button>
+                <button class="btn btn-danger" id="btnExecuteWipe" onclick="executeWipeParticipantDataset()" disabled
+                        style="min-height: 42px; padding: 10px 24px; font-weight: 900; letter-spacing: 0.05em; background: #dc2626; border-color: #991b1b; opacity: 0.4;">
+                  PERMANENTLY WIPE DATASET
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+    }
+    window.openWipeParticipantDatasetModal = openWipeParticipantDatasetModal;
+    window.openDeleteAllDataModal = function() { openWipeParticipantDatasetModal(1); };
+
+    window.checkWipeConfirmationReady = function() {
+      const phrase = (document.getElementById('confirmWipePhraseInput')?.value || '').trim().toUpperCase();
+      const acknowledged = document.getElementById('wipeScopeAcknowledge')?.checked;
+      const btn = document.getElementById('btnExecuteWipe');
+      if (btn) {
+        if (phrase === 'WIPE ACC PARTICIPANT DATA' && acknowledged) {
+          btn.disabled = false;
+          btn.style.opacity = '1';
+        } else {
+          btn.disabled = true;
+          btn.style.opacity = '0.4';
+        }
+      }
+    };
+
+    async function executeWipeParticipantDataset() {
+      const input = (document.getElementById("confirmWipePhraseInput")?.value || '').trim().toUpperCase();
+      const acknowledged = document.getElementById("wipeScopeAcknowledge")?.checked;
+      if (input !== 'WIPE ACC PARTICIPANT DATA' || !acknowledged) {
+        showToast("Both explicit confirmation phrase and checkbox acknowledgment are required.", "error");
         return;
+      }
+
+      const m = document.getElementById("modalContainer");
+      if (m) {
+        m.innerHTML = `
+          <div class="modal-overlay">
+            <div class="modal-dialog" style="padding: 32px; max-width: 480px; text-align: center;">
+              <div class="loading-spinner" style="margin: 0 auto 16px auto; width: 40px; height: 40px; border-width: 4px;"></div>
+              <h3 style="font-family: var(--font-display); font-size: 1.15rem; font-weight: 900; color: var(--text-bright); margin-bottom: 8px;">
+                PURGING ACC 2026 PARTICIPANT DATASET...
+              </h3>
+              <p style="font-size: 0.8125rem; color: var(--text-muted); margin: 0;">
+                Executing chunked server batch deletions across 25 participant collections. Please do not close this window.
+              </p>
+            </div>
+          </div>
+        `;
       }
 
       const playerCount = players.length;
@@ -11775,15 +11903,35 @@
       const trashPlayerCount = deletedPlayers.length;
       const trashFranchiseCount = (deletedFranchises || []).length;
 
-      // ============================================================
-      // STEP 1: DELETE FROM FIRESTORE (all collections)
-      // ============================================================
+      // 1. Invoke Server-Side Cloud Function wipeParticipantDataset
+      let cloudFunctionSucceeded = false;
+      if (typeof firebase !== 'undefined' && firebase.functions) {
+        try {
+          const wipeCallable = firebase.functions().httpsCallable('wipeParticipantDataset');
+          const fnRes = await wipeCallable({
+            action: 'EXECUTE',
+            confirmedScope: 'acc-2026',
+            typedConfirmation: 'WIPE ACC PARTICIPANT DATA',
+            acknowledgedScope: true
+          });
+          if (fnRes?.data?.success) {
+            cloudFunctionSucceeded = true;
+            console.log("[WIPE DATASET] Cloud function wipeParticipantDataset executed successfully:", fnRes.data);
+          }
+        } catch (fnErr) {
+          console.warn("[WIPE DATASET] Cloud function call error or offline; falling back to direct Firestore purge:", fnErr);
+        }
+      }
+
+      // 2. Client-Side Complete Fallback & Local Cleanup across 25 collections
       if (typeof fbDb !== 'undefined' && fbDb) {
-        showToast("Purging Firestore collections...", "info");
         const collectionsToWipe = [
-          'players', 'publicPlayers', 'deletedPlayers',
-          'franchises', 'franchisesPublic', 'deletedFranchises',
-          'playerUniqueKeys', 'registrations', 'lots', 'bids', 'acquisitions'
+          'players', 'publicPlayers', 'playersPublic', 'deletedPlayers',
+          'playerUniqueKeys', 'registrations', 'referrals', 'playerReferrals',
+          'franchises', 'franchisesPublic', 'deletedFranchises', 'franchiseUsers',
+          'lots', 'bids', 'acquisitions', 'sales', 'round2', 'round2Records',
+          'round2Selections', 'allotments', 'purseTransactions', 'purseLedger',
+          'franchiseTransactions', 'transactions', 'auctionHistory'
         ];
 
         for (const colName of collectionsToWipe) {
@@ -11793,60 +11941,73 @@
               const batch = fbDb.batch();
               snapshot.docs.forEach(doc => batch.delete(doc.ref));
               await batch.commit();
-              console.log(`[DELETE ALL] Firestore collection '${colName}' wiped (${snapshot.size} docs).`);
             }
           } catch (e) {
-            console.warn(`[DELETE ALL] Error wiping collection '${colName}':`, e);
+            console.warn(`[WIPE DATASET] Error wiping collection '${colName}':`, e);
           }
         }
 
-        // Wipe the main auction state document
-        if (typeof auctionDocRef !== 'undefined' && auctionDocRef) {
-          try {
-            await auctionDocRef.set({
-              isFullReset: true,
-              lotIndex: 0,
-              currentBid: 0,
-              leadingBidderId: null,
-              timerSeconds: 30,
-              timerDeadline: null,
-              timerDuration: 30000,
-              timerStartedAt: null,
-              lastBidAt: null,
-              timerVersion: (timerVersion || 1) + 1,
-              timerRunning: false,
-              auctionPaused: false,
-              pausedRemainingMs: null,
-              passedFranchiseIds: [],
-              franchises: [],
-              deletedFranchises: [],
-              players: [],
-              deletedPlayers: [],
-              auditLog: auditLog,
-              currentLot: null,
-              timestamp: Date.now()
+        // Purge non-admin participant accounts from /users
+        try {
+          const userSnap = await fbDb.collection('users').get();
+          if (!userSnap.empty) {
+            const userBatch = fbDb.batch();
+            let count = 0;
+            userSnap.docs.forEach(doc => {
+              const data = doc.data();
+              if (data.role !== 'SUPER_ADMIN' && data.role !== 'ADMIN') {
+                userBatch.delete(doc.ref);
+                count++;
+              }
             });
-            console.log("[DELETE ALL] Auction state doc reset with isFullReset: true.");
-          } catch (err) {
-            console.warn("[DELETE ALL] Error resetting auction doc:", err);
+            if (count > 0) await userBatch.commit();
           }
+        } catch (e) {
+          console.warn("[WIPE DATASET] Error wiping participant accounts:", e);
         }
+
+        // Reset auction state doc to pristine IDLE
+        const resetPayload = {
+          isFullReset: true,
+          status: 'IDLE',
+          lotIndex: 0,
+          currentBid: 0,
+          leadingBidderId: null,
+          timerSeconds: 30,
+          timerDeadline: null,
+          timerDuration: 30000,
+          timerStartedAt: null,
+          lastBidAt: null,
+          timerVersion: (timerVersion || 1) + 1,
+          timerRunning: false,
+          auctionPaused: false,
+          pausedRemainingMs: null,
+          passedFranchiseIds: [],
+          franchises: [],
+          deletedFranchises: [],
+          players: [],
+          deletedPlayers: [],
+          auditLog: auditLog,
+          currentLot: null,
+          updatedBy: 'WIPE_SERVICE',
+          timestamp: Date.now()
+        };
+
+        if (typeof auctionDocRef !== 'undefined' && auctionDocRef) {
+          try { await auctionDocRef.set(resetPayload); } catch (err) {}
+        }
+        try { await fbDb.collection('acc_auctions').doc('acc-2026').set(resetPayload, { merge: true }); } catch (e) {}
+        try { await fbDb.collection('acc_auctions').doc('live').set(resetPayload, { merge: true }); } catch (e) {}
       }
 
-      // ============================================================
-      // STEP 2: CLEAR ALL LOCAL STATE ARRAYS
-      // ============================================================
+      // 3. Clear all local state arrays
       players = [];
       franchises = [];
       deletedPlayers = [];
       deletedFranchises = [];
-      if (typeof franchiseMembers !== 'undefined') {
-        franchiseMembers = [];
-      }
+      if (typeof franchiseMembers !== 'undefined') franchiseMembers = [];
 
-      // ============================================================
-      // STEP 3: RESET ALL AUCTION / BIDDING STATE
-      // ============================================================
+      // 4. Reset bidding and timer loop
       lotIndex = 0;
       currentBid = 0;
       leadingBidderId = null;
@@ -11862,10 +12023,7 @@
       timerVersion = (timerVersion || 1) + 1;
       AuctionTimerEngine.stopLoop();
 
-      // ============================================================
-      // STEP 4: SAVE EMPTY ARRAYS TO LOCALSTORAGE
-      // (Must set "[]" not remove — removing causes || DEFAULT_* fallback to reload data)
-      // ============================================================
+      // 5. Store empty arrays in localStorage
       localStorage.setItem('acc_players_2026', '[]');
       localStorage.setItem('acc_deleted_players_2026', '[]');
       localStorage.setItem('acc_franchises_2026', '[]');
@@ -11875,7 +12033,7 @@
       try { localStorage.removeItem('acc_draw_mode_2026'); } catch (e) {}
       try { localStorage.removeItem('acc_bucket_minimums_2026'); } catch (e) {}
 
-      // Also clear any snapshot keys
+      // Clear snapshot keys
       try {
         Object.keys(localStorage).forEach(key => {
           if (key.startsWith('acc_snapshot_lot_') || key.startsWith('acc_last_lot_')) {
@@ -11884,36 +12042,29 @@
         });
       } catch (e) {}
 
-      // ============================================================
-      // STEP 5: AUDIT LOG (keep audit, just add this entry)
-      // ============================================================
+      // 6. Record in immutable audit log
       auditLog.unshift({
         time: new Date().toLocaleTimeString(),
-        action: "NUCLEAR_DELETE_ALL_DATA",
-        details: `PERMANENTLY DELETED ALL DATA: ${playerCount} players, ${franchiseCount} franchises, ${trashPlayerCount} trashed players, ${trashFranchiseCount} trashed franchises. All Firestore collections wiped. All squad links, sold records, bidding data, and purse data destroyed.`,
+        action: "WIPE_ALL_PARTICIPANT_DATA",
+        details: `PERMANENTLY WIPED ALL PARTICIPANT DATA: ${playerCount} players, ${franchiseCount} franchises, ${trashPlayerCount} trashed players, ${trashFranchiseCount} trashed franchises. Admin identities and security audit log preserved.`,
         actorUid: currentUser.uid || 'usr_sys',
         actorRole: currentUser.role,
         severity: 'CRITICAL'
       });
 
-      // ============================================================
-      // STEP 6: SAVE EMPTY STATE & BROADCAST TO ALL TABS
-      // ============================================================
+      // 7. Save state and broadcast reload across all tabs
       saveDatabase();
       broadcastAuthoritativeState();
-
-      // Force BroadcastChannel update to all open tabs
       if (typeof broadcastChannel !== 'undefined' && broadcastChannel) {
-        try {
-          broadcastChannel.postMessage({ type: "FORCE_RELOAD" });
-        } catch (e) {}
+        try { broadcastChannel.postMessage({ type: "FORCE_RELOAD" }); } catch (e) {}
       }
 
       closeModal();
       renderCurrentView();
-      showToast(`NUCLEAR DELETE COMPLETE: ${playerCount} players + ${franchiseCount} franchises permanently destroyed from all stores (Firestore + Local).`, "success");
+      showToast(`Wipe complete: All participant and dependent tournament data permanently purged.`, "success");
     }
-    window.executeDeleteAllData = executeDeleteAllData;
+    window.executeWipeParticipantDataset = executeWipeParticipantDataset;
+    window.executeDeleteAllData = executeWipeParticipantDataset;
 
     function restorePlayerFromTrash(playerId) {
       const idx = deletedPlayers.findIndex(x => x.id == playerId || x.playerId == playerId);
@@ -16126,30 +16277,56 @@
                 </div>
 
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px;">
-                  <!-- CARD 1: USER MANAGEMENT -->
+                  <!-- CARD 1: MANAGE PLAYERS -->
                   <div class="surface-subtle" style="padding: 16px; border-radius: 8px; display: flex; flex-direction: column; justify-content: space-between; border: 1px solid var(--border-subtle); background: #f8fafc;">
                     <div>
-                      <div style="font-weight: 800; font-size: 0.95rem; color: var(--text-bright); text-transform: uppercase;">USER MANAGEMENT</div>
+                      <div style="font-weight: 800; font-size: 0.95rem; color: var(--text-bright); text-transform: uppercase;">1. MANAGE PLAYERS</div>
                       <p style="font-size: 0.78rem; color: var(--text-muted); margin: 6px 0 14px 0; line-height: 1.4;">
-                        Search and manage ACC accounts. Filter players, franchises, team leads, and admin roles.
+                        Search, inspect, edit, or archive canonical player profiles, base prices, and bucket assignments.
                       </p>
                     </div>
-                    <button class="btn btn-primary" onclick="openUserManagementModal()" style="width: 100%; font-size: 0.78rem; font-weight: 800; padding: 8px 14px; min-height: 36px;">
-                      MANAGE USERS
+                    <button class="btn btn-primary" onclick="dataManagementSubTab = 'PLAYERS'; setAdminNavTab('DATA MANAGEMENT'); renderCurrentView();" style="width: 100%; font-size: 0.78rem; font-weight: 800; padding: 8px 14px; min-height: 36px;">
+                      MANAGE PLAYERS
                     </button>
                   </div>
 
-                  <!-- CARD 2: TRASH & RESTORE -->
+                  <!-- CARD 2: MANAGE FRANCHISES -->
+                  <div class="surface-subtle" style="padding: 16px; border-radius: 8px; display: flex; flex-direction: column; justify-content: space-between; border: 1px solid var(--border-subtle); background: #f8fafc;">
+                    <div>
+                      <div style="font-weight: 800; font-size: 0.95rem; color: var(--text-bright); text-transform: uppercase;">2. MANAGE FRANCHISES</div>
+                      <p style="font-size: 0.78rem; color: var(--text-muted); margin: 6px 0 14px 0; line-height: 1.4;">
+                        Configure teams, coordinator mappings, purse quotas, and captain assignments.
+                      </p>
+                    </div>
+                    <button class="btn btn-primary" onclick="dataManagementSubTab = 'FRANCHISES'; setAdminNavTab('DATA MANAGEMENT'); renderCurrentView();" style="width: 100%; font-size: 0.78rem; font-weight: 800; padding: 8px 14px; min-height: 36px;">
+                      MANAGE FRANCHISES
+                    </button>
+                  </div>
+
+                  <!-- CARD 3: REGISTRATION & VERIFICATION -->
+                  <div class="surface-subtle" style="padding: 16px; border-radius: 8px; display: flex; flex-direction: column; justify-content: space-between; border: 1px solid var(--border-subtle); background: #f8fafc;">
+                    <div>
+                      <div style="font-weight: 800; font-size: 0.95rem; color: var(--text-bright); text-transform: uppercase;">3. REGISTRATION & VERIFICATION</div>
+                      <p style="font-size: 0.78rem; color: var(--text-muted); margin: 6px 0 14px 0; line-height: 1.4;">
+                        Process player applications, identity documents, fee proofs, and referral claims.
+                      </p>
+                    </div>
+                    <button class="btn btn-secondary" onclick="setAdminNavTab('PLAYER VERIFICATION'); renderCurrentView();" style="width: 100%; font-size: 0.78rem; font-weight: 800; padding: 8px 14px; min-height: 36px; border-color: rgba(37,99,235,0.4); color: var(--color-blue);">
+                      VERIFICATION QUEUE
+                    </button>
+                  </div>
+
+                  <!-- CARD 4: TRASH & RESTORE -->
                   <div class="surface-subtle" style="padding: 16px; border-radius: 8px; display: flex; flex-direction: column; justify-content: space-between; border: 1px solid var(--border-subtle); background: #f8fafc;">
                     <div>
                       <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <div style="font-weight: 800; font-size: 0.95rem; color: var(--text-bright); text-transform: uppercase;">TRASH & RESTORE</div>
+                        <div style="font-weight: 800; font-size: 0.95rem; color: var(--text-bright); text-transform: uppercase;">4. TRASH & RESTORE</div>
                         <span class="status-badge" style="background: rgba(225,29,72,0.1); color: var(--color-red); font-size: 0.65rem; font-weight: 800; padding: 2px 6px;">
                           ${deletedPlayers.length + (deletedFranchises || []).length}
                         </span>
                       </div>
                       <p style="font-size: 0.78rem; color: var(--text-muted); margin: 6px 0 14px 0; line-height: 1.4;">
-                        Recover archived/deleted records. View audit history and restore previous statuses.
+                        Recover archived or deleted participant records and review historical statuses.
                       </p>
                     </div>
                     <button class="btn btn-secondary" onclick="openTrashManagementModal()" style="width: 100%; font-size: 0.78rem; font-weight: 800; padding: 8px 14px; min-height: 36px; border-color: rgba(225,29,72,0.4); color: var(--color-red);">
@@ -16157,50 +16334,55 @@
                     </button>
                   </div>
 
-                  <!-- CARD 3: AUCTION CORRECTIONS -->
+                  <!-- CARD 5: AUDIT HISTORY -->
                   <div class="surface-subtle" style="padding: 16px; border-radius: 8px; display: flex; flex-direction: column; justify-content: space-between; border: 1px solid var(--border-subtle); background: #f8fafc;">
                     <div>
-                      <div style="font-weight: 800; font-size: 0.95rem; color: var(--text-bright); text-transform: uppercase;">AUCTION CORRECTIONS</div>
+                      <div style="font-weight: 800; font-size: 0.95rem; color: var(--text-bright); text-transform: uppercase;">5. AUDIT HISTORY</div>
                       <p style="font-size: 0.78rem; color: var(--text-muted); margin: 6px 0 14px 0; line-height: 1.4;">
-                        Review authoritative auction reversals. Reverse sold lots with instant purse and bucket restoration.
+                        Inspect immutable security ledger, role modifications, overrides, and floor actions.
                       </p>
                     </div>
-                    <button class="btn btn-secondary" onclick="openAuctionUndoListModal()" style="width: 100%; font-size: 0.78rem; font-weight: 800; padding: 8px 14px; min-height: 36px; border-color: rgba(217,119,6,0.4); color: var(--color-orange);">
-                      AUCTION UNDO
+                    <button class="btn btn-secondary" onclick="setAdminNavTab('AUDIT'); renderCurrentView();" style="width: 100%; font-size: 0.78rem; font-weight: 800; padding: 8px 14px; min-height: 36px; border-color: rgba(16,185,129,0.4); color: var(--color-green);">
+                      AUDIT HISTORY
                     </button>
                   </div>
 
-                  <!-- CARD 4: DATABASE EXPORT -->
+                  <!-- CARD 6: EXPORT DATA -->
                   <div class="surface-subtle" style="padding: 16px; border-radius: 8px; display: flex; flex-direction: column; justify-content: space-between; border: 1px solid var(--border-subtle); background: #f8fafc;">
                     <div>
-                      <div style="font-weight: 800; font-size: 0.95rem; color: var(--text-bright); text-transform: uppercase;">DATABASE</div>
+                      <div style="font-weight: 800; font-size: 0.95rem; color: var(--text-bright); text-transform: uppercase;">6. EXPORT DATA</div>
                       <p style="font-size: 0.78rem; color: var(--text-muted); margin: 6px 0 14px 0; line-height: 1.4;">
-                        Export the ACC tournament dataset (Players, Squads, and Audit records).
+                        Export the ACC tournament dataset (Players CSV, Squads, and Audit records JSON).
                       </p>
                     </div>
-                    <button class="btn btn-secondary" onclick="triggerTournamentDatabaseExport()" style="width: 100%; font-size: 0.78rem; font-weight: 800; padding: 8px 14px; min-height: 36px; border-color: rgba(37,99,235,0.4); color: var(--blue-600);">
-                      EXPORT DATABASE
+                    <button class="btn btn-secondary" onclick="triggerTournamentDatabaseExport()" style="width: 100%; font-size: 0.78rem; font-weight: 800; padding: 8px 14px; min-height: 36px; border-color: rgba(37,99,235,0.4); color: var(--color-blue);">
+                      EXPORT DATA
                     </button>
                   </div>
                 </div>
 
-                <!-- CARD 5: DELETE ALL DATA (NUCLEAR) -->
-                <div style="padding: 16px; border-radius: 8px; display: flex; flex-direction: column; justify-content: space-between; border: 2px solid #dc2626; background: linear-gradient(135deg, #fef2f2, #fee2e2);">
+                <!-- CARD 7: WIPE ALL PARTICIPANT DATA (SUPER ADMIN DESTRUCTIVE OPERATION) -->
+                <div style="padding: 18px; border-radius: 10px; display: flex; flex-direction: column; justify-content: space-between; border: 2px solid #dc2626; background: linear-gradient(135deg, #fef2f2, #fee2e2);">
                   <div>
-                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
-                      <div style="width: 28px; height: 28px; border-radius: 50%; background: #dc2626; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-                        <svg width="14" height="14" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
-                          <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6"/>
-                        </svg>
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                      <div style="display: flex; align-items: center; gap: 8px;">
+                        <div style="width: 32px; height: 32px; border-radius: 50%; background: #dc2626; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                          <svg width="16" height="16" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+                            <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6"/>
+                          </svg>
+                        </div>
+                        <div style="font-weight: 900; font-size: 1rem; color: #dc2626; text-transform: uppercase; letter-spacing: 0.04em;">7. WIPE ALL PARTICIPANT DATA</div>
                       </div>
-                      <div style="font-weight: 900; font-size: 0.95rem; color: #dc2626; text-transform: uppercase; letter-spacing: 0.04em;">DELETE ALL DATA</div>
+                      <span class="status-badge" style="background: #dc2626; color: #fff; font-weight: 900; font-size: 0.65rem; padding: 2px 8px;">
+                        SUPER ADMIN ONLY
+                      </span>
                     </div>
-                    <p style="font-size: 0.78rem; color: #991b1b; margin: 0 0 14px 0; line-height: 1.5;">
-                      Permanently delete <strong>all players, franchises, squads, sold records</strong> and linked data. Trash is also emptied. Admin accounts & audit logs are preserved.
+                    <p style="font-size: 0.8125rem; color: #991b1b; margin: 0 0 16px 0; line-height: 1.5;">
+                      Permanently remove participant records and dependent tournament data from the selected dataset. This action cannot be undone through the normal application interface.
                     </p>
                   </div>
-                  <button class="btn btn-danger" onclick="openDeleteAllDataModal()" style="width: 100%; font-size: 0.78rem; font-weight: 900; padding: 8px 14px; min-height: 36px; background: #dc2626; border-color: #991b1b; letter-spacing: 0.06em;">
-                    🗑️ DELETE ALL DATA
+                  <button class="btn btn-danger" onclick="openWipeParticipantDatasetModal(1)" style="width: 100%; font-size: 0.8125rem; font-weight: 900; padding: 10px 16px; min-height: 40px; background: #dc2626; border-color: #991b1b; letter-spacing: 0.05em;">
+                    🗑️ WIPE ALL PARTICIPANT DATA
                   </button>
                 </div>
 

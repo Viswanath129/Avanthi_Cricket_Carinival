@@ -14,6 +14,7 @@ export { overrideBucket } from './admin/overrideBucket';
 export { manageUserRecord } from './admin/manageUserRecord';
 export { managePlayerRecord } from './admin/managePlayerRecord';
 export { recordAuditEvent } from './admin/recordAuditEvent';
+export { wipeParticipantDataset } from './admin/wipeParticipantDataset';
 export { registerPlayer } from './registration/registerPlayer';
 export { registerFranchise } from './registration/registerFranchise';
 export { aggregateLiveUsers } from './presence/aggregateLiveUsers';

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.projectPublicFranchise = exports.projectPublicPlayer = exports.getServerTime = exports.getTimeHttp = exports.aggregateLiveUsers = exports.registerFranchise = exports.registerPlayer = exports.recordAuditEvent = exports.managePlayerRecord = exports.manageUserRecord = exports.overrideBucket = exports.approveFranchise = exports.markPayment = exports.approvePlayer = exports.createEdition = exports.generateDraw = exports.pauseResumeAuction = exports.passFranchise = exports.skipLot = exports.openLot = exports.undoSale = exports.hammerLot = exports.placeBid = void 0;
+exports.projectPublicFranchise = exports.projectPublicPlayer = exports.getServerTime = exports.getTimeHttp = exports.aggregateLiveUsers = exports.registerFranchise = exports.registerPlayer = exports.wipeParticipantDataset = exports.recordAuditEvent = exports.managePlayerRecord = exports.manageUserRecord = exports.overrideBucket = exports.approveFranchise = exports.markPayment = exports.approvePlayer = exports.createEdition = exports.generateDraw = exports.pauseResumeAuction = exports.passFranchise = exports.skipLot = exports.openLot = exports.undoSale = exports.hammerLot = exports.placeBid = void 0;
 var placeBid_1 = require("./auction/placeBid");
 Object.defineProperty(exports, "placeBid", { enumerable: true, get: function () { return placeBid_1.placeBid; } });
 var hammerLot_1 = require("./auction/hammerLot");
@@ -33,6 +33,8 @@ var managePlayerRecord_1 = require("./admin/managePlayerRecord");
 Object.defineProperty(exports, "managePlayerRecord", { enumerable: true, get: function () { return managePlayerRecord_1.managePlayerRecord; } });
 var recordAuditEvent_1 = require("./admin/recordAuditEvent");
 Object.defineProperty(exports, "recordAuditEvent", { enumerable: true, get: function () { return recordAuditEvent_1.recordAuditEvent; } });
+var wipeParticipantDataset_1 = require("./admin/wipeParticipantDataset");
+Object.defineProperty(exports, "wipeParticipantDataset", { enumerable: true, get: function () { return wipeParticipantDataset_1.wipeParticipantDataset; } });
 var registerPlayer_1 = require("./registration/registerPlayer");
 Object.defineProperty(exports, "registerPlayer", { enumerable: true, get: function () { return registerPlayer_1.registerPlayer; } });
 var registerFranchise_1 = require("./registration/registerFranchise");

@@ -106,6 +106,21 @@ export default function AdminDashboardPage() {
   const [confirmInput, setConfirmInput] = useState('');
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
 
+  // Participant Dataset Wipe Modal State
+  const [wipeModalOpen, setWipeModalOpen] = useState(false);
+  const [wipeStep, setWipeStep] = useState<1 | 2 | 3>(1);
+  const [wipeConfirmPhrase, setWipeConfirmPhrase] = useState('');
+  const [wipeScopeAcknowledged, setWipeScopeAcknowledged] = useState(false);
+  const [wipeCounts, setWipeCounts] = useState<{
+    players: number;
+    franchises: number;
+    registrations: number;
+    verification: number;
+    auction: number;
+    media: number;
+  } | null>(null);
+  const [wipeLoading, setWipeLoading] = useState(false);
+
   const isSuperAdmin = userDoc?.role === 'SUPER_ADMIN';
 
   // Realtime Users Directory State
@@ -235,6 +250,74 @@ export default function AdminDashboardPage() {
       await write({ action, targetType: 'ADMINISTRATION', targetId, details, editionId: EDITION_ID });
     } catch {
       showToast('Audit event could not be persisted; operation was not recorded.', 'error');
+    }
+  };
+
+  const handleOpenWipeModal = async () => {
+    if (!isSuperAdmin) {
+      showToast('Super Admin authorization required to wipe participant data.', 'error');
+      return;
+    }
+    setWipeStep(1);
+    setWipeConfirmPhrase('');
+    setWipeScopeAcknowledged(false);
+    setWipeModalOpen(true);
+    setWipeLoading(true);
+
+    const defaultCounts = {
+      players: players.length + deletedPlayers.length,
+      franchises: franchises.length + deletedFranchises.length,
+      registrations: players.filter(p => p.registered || p.registration).length,
+      verification: players.filter(p => p.approvalStatus || p.verificationStatus).length,
+      auction: players.filter(p => p.status === 'SOLD' || p.status === 'UNSOLD').length,
+      media: players.filter(p => p.photo || p.photoUrl).length + franchises.filter(f => f.logo || f.logoUrl).length,
+    };
+    setWipeCounts(defaultCounts);
+
+    try {
+      const wipeCallable = httpsCallable(functions, 'wipeParticipantDataset');
+      const res: any = await wipeCallable({ action: 'PREVIEW', targetEdition: EDITION_ID });
+      if (res?.data?.counts) {
+        setWipeCounts({
+          players: res.data.counts.players ?? defaultCounts.players,
+          franchises: res.data.counts.franchises ?? defaultCounts.franchises,
+          registrations: res.data.counts.registrations ?? defaultCounts.registrations,
+          verification: res.data.counts.verification ?? defaultCounts.verification,
+          auction: res.data.counts.auctionRecords ?? defaultCounts.auction,
+          media: res.data.counts.mediaObjects ?? defaultCounts.media,
+        });
+      }
+    } catch {
+      // Graceful fallback to snapshot counts
+    } finally {
+      setWipeLoading(false);
+    }
+  };
+
+  const handleExecuteWipe = async () => {
+    if (wipeConfirmPhrase !== 'WIPE ACC PARTICIPANT DATA' || !wipeScopeAcknowledged) {
+      showToast('Exact confirmation phrase and scope acknowledgment are required.', 'error');
+      return;
+    }
+    setWipeLoading(true);
+    try {
+      const wipeCallable = httpsCallable(functions, 'wipeParticipantDataset');
+      await wipeCallable({
+        action: 'EXECUTE',
+        confirmedScope: EDITION_ID,
+        typedConfirmation: 'WIPE ACC PARTICIPANT DATA',
+        acknowledgedScope: true,
+      });
+      showToast('Participant dataset and dependent operational data wiped successfully.');
+      setWipeModalOpen(false);
+      setPlayers([]);
+      setFranchises([]);
+      setDeletedPlayers([]);
+      setDeletedFranchises([]);
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to wipe participant dataset.', 'error');
+    } finally {
+      setWipeLoading(false);
     }
   };
 
@@ -1372,55 +1455,101 @@ export default function AdminDashboardPage() {
                   <h2 className="font-display font-bold text-xl text-slate-900 mt-1">DATA MANAGEMENT</h2>
                   <p className="text-xs text-slate-500 mt-0.5">Manage ACC player, franchise, and account records.</p>
                 </div>
-                <div className="grid sm:grid-cols-2 gap-4">
-                  {/* CARD 1: USER MANAGEMENT */}
+                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {/* CARD 1: MANAGE PLAYERS */}
                   <div className="p-5 rounded-xl border border-slate-200 bg-slate-50 flex flex-col justify-between">
                     <div>
-                      <h3 className="font-bold text-sm text-slate-900 uppercase">USER MANAGEMENT</h3>
-                      <p className="text-xs text-slate-600 mt-1 mb-4">Search and manage ACC accounts. Filter players, franchises, team leads, and admin roles.</p>
+                      <h3 className="font-bold text-sm text-slate-900 uppercase">1. MANAGE PLAYERS</h3>
+                      <p className="text-xs text-slate-600 mt-1 mb-4">Search, inspect, edit, or archive canonical player profiles, base prices, and buckets.</p>
                     </div>
-                    <button onClick={() => { setDataView('USERS'); setActiveSection('datamanagement'); }} className="w-full py-2.5 px-4 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs uppercase tracking-wider transition-colors shadow-sm">
-                      MANAGE USERS
+                    <button onClick={() => setActiveSection('players')} className="w-full py-2.5 px-4 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs uppercase tracking-wider transition-colors shadow-sm">
+                      MANAGE PLAYERS
                     </button>
                   </div>
 
-                  {/* CARD 2: TRASH & RESTORE */}
+                  {/* CARD 2: MANAGE FRANCHISES */}
+                  <div className="p-5 rounded-xl border border-slate-200 bg-slate-50 flex flex-col justify-between">
+                    <div>
+                      <h3 className="font-bold text-sm text-slate-900 uppercase">2. MANAGE FRANCHISES</h3>
+                      <p className="text-xs text-slate-600 mt-1 mb-4">Configure teams, coordinator mappings, purse quotas, and captain assignments.</p>
+                    </div>
+                    <button onClick={() => setActiveSection('franchises')} className="w-full py-2.5 px-4 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs uppercase tracking-wider transition-colors shadow-sm">
+                      MANAGE FRANCHISES
+                    </button>
+                  </div>
+
+                  {/* CARD 3: REGISTRATION & VERIFICATION */}
+                  <div className="p-5 rounded-xl border border-slate-200 bg-slate-50 flex flex-col justify-between">
+                    <div>
+                      <h3 className="font-bold text-sm text-slate-900 uppercase">3. REGISTRATION & VERIFICATION</h3>
+                      <p className="text-xs text-slate-600 mt-1 mb-4">Process candidate applications, KYC proofs, and referral declarations.</p>
+                    </div>
+                    <button onClick={() => setActiveSection('verification')} className="w-full py-2.5 px-4 rounded-lg bg-white border border-blue-300 hover:bg-blue-50 text-blue-700 font-bold text-xs uppercase tracking-wider transition-colors">
+                      VERIFICATION QUEUE
+                    </button>
+                  </div>
+
+                  {/* CARD 4: TRASH & RESTORE */}
                   <div className="p-5 rounded-xl border border-slate-200 bg-slate-50 flex flex-col justify-between">
                     <div>
                       <div className="flex items-center justify-between">
-                        <h3 className="font-bold text-sm text-slate-900 uppercase">TRASH & RESTORE</h3>
+                        <h3 className="font-bold text-sm text-slate-900 uppercase">4. TRASH & RESTORE</h3>
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700">
-                          {deletedPlayers.length}
+                          {deletedPlayers.length + deletedFranchises.length}
                         </span>
                       </div>
-                      <p className="text-xs text-slate-600 mt-1 mb-4">Recover archived/deleted records. View audit history and restore previous statuses.</p>
+                      <p className="text-xs text-slate-600 mt-1 mb-4">Recover archived/deleted records and review historical removal statuses.</p>
                     </div>
                     <button onClick={() => { setDataView('TRASH'); setActiveSection('datamanagement'); }} className="w-full py-2.5 px-4 rounded-lg bg-white border border-rose-300 hover:bg-rose-50 text-rose-700 font-bold text-xs uppercase tracking-wider transition-colors">
                       OPEN TRASH
                     </button>
                   </div>
 
-                  {/* CARD 3: AUCTION CORRECTIONS */}
+                  {/* CARD 5: AUDIT HISTORY */}
                   <div className="p-5 rounded-xl border border-slate-200 bg-slate-50 flex flex-col justify-between">
                     <div>
-                      <h3 className="font-bold text-sm text-slate-900 uppercase">AUCTION CORRECTIONS</h3>
-                      <p className="text-xs text-slate-600 mt-1 mb-4">Review authoritative auction reversals. Reverse sold lots with instant purse and bucket restoration.</p>
+                      <h3 className="font-bold text-sm text-slate-900 uppercase">5. AUDIT HISTORY</h3>
+                      <p className="text-xs text-slate-600 mt-1 mb-4">Inspect immutable security ledger, role changes, overrides, and live floor logs.</p>
                     </div>
-                    <button onClick={() => { setDataView('CORRECTIONS'); setActiveSection('datamanagement'); }} className="w-full py-2.5 px-4 rounded-lg bg-white border border-amber-300 hover:bg-amber-50 text-amber-700 font-bold text-xs uppercase tracking-wider transition-colors">
-                      AUCTION UNDO
+                    <button onClick={() => setActiveSection('audit')} className="w-full py-2.5 px-4 rounded-lg bg-white border border-emerald-300 hover:bg-emerald-50 text-emerald-700 font-bold text-xs uppercase tracking-wider transition-colors">
+                      AUDIT HISTORY
                     </button>
                   </div>
 
-                  {/* CARD 4: DATABASE */}
+                  {/* CARD 6: EXPORT DATA */}
                   <div className="p-5 rounded-xl border border-slate-200 bg-slate-50 flex flex-col justify-between">
                     <div>
-                      <h3 className="font-bold text-sm text-slate-900 uppercase">DATABASE</h3>
-                      <p className="text-xs text-slate-600 mt-1 mb-4">Export the ACC tournament dataset (Players, Squads, and Audit records).</p>
+                      <h3 className="font-bold text-sm text-slate-900 uppercase">6. EXPORT DATA</h3>
+                      <p className="text-xs text-slate-600 mt-1 mb-4">Export the ACC tournament dataset (Players CSV, Squads, and Audit records).</p>
                     </div>
                     <button onClick={() => setActiveSection('export')} className="w-full py-2.5 px-4 rounded-lg bg-white border border-blue-300 hover:bg-blue-50 text-blue-700 font-bold text-xs uppercase tracking-wider transition-colors">
                       EXPORT DATABASE
                     </button>
                   </div>
+                </div>
+
+                {/* CARD 7: WIPE ALL PARTICIPANT DATA */}
+                <div className="p-5 rounded-xl border-2 border-red-500 bg-gradient-to-r from-red-50 to-rose-50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-full bg-red-600 flex items-center justify-center text-white">
+                        <Trash2 size={13} />
+                      </div>
+                      <h3 className="font-bold text-sm text-red-900 uppercase tracking-wide">7. WIPE ALL PARTICIPANT DATA</h3>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-600 text-white font-mono">
+                        SUPER ADMIN ONLY
+                      </span>
+                    </div>
+                    <p className="text-xs text-red-700 mt-1 max-w-2xl">
+                      Permanently remove participant records and dependent tournament data from the selected dataset. This action cannot be undone through the normal application interface.
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleOpenWipeModal}
+                    className="shrink-0 py-2.5 px-5 rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold text-xs uppercase tracking-wider transition-colors shadow-sm"
+                  >
+                    WIPE PARTICIPANT DATA
+                  </button>
                 </div>
 
                 {/* DEMO RESET SAFETY NOTICE */}
@@ -2303,6 +2432,187 @@ export default function AdminDashboardPage() {
         </div>
       )}
       {managementPlayer && <div className="fixed inset-0 z-[70] bg-slate-900/40 flex justify-end" onClick={()=>setManagementPlayer(null)}><aside onClick={e=>e.stopPropagation()} className="h-full w-full max-w-2xl overflow-y-auto bg-white p-5 shadow-2xl text-slate-800"><div className="flex justify-between"><div><h2 className="text-xl font-black">PLAYER PROFILE</h2><p className="text-sm text-slate-500">Historical auction records remain visible for archived players.</p></div><button onClick={()=>setManagementPlayer(null)} className="rounded-lg bg-slate-100 px-3 py-1">CLOSE</button></div><div className="mt-5 flex items-center gap-4"><img src={managementPlayer.photoUrl||''} alt="" className="h-20 w-20 rounded-xl bg-slate-100 object-cover"/><div><h3 className="text-lg font-bold">{managementPlayer.name}</h3><p className="font-mono text-sm text-slate-500">{managementPlayer.rollNumber||managementPlayer.roll}</p></div></div><div className="mt-5 grid grid-cols-2 gap-3">{[['Mobile',managementPlayer.mobile],['Email',managementPlayer.email],['Academic program',managementPlayer.program||managementPlayer.academic?.program],['Branch',managementPlayer.branch||managementPlayer.academic?.branch],['Year',managementPlayer.year||managementPlayer.academic?.studyYear],['Bucket',managementPlayer.bucket||managementPlayer.academic?.bucket],['Skills',(managementPlayer.skills||[]).join?.(', ')||managementPlayer.skills],['CricHeroes',managementPlayer.cricHeroesUrl],['Base price',managementPlayer.basePrice],['Approval status',managementPlayer.approvalStatus],['Payment status',managementPlayer.paid?'PAID':'UNPAID']].map(([k,v])=><div key={String(k)} className="rounded-lg bg-slate-50 p-3"><small className="block text-slate-500">{k}</small><b className="break-words">{String(v||'—')}</b></div>)}</div><h3 className="mt-7 text-lg font-bold">AUCTION HISTORY</h3>{playerHistory.length===0?<p className="mt-2 rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No linked lots, bids, or purchases were found.</p>:<div className="mt-2 space-y-2">{playerHistory.map(row=><div key={`${row.type}-${row.id}`} className="flex justify-between rounded-lg border border-slate-200 p-3 text-sm"><span><b>{row.type}</b> · Lot #{row.drawNumber||row.lotNumber||row.lotId||'—'} · {row.franchiseName||'—'}</span><span>{row.price||row.amount||row.status||'—'} Cr</span></div>)}</div>}</aside></div>}
+      {/* 3-Step Wipe All Participant Data Modal */}
+      {wipeModalOpen && (
+        <div className="fixed inset-0 z-[80] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-xl rounded-2xl bg-white border border-red-200 shadow-2xl p-6 text-slate-800 space-y-4">
+            {/* Step 1 */}
+            {wipeStep === 1 && (
+              <>
+                <div className="p-4 rounded-xl bg-red-50 border border-red-200">
+                  <div className="flex items-center gap-2">
+                    <Trash2 className="text-red-600" size={20} />
+                    <h3 className="font-display font-black text-lg text-red-950 uppercase">
+                      WIPE ALL PARTICIPANT DATA
+                    </h3>
+                  </div>
+                  <span className="text-[11px] font-mono font-bold text-red-700 tracking-wider">
+                    STEP 1 OF 3 — SCOPE & RECORD ENUMERATION
+                  </span>
+                  <p className="text-xs text-red-800 mt-2">
+                    Permanently remove participant records and dependent tournament data from the selected dataset. This action cannot be undone through the normal application interface.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Selected Edition:</span>
+                    <span className="font-mono font-bold text-slate-900">ACC 2026 (acc-2026)</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Environment:</span>
+                    <span className="px-2 py-0.5 rounded font-mono font-bold text-[10px] bg-blue-100 text-blue-800">LIVE / PRODUCTION</span>
+                  </div>
+                </div>
+
+                <div className="border border-slate-200 rounded-xl p-4 bg-white">
+                  <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                    Discovered Participant & Operational Records
+                  </div>
+                  {wipeLoading && !wipeCounts ? (
+                    <div className="text-xs text-slate-400 font-mono py-4 text-center">Loading live record counts...</div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                      <div className="p-2 bg-slate-50 rounded border border-slate-100 flex justify-between">
+                        <span>Players found:</span>
+                        <strong className="text-red-600">{wipeCounts?.players ?? 0}</strong>
+                      </div>
+                      <div className="p-2 bg-slate-50 rounded border border-slate-100 flex justify-between">
+                        <span>Franchises found:</span>
+                        <strong className="text-red-600">{wipeCounts?.franchises ?? 0}</strong>
+                      </div>
+                      <div className="p-2 bg-slate-50 rounded border border-slate-100 flex justify-between">
+                        <span>Registrations found:</span>
+                        <strong className="text-red-600">{wipeCounts?.registrations ?? 0}</strong>
+                      </div>
+                      <div className="p-2 bg-slate-50 rounded border border-slate-100 flex justify-between">
+                        <span>Verification records:</span>
+                        <strong className="text-red-600">{wipeCounts?.verification ?? 0}</strong>
+                      </div>
+                      <div className="p-2 bg-slate-50 rounded border border-slate-100 flex justify-between">
+                        <span>Auction lots & bids:</span>
+                        <strong className="text-red-600">{wipeCounts?.auction ?? 0}</strong>
+                      </div>
+                      <div className="p-2 bg-slate-50 rounded border border-slate-100 flex justify-between">
+                        <span>Media objects:</span>
+                        <strong className="text-red-600">{wipeCounts?.media ?? 0}</strong>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <button onClick={() => setWipeModalOpen(false)} className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold">
+                    CANCEL
+                  </button>
+                  <button onClick={() => setWipeStep(2)} className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold uppercase tracking-wider">
+                    REVIEW DEPENDENCIES →
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* Step 2 */}
+            {wipeStep === 2 && (
+              <>
+                <div className="p-4 rounded-xl bg-red-50 border border-red-200">
+                  <h3 className="font-display font-black text-lg text-red-950 uppercase">
+                    WIPE ALL PARTICIPANT DATA
+                  </h3>
+                  <span className="text-[11px] font-mono font-bold text-red-700 tracking-wider">
+                    STEP 2 OF 3 — PREVIEW DEPENDENCIES & PROTECTED RESOURCES
+                  </span>
+                </div>
+
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl space-y-1 text-xs">
+                  <div className="font-bold text-rose-900 uppercase">Affected Collections to be Wiped:</div>
+                  <div className="text-[11px] text-rose-800 leading-relaxed font-mono">
+                    Phase 1 (Auction Operations): bids, lots, sales, acquisitions, round2, allotments, purseTransactions, purseLedger<br />
+                    Phase 2 (Registry & Projections): players, publicPlayers, deletedPlayers, registrations, referrals, franchises, franchiseUsers<br />
+                    Phase 3 (Participant Accounts & Media): non-admin /users profiles, Storage /players/, /franchises/<br />
+                    Phase 4 (State Reset): live auction state doc reset to pristine IDLE
+                  </div>
+                </div>
+
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl space-y-1 text-xs">
+                  <div className="font-bold text-emerald-900 uppercase">✓ Strictly Protected Resources (Never Removed):</div>
+                  <ul className="text-[11px] text-emerald-800 list-disc list-inside space-y-0.5">
+                    <li>Super Admin account ({userDoc?.email || user?.email}) & all ADMIN accounts</li>
+                    <li>Tamper-evident Security Audit Log (auditLogs ledger is preserved and appended)</li>
+                    <li>System settings & tournament edition metadata documents</li>
+                    <li>Database backup snapshots in /backups</li>
+                  </ul>
+                </div>
+
+                <div className="flex justify-between gap-2 pt-2">
+                  <button onClick={() => setWipeStep(1)} className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold">
+                    ← BACK TO SCOPE
+                  </button>
+                  <button onClick={() => setWipeStep(3)} className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold uppercase tracking-wider">
+                    PROCEED TO CONFIRMATION →
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* Step 3 */}
+            {wipeStep === 3 && (
+              <>
+                <div className="p-4 rounded-xl bg-red-50 border border-red-200">
+                  <h3 className="font-display font-black text-lg text-red-950 uppercase">
+                    WIPE ALL PARTICIPANT DATA
+                  </h3>
+                  <span className="text-[11px] font-mono font-bold text-red-700 tracking-wider">
+                    STEP 3 OF 3 — EXPLICIT SECURITY CONFIRMATION
+                  </span>
+                </div>
+
+                <div className="p-3 bg-red-100 border border-red-300 rounded-xl text-xs text-red-900 leading-relaxed font-medium">
+                  <strong>PERMANENT DELETION WARNING:</strong> This action permanently purges participant records, team allocations, and auction operations from the database. It cannot be reversed.
+                </div>
+
+                <label className="flex items-start gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer text-xs text-slate-800">
+                  <input
+                    type="checkbox"
+                    checked={wipeScopeAcknowledged}
+                    onChange={e => setWipeScopeAcknowledged(e.target.checked)}
+                    className="mt-0.5 accent-red-600"
+                  />
+                  <span>
+                    I have verified the record counts and understand that all participant data and dependent auction records will be permanently removed.
+                  </span>
+                </label>
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-slate-700">
+                    Type <strong className="text-red-600 font-mono">WIPE ACC PARTICIPANT DATA</strong> to confirm:
+                  </label>
+                  <input
+                    type="text"
+                    value={wipeConfirmPhrase}
+                    onChange={e => setWipeConfirmPhrase(e.target.value.toUpperCase())}
+                    placeholder="WIPE ACC PARTICIPANT DATA"
+                    className="w-full px-3 py-2 border-2 border-red-400 focus:border-red-600 rounded-xl font-mono text-sm uppercase text-red-900"
+                  />
+                </div>
+
+                <div className="flex justify-between gap-2 pt-2">
+                  <button onClick={() => setWipeStep(2)} className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold">
+                    ← BACK
+                  </button>
+                  <button
+                    onClick={handleExecuteWipe}
+                    disabled={wipeLoading || wipeConfirmPhrase !== 'WIPE ACC PARTICIPANT DATA' || !wipeScopeAcknowledged}
+                    className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white text-xs font-bold uppercase tracking-wider transition-all"
+                  >
+                    {wipeLoading ? 'PURGING DATASET...' : 'PERMANENTLY WIPE DATASET'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       {editDraft && <div className="fixed inset-0 z-[70] bg-slate-900/40 flex items-center justify-center p-3"><section className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5 text-slate-800 shadow-2xl"><h2 className="text-xl font-black">EDIT PLAYER</h2><p className="mb-4 text-sm text-slate-500">Review field changes before saving. The successful update is recorded in the canonical audit log.</p><div className="grid sm:grid-cols-2 gap-3">{[['name','Name'],['photoUrl','Photo URL'],['mobile','Mobile'],['email','Email'],['program','Academic program'],['branch','Branch'],['year','Year'],['bucket','Bucket'],['basePrice','Base price'],['cricHeroesUrl','CricHeroes']].map(([key,label])=><label key={key} className="text-xs font-semibold text-slate-600">{label}<input value={editDraft[key]??''} onChange={e=>setEditDraft((d:any)=>({...d,[key]:e.target.value}))} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"/></label>)}</div><label className="mt-3 block text-xs font-semibold text-slate-600">Skills (comma separated)<input value={(editDraft.skills||[]).join?.(', ')||editDraft.skills||''} onChange={e=>setEditDraft((d:any)=>({...d,skills:e.target.value.split(',').map((x:string)=>x.trim()).filter(Boolean)}))} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"/></label><div className="mt-4 rounded-xl bg-blue-50 p-3"><b className="text-sm">CHANGES TO SAVE</b>{['name','photoUrl','mobile','email','program','branch','year','bucket','basePrice','cricHeroesUrl','skills'].filter(k=>JSON.stringify(editDraft[k]??'')!==JSON.stringify((players.find(p=>p.id===editDraft.id)||{})[k]??'')).map(k=><div key={k} className="mt-1 text-xs"><b>{k}</b>: {String((players.find(p=>p.id===editDraft.id)||{})[k]??'—')} → {String(editDraft[k]??'—')}</div>)}</div><div className="mt-4 flex justify-end gap-2"><button onClick={()=>setEditDraft(null)} className="rounded-lg border px-4 py-2">CANCEL</button><button disabled={managementBusy||!isSuperAdmin} onClick={savePlayerEdit} className="rounded-lg bg-blue-700 px-4 py-2 font-bold text-white disabled:opacity-50">{managementBusy?'SAVING…':'SAVE CHANGES'}</button></div></section></div>}
     </div>
   );

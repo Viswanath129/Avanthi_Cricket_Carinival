@@ -20,6 +20,7 @@ export interface Capabilities {
   canPurgeTrash: boolean;
   canCreateEdition: boolean;
   canViewAuditLog: boolean;
+  canWipeData: boolean;
 }
 
 export function useCapabilities(modeOverride?: 'SUPER_ADMIN' | 'OPERATOR'): Capabilities {
@@ -50,6 +51,7 @@ export function useCapabilities(modeOverride?: 'SUPER_ADMIN' | 'OPERATOR'): Capa
       canPurgeTrash: true,
       canCreateEdition: true,
       canViewAuditLog: true,
+      canWipeData: true,
     };
   }
 
@@ -74,5 +76,6 @@ export function useCapabilities(modeOverride?: 'SUPER_ADMIN' | 'OPERATOR'): Capa
     canPurgeTrash: false, // Forbidden for Operator
     canCreateEdition: false, // Forbidden for Operator
     canViewAuditLog: true,
+    canWipeData: false,
   };
 }
