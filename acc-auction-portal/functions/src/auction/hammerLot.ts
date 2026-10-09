@@ -20,7 +20,7 @@ export const hammerLot = onCall({ maxInstances: 5 }, async (request) => {
       throw new HttpsError('failed-precondition', `Cannot hammer. Lot status is ${lot.status}, expected LIVE.`);
     }
     
-    const hasHighestBidder = !!lot.highestBidderFranchiseId;
+    const hasHighestBidder = Boolean(lot.highestBidderFranchiseId || lot.highestBidderId);
 
     // Strict validation of operator intent
     if (expectedOutcome === 'UNSOLD' && hasHighestBidder) {
@@ -28,6 +28,20 @@ export const hammerLot = onCall({ maxInstances: 5 }, async (request) => {
     }
     if (expectedOutcome === 'SOLD' && !hasHighestBidder) {
       throw new HttpsError('failed-precondition', 'Cannot confirm SOLD: No winning bid was placed on this lot.');
+    }
+
+    // UNSOLD requires expiry and zero accepted valid bids
+    if (!hasHighestBidder) {
+      if (lot.timerDeadline) {
+        const deadlineMs = lot.timerDeadline.toMillis
+          ? lot.timerDeadline.toMillis()
+          : (typeof lot.timerDeadline.seconds === 'number'
+            ? lot.timerDeadline.seconds * 1000
+            : Number(lot.timerDeadline));
+        if (Date.now() < deadlineMs) {
+          throw new HttpsError('failed-precondition', 'Cannot confirm UNSOLD: Auction countdown timer has not expired yet.');
+        }
+      }
     }
 
     const newStatus = hasHighestBidder ? 'SOLD' : 'UNSOLD';

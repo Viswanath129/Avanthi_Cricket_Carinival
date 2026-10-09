@@ -21,11 +21,39 @@ export const openLot = onCall({ maxInstances: 5 }, async (request) => {
     
     // Set initial timer to 30 seconds
     const timerDeadline = admin.firestore.Timestamp.fromMillis(Date.now() + 30000);
+
+    // Enrich player metadata if not already present on lot
+    let pName = lot.playerName;
+    let pPhoto = lot.photoUrl || lot.playerPhoto;
+    let pRoll = lot.rollNumber;
+    let pBucket = lot.bucket || lot.bucketId;
+
+    if ((!pName || !pPhoto || !pRoll) && lot.playerId) {
+      try {
+        const pSnap = await txn.get(db.collection('players').doc(lot.playerId));
+        if (pSnap.exists) {
+          const pData = pSnap.data()!;
+          pName = pName || pData.name;
+          pPhoto = pPhoto || pData.photoUrl;
+          pRoll = pRoll || pData.rollNumber;
+          pBucket = pBucket || pData.academic?.bucket || pData.bucket;
+        }
+      } catch (err) {
+        console.warn('[OpenLot] Metadata enrichment fallback:', err);
+      }
+    }
     
     txn.update(lotRef, {
       status: 'LIVE',
       currentPrice: lot.basePrice,
       highestBidderFranchiseId: null,
+      highestBidderId: null,
+      highestBidderName: null,
+      playerName: pName || 'Player',
+      photoUrl: pPhoto || null,
+      playerPhoto: pPhoto || null,
+      rollNumber: pRoll || null,
+      bucket: pBucket || null,
       timerDeadline,
       timerDurationMs: 30000,
       timerRunning: true,

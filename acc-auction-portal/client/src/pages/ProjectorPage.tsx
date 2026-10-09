@@ -152,32 +152,65 @@ export default function ProjectorPage() {
     };
   }, [auctionState?.currentLotId]);
 
-  // Synchronized countdown timer
+  // Synchronized countdown timer (Authoritative server deadline derivation)
   useEffect(() => {
-    if (!currentLot?.timerDeadline || auctionState?.status === 'PAUSED') {
-      if (auctionState?.status === 'PAUSED') {
-        const pausedSec = typeof auctionState?.pausedRemainingMs === 'number'
-          ? Math.max(0, Math.ceil(auctionState.pausedRemainingMs / 1000))
-          : timeLeft;
-        setTimeLeft(pausedSec);
-      } else {
-        setTimeLeft(0);
-      }
+    // 1. If no lot active or lot is not live/available, timer is inactive (0)
+    if (!currentLot || (currentLot.status !== 'LIVE' && currentLot.status !== 'AVAILABLE')) {
+      setTimeLeft(0);
       return;
     }
 
+    // 2. If auction is paused, derive fixed remaining seconds
+    if (auctionState?.status === 'PAUSED' || currentLot.timerRunning === false) {
+      const pausedMs = typeof currentLot.pausedRemainingMs === 'number'
+        ? currentLot.pausedRemainingMs
+        : (typeof auctionState?.pausedRemainingMs === 'number' ? auctionState.pausedRemainingMs : 0);
+      setTimeLeft(Math.max(0, Math.ceil(pausedMs / 1000)));
+      return;
+    }
+
+    // 3. Live countdown from authoritative deadline
+    const deadlineMs = currentLot.timerDeadline
+      ? (currentLot.timerDeadline.toMillis
+        ? currentLot.timerDeadline.toMillis()
+        : (typeof currentLot.timerDeadline.seconds === 'number'
+          ? currentLot.timerDeadline.seconds * 1000
+          : Number(currentLot.timerDeadline)))
+      : null;
+
+    if (!deadlineMs) {
+      setTimeLeft(0);
+      return;
+    }
+
+    const calcRemaining = () => {
+      const serverNow = Date.now() + serverOffset;
+      const rem = Math.max(0, Math.ceil((deadlineMs - serverNow) / 1000));
+      setTimeLeft(rem);
+      return rem;
+    };
+
+    const initial = calcRemaining();
+    if (initial <= 0) return;
+
     const interval = setInterval(() => {
-      const nowWithOffset = Date.now() + serverOffset;
-      const deadline = currentLot.timerDeadline.toMillis 
-        ? currentLot.timerDeadline.toMillis() 
-        : Number(currentLot.timerDeadline);
-      const remainingMs = deadline - nowWithOffset;
-      const sec = Math.max(0, Math.ceil(remainingMs / 1000));
-      setTimeLeft(sec);
+      const rem = calcRemaining();
+      if (rem <= 0) {
+        clearInterval(interval);
+      }
     }, 100);
 
     return () => clearInterval(interval);
-  }, [currentLot?.timerDeadline, auctionState?.status, auctionState?.pausedRemainingMs, serverOffset]);
+  }, [
+    currentLot?.id,
+    currentLot?.status,
+    currentLot?.timerRunning,
+    currentLot?.pausedRemainingMs,
+    currentLot?.timerDeadline?.seconds || currentLot?.timerDeadline,
+    auctionState?.status,
+    auctionState?.pausedRemainingMs,
+    serverOffset,
+  ]);
 
   const highestBid = bids[0];
   const currentBidPrice = highestBid?.amount || currentLot?.currentPrice || currentLot?.basePrice || 50;
@@ -323,14 +356,28 @@ export default function ProjectorPage() {
             </div>
           </div>
 
-          {/* Center Dominant Price */}
+          {/* Center Dominant Price or Time Expired Unsold Notice */}
           <div className="text-center py-6 my-auto">
-            <span className="font-mono text-sm xl:text-base font-extrabold uppercase tracking-widest text-amber-400">
-              CURRENT BID
-            </span>
-            <div className="text-7xl xl:text-9xl font-black font-mono text-amber-400 tabular-nums tracking-tight drop-shadow-[0_10px_25px_rgba(245,158,11,0.25)]">
-              {currentBidPrice} <span className="text-3xl xl:text-4xl text-slate-600 font-sans font-bold">CREDITS</span>
-            </div>
+            {timeLeft <= 0 && (currentLot?.status === 'LIVE' || currentLot?.status === 'AVAILABLE') && !leaderId ? (
+              <div className="flex flex-col items-center justify-center gap-4 animate-in zoom-in-95 duration-300">
+                <img src="/unsold.svg" alt="Unsold" className="w-40 h-40 object-contain drop-shadow-2xl animate-pulse" />
+                <div className="font-mono text-3xl font-black text-rose-600 uppercase tracking-widest bg-rose-50 border-2 border-rose-300 px-8 py-2 rounded-2xl shadow-sm">
+                  TIME EXPIRED · UNSOLD
+                </div>
+                <div className="font-mono text-base font-bold text-slate-500">
+                  Zero bids placed · Awaiting hammer to finalize for Round 2 recall
+                </div>
+              </div>
+            ) : (
+              <>
+                <span className="font-mono text-sm xl:text-base font-extrabold uppercase tracking-widest text-amber-400">
+                  CURRENT BID
+                </span>
+                <div className="text-7xl xl:text-9xl font-black font-mono text-amber-400 tabular-nums tracking-tight drop-shadow-[0_10px_25px_rgba(245,158,11,0.25)]">
+                  {currentBidPrice} <span className="text-3xl xl:text-4xl text-slate-600 font-sans font-bold">CREDITS</span>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Leading Bidder Strip */}

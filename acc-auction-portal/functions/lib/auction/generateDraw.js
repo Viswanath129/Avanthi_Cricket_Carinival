@@ -55,8 +55,8 @@ exports.generateDraw = (0, https_1.onCall)({ maxInstances: 2 }, async (request) 
         const seenPlayerIds = new Set();
         unsoldSnap.docs.forEach((doc) => {
             const data = doc.data();
-            // Safety filter: Permanently exclude all players marked SOLD or already acquired
-            if (data.status !== 'SOLD' && data.auctionStatus !== 'SOLD' && !seenPlayerIds.has(doc.id)) {
+            // Safety filter: Permanently exclude all players marked SOLD and require confirmed Round 1 unsold
+            if (data.status !== 'SOLD' && data.auctionStatus !== 'SOLD' && (data.round1Unsold === true || data.status === 'UNSOLD') && !seenPlayerIds.has(doc.id)) {
                 seenPlayerIds.add(doc.id);
                 candidatePlayers.push({ id: doc.id, data });
             }
@@ -107,7 +107,14 @@ exports.generateDraw = (0, https_1.onCall)({ maxInstances: 2 }, async (request) 
             batch.set(lotRef, {
                 editionId,
                 playerId: player.id,
+                playerName: player.data.name || 'Player',
+                photoUrl: player.data.photoUrl || null,
+                playerPhoto: player.data.photoUrl || null,
+                rollNumber: player.data.rollNumber || null,
+                branch: player.data.academic?.branch || null,
+                year: player.data.academic?.studyYear || null,
                 bucketId,
+                bucket: bucketId,
                 round: roundNum,
                 sequence: globalSequence,
                 drawNumber: index + 1,
@@ -115,8 +122,12 @@ exports.generateDraw = (0, https_1.onCall)({ maxInstances: 2 }, async (request) 
                 basePrice: roundNum === 2 ? 20 : (player.data.basePrice || 20),
                 currentPrice: roundNum === 2 ? 20 : (player.data.basePrice || 20),
                 highestBidderFranchiseId: null,
+                highestBidderId: null,
+                highestBidderName: null,
                 timerDeadline: null,
                 timerDurationMs: 0,
+                timerRunning: false,
+                pausedRemainingMs: null,
                 version: 0,
             });
         });

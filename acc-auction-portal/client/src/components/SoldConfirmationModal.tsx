@@ -81,35 +81,45 @@ export default function SoldConfirmationModal({
           {isUnsold ? 'HAMMER CONFIRMED — UNSOLD' : 'Hammer Sale Confirmed'}
         </div>
 
-        {/* Player Photo / Default Avatar */}
-        <div className="relative mx-auto my-3 w-24 h-24 sm:w-28 sm:h-28 flex items-center justify-center">
-          {soldData.photoUrl && soldData.photoUrl.trim() !== '' && !soldData.photoUrl.includes('acc-logo.png') ? (
+        {/* Player Photo or Unsold Stamp Animation */}
+        {isUnsold ? (
+          <div className="relative mx-auto my-2 w-36 h-36 flex flex-col items-center justify-center">
             <img
-              src={soldData.photoUrl}
-              alt={soldData.playerName}
-              className={`w-full h-full object-cover rounded-full border-4 ${isUnsold ? 'border-amber-500 shadow-amber-500/20' : 'border-emerald-500 shadow-emerald-500/20'} shadow-xl`}
-            />
-          ) : (
-            <div className={`w-full h-full rounded-full bg-gradient-to-br ${isUnsold ? 'from-amber-50 to-amber-100 border-4 border-amber-500 text-amber-700 shadow-amber-500/20' : 'from-emerald-50 to-emerald-100 border-4 border-emerald-500 text-emerald-700 shadow-emerald-500/20'} flex items-center justify-center font-display font-extrabold text-3xl sm:text-4xl shadow-xl`}>
-              {initials}
-            </div>
-          )}
-
-          {/* Gavel icon overlay */}
-          <div className={`absolute -bottom-2 -right-1 w-10 h-10 rounded-full bg-white border-2 ${isUnsold ? 'border-amber-500' : 'border-emerald-500'} shadow-md flex items-center justify-center overflow-hidden`}>
-            <img
-              src="/auction-hammer.svg"
-              alt="Gavel"
-              className="w-7 h-7 object-contain"
-              onError={(e) => {
-                (e.currentTarget as HTMLElement).style.display = 'none';
-                if (e.currentTarget.parentElement) {
-                  e.currentTarget.parentElement.innerText = '🔨';
-                }
-              }}
+              src="/unsold.svg"
+              alt="UNSOLD"
+              className="w-full h-full object-contain drop-shadow-xl animate-in zoom-in-75 duration-300"
             />
           </div>
-        </div>
+        ) : (
+          <div className="relative mx-auto my-3 w-24 h-24 sm:w-28 sm:h-28 flex items-center justify-center">
+            {soldData.photoUrl && soldData.photoUrl.trim() !== '' && !soldData.photoUrl.includes('acc-logo.png') ? (
+              <img
+                src={soldData.photoUrl}
+                alt={soldData.playerName}
+                className="w-full h-full object-cover rounded-full border-4 border-emerald-500 shadow-emerald-500/20 shadow-xl"
+              />
+            ) : (
+              <div className="w-full h-full rounded-full bg-gradient-to-br from-emerald-50 to-emerald-100 border-4 border-emerald-500 text-emerald-700 shadow-emerald-500/20 flex items-center justify-center font-display font-extrabold text-3xl sm:text-4xl shadow-xl">
+                {initials}
+              </div>
+            )}
+
+            {/* Gavel icon overlay */}
+            <div className="absolute -bottom-2 -right-1 w-10 h-10 rounded-full bg-white border-2 border-emerald-500 shadow-md flex items-center justify-center overflow-hidden">
+              <img
+                src="/auction-hammer.svg"
+                alt="Gavel"
+                className="w-7 h-7 object-contain"
+                onError={(e) => {
+                  (e.currentTarget as HTMLElement).style.display = 'none';
+                  if (e.currentTarget.parentElement) {
+                    e.currentTarget.parentElement.innerText = '🔨';
+                  }
+                }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* SOLD / UNSOLD Indicator */}
         <div className={`text-3xl sm:text-4xl font-display font-black ${isUnsold ? 'text-amber-600' : 'text-emerald-600'} tracking-tight leading-none mt-2`}>

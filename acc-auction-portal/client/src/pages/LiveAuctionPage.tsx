@@ -207,32 +207,65 @@ export default function LiveAuctionPage() {
     };
   }, [auctionState?.currentLotId]);
 
-  // Synchronized countdown timer
+  // Synchronized countdown timer (Authoritative server deadline derivation)
   useEffect(() => {
-    if (!currentLot?.timerDeadline || auctionState?.status === 'PAUSED') {
-      if (auctionState?.status === 'PAUSED') {
-        const pausedSec = typeof auctionState?.pausedRemainingMs === 'number'
-          ? Math.max(0, Math.ceil(auctionState.pausedRemainingMs / 1000))
-          : timeLeft;
-        setTimeLeft(pausedSec);
-      } else {
-        setTimeLeft(0);
-      }
+    // 1. If no lot active or lot is not live/available, timer is inactive (0)
+    if (!currentLot || (currentLot.status !== 'LIVE' && currentLot.status !== 'AVAILABLE')) {
+      setTimeLeft(0);
       return;
     }
 
+    // 2. If auction is paused, derive fixed remaining seconds
+    if (auctionState?.status === 'PAUSED' || currentLot.timerRunning === false) {
+      const pausedMs = typeof currentLot.pausedRemainingMs === 'number'
+        ? currentLot.pausedRemainingMs
+        : (typeof auctionState?.pausedRemainingMs === 'number' ? auctionState.pausedRemainingMs : 0);
+      setTimeLeft(Math.max(0, Math.ceil(pausedMs / 1000)));
+      return;
+    }
+
+    // 3. Live countdown from authoritative deadline
+    const deadlineMs = currentLot.timerDeadline
+      ? (currentLot.timerDeadline.toMillis
+        ? currentLot.timerDeadline.toMillis()
+        : (typeof currentLot.timerDeadline.seconds === 'number'
+          ? currentLot.timerDeadline.seconds * 1000
+          : Number(currentLot.timerDeadline)))
+      : null;
+
+    if (!deadlineMs) {
+      setTimeLeft(0);
+      return;
+    }
+
+    const calcRemaining = () => {
+      const serverNow = Date.now() + serverOffset;
+      const rem = Math.max(0, Math.ceil((deadlineMs - serverNow) / 1000));
+      setTimeLeft(rem);
+      return rem;
+    };
+
+    const initial = calcRemaining();
+    if (initial <= 0) return;
+
     const interval = setInterval(() => {
-      const nowWithOffset = Date.now() + serverOffset;
-      const deadline = currentLot.timerDeadline.toMillis 
-        ? currentLot.timerDeadline.toMillis() 
-        : Number(currentLot.timerDeadline);
-      const remainingMs = deadline - nowWithOffset;
-      const sec = Math.max(0, Math.ceil(remainingMs / 1000));
-      setTimeLeft(sec);
+      const rem = calcRemaining();
+      if (rem <= 0) {
+        clearInterval(interval);
+      }
     }, 100);
 
     return () => clearInterval(interval);
-  }, [currentLot?.timerDeadline, auctionState?.status, auctionState?.pausedRemainingMs, serverOffset]);
+  }, [
+    currentLot?.id,
+    currentLot?.status,
+    currentLot?.timerRunning,
+    currentLot?.pausedRemainingMs,
+    currentLot?.timerDeadline?.seconds || currentLot?.timerDeadline,
+    auctionState?.status,
+    auctionState?.pausedRemainingMs,
+    serverOffset,
+  ]);
 
   const bucketMinimums: Record<BucketId, number> = useMemo(() => ({
     B1: 1,
@@ -523,17 +556,31 @@ export default function LiveAuctionPage() {
               </div>
             </div>
 
-            {/* Center: Dominant Current Bid */}
+            {/* Center: Dominant Current Bid or Expired / Unsold Banner */}
             <div className="py-6 text-center my-auto">
-              <span className="text-xs uppercase font-mono text-amber-400/80 tracking-widest font-extrabold">
-                CURRENT BID
-              </span>
-              <div className="text-5xl sm:text-6xl md:text-7xl font-extrabold font-mono text-amber-400 tabular-nums tracking-tight mt-1 drop-shadow-md">
-                {currentBidPrice} <span className="text-2xl sm:text-3xl text-slate-600 font-bold font-sans">Credits</span>
-              </div>
-              <div className="text-xs font-mono text-slate-600 mt-2">
-                Minimum next bid: <span className="text-slate-900 font-bold">{nextMinBid} Credits</span>
-              </div>
+              {timeLeft <= 0 && (currentLot?.status === 'LIVE' || currentLot?.status === 'AVAILABLE') && !leadingFranchiseId ? (
+                <div className="flex flex-col items-center justify-center gap-2.5 animate-in zoom-in-95 duration-300">
+                  <img src="/unsold.svg" alt="Unsold" className="w-24 h-24 sm:w-28 sm:h-28 object-contain drop-shadow-md animate-pulse" />
+                  <div className="font-mono text-base sm:text-lg font-black text-rose-600 uppercase tracking-wider bg-rose-50 border border-rose-200 px-4 py-1 rounded-lg">
+                    TIME EXPIRED · UNSOLD
+                  </div>
+                  <div className="font-mono text-xs text-slate-500 font-medium">
+                    No bids received · Awaiting hammer to finalize for Round 2 recall
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <span className="text-xs uppercase font-mono text-amber-400/80 tracking-widest font-extrabold">
+                    CURRENT BID
+                  </span>
+                  <div className="text-5xl sm:text-6xl md:text-7xl font-extrabold font-mono text-amber-400 tabular-nums tracking-tight mt-1 drop-shadow-md">
+                    {currentBidPrice} <span className="text-2xl sm:text-3xl text-slate-600 font-bold font-sans">Credits</span>
+                  </div>
+                  <div className="text-xs font-mono text-slate-600 mt-2">
+                    Minimum next bid: <span className="text-slate-900 font-bold">{nextMinBid} Credits</span>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Franchise Status Pills Bar */}

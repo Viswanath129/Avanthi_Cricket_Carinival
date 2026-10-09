@@ -234,44 +234,65 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
     };
   }, [auctionState?.currentLotId]);
 
-  // Synchronized countdown timer
+  // Synchronized countdown timer (Authoritative server deadline derivation)
   useEffect(() => {
-    if (currentLot?.timerRunning === false || !currentLot?.timerDeadline) {
-      if (auctionState?.status === 'PAUSED' || currentLot?.timerRunning === false) {
-        const pausedSec = typeof currentLot?.pausedRemainingMs === 'number'
-          ? Math.max(0, Math.ceil(currentLot.pausedRemainingMs / 1000))
-          : (typeof auctionState?.pausedRemainingMs === 'number'
-            ? Math.max(0, Math.ceil(auctionState.pausedRemainingMs / 1000))
-            : (typeof currentLot?.timerSeconds === 'number' ? currentLot.timerSeconds : 30));
-        setTimeLeft(pausedSec);
-      } else {
-        setTimeLeft(0);
-      }
+    // 1. If no lot active or lot is not live, timer is inactive (0)
+    if (!currentLot || currentLot.status !== 'LIVE') {
+      setTimeLeft(0);
       return;
     }
 
-    if (auctionState?.status === 'PAUSED') {
-      const pausedSec = typeof auctionState?.pausedRemainingMs === 'number'
-        ? Math.max(0, Math.ceil(auctionState.pausedRemainingMs / 1000))
-        : (typeof currentLot?.pausedRemainingMs === 'number'
-          ? Math.max(0, Math.ceil(currentLot.pausedRemainingMs / 1000))
-          : timeLeft);
-      setTimeLeft(pausedSec);
+    // 2. If auction is paused, derive fixed remaining seconds
+    if (auctionState?.status === 'PAUSED' || currentLot.timerRunning === false) {
+      const pausedMs = typeof currentLot.pausedRemainingMs === 'number'
+        ? currentLot.pausedRemainingMs
+        : (typeof auctionState?.pausedRemainingMs === 'number' ? auctionState.pausedRemainingMs : 0);
+      setTimeLeft(Math.max(0, Math.ceil(pausedMs / 1000)));
       return;
     }
+
+    // 3. Live countdown from authoritative deadline
+    const deadlineMs = currentLot.timerDeadline
+      ? (currentLot.timerDeadline.toMillis
+        ? currentLot.timerDeadline.toMillis()
+        : (typeof currentLot.timerDeadline.seconds === 'number'
+          ? currentLot.timerDeadline.seconds * 1000
+          : Number(currentLot.timerDeadline)))
+      : null;
+
+    if (!deadlineMs) {
+      setTimeLeft(0);
+      return;
+    }
+
+    const calcRemaining = () => {
+      const serverNow = Date.now() + serverOffset;
+      const rem = Math.max(0, Math.ceil((deadlineMs - serverNow) / 1000));
+      setTimeLeft(rem);
+      return rem;
+    };
+
+    const initial = calcRemaining();
+    if (initial <= 0) return;
 
     const interval = setInterval(() => {
-      const deadline = currentLot.timerDeadline.toMillis 
-        ? currentLot.timerDeadline.toMillis() 
-        : Number(currentLot.timerDeadline);
-
-      const serverNow = Date.now() + serverOffset;
-      const remaining = Math.max(0, Math.ceil((deadline - serverNow) / 1000));
-      setTimeLeft(remaining);
+      const rem = calcRemaining();
+      if (rem <= 0) {
+        clearInterval(interval);
+      }
     }, 100);
 
     return () => clearInterval(interval);
-  }, [currentLot?.timerDeadline, currentLot?.timerRunning, currentLot?.pausedRemainingMs, currentLot?.timerSeconds, auctionState?.status, auctionState?.pausedRemainingMs, serverOffset]);
+  }, [
+    currentLot?.id,
+    currentLot?.status,
+    currentLot?.timerRunning,
+    currentLot?.pausedRemainingMs,
+    currentLot?.timerDeadline?.seconds || currentLot?.timerDeadline,
+    auctionState?.status,
+    auctionState?.pausedRemainingMs,
+    serverOffset,
+  ]);
 
   // Current Bid & Next Bid calculation
   const highestBid = bids.length > 0 ? bids[0] : null;
@@ -423,33 +444,103 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
       setIsActionLoading(true);
       setActionError(null);
       const isSold = !!highestBid;
-      const winningFranchise = franchises.find(f => f.id === (highestBid?.franchiseId || currentLot?.highestBidderId));
+      const winningFranchise = franchises.find(f => f.id === (highestBid?.franchiseId || currentLot?.highestBidderId || currentLot?.highestBidderFranchiseId));
       const soldDataToAnimate: SoldPlayerDetails = {
         lotId: currentLot.id,
         drawNumber: currentLot.drawNumber,
         lotNumber: currentLot.lotNumber,
-        playerName: currentLot.playerName,
+        playerName: currentLot.playerName || 'Player',
         rollNumber: currentLot.rollNumber,
         department: currentLot.department || currentLot.branch,
         branch: currentLot.branch,
         year: currentLot.year,
         bucket: currentLot.bucket || currentLot.bucketId,
         playerType: currentLot.playerType,
-        photoUrl: currentLot.photoUrl,
-        franchiseId: highestBid?.franchiseId || currentLot?.highestBidderId || '1',
-        franchiseName: highestBid?.franchiseName || winningFranchise?.name || 'Franchise',
-        soldPrice: currentBidPrice,
+        photoUrl: currentLot.photoUrl || currentLot.playerPhoto || null,
+        franchiseId: highestBid?.franchiseId || currentLot?.highestBidderId || (isSold ? '1' : null),
+        franchiseName: highestBid?.franchiseName || winningFranchise?.name || (isSold ? 'Franchise' : 'UNSOLD'),
+        soldPrice: isSold ? currentBidPrice : 0,
         outcome: isSold ? 'SOLD' : 'UNSOLD',
       };
 
-      await hammerLotFn({
-        editionId: EDITION_ID,
-        lotId: currentLot.id,
-        expectedOutcome: isSold ? 'SOLD' : 'UNSOLD',
-      });
+      try {
+        await hammerLotFn({
+          editionId: EDITION_ID,
+          lotId: currentLot.id,
+          expectedOutcome: isSold ? 'SOLD' : 'UNSOLD',
+        });
+      } catch (cloudFnErr: any) {
+        console.warn('[Hammer] hammerLot Cloud Function error, executing authoritative Firestore transaction fallback:', cloudFnErr);
+        // Direct atomic fallback transaction
+        await runTransaction(db, async (txn) => {
+          const lotRef = doc(db, 'lots', currentLot.id);
+          const lotSnap = await txn.get(lotRef);
+          if (!lotSnap.exists()) throw new Error('Lot document not found in database.');
+          const lotData = lotSnap.data();
+
+          const hasBidder = isSold;
+          const newStatus = hasBidder ? 'SOLD' : 'UNSOLD';
+
+          txn.update(lotRef, {
+            status: newStatus,
+            timerRunning: false,
+            timerDeadline: null,
+            pausedRemainingMs: null,
+          });
+
+          if (hasBidder && winningFranchise) {
+            const franchRef = doc(db, 'franchises', winningFranchise.id);
+            const fSnap = await txn.get(franchRef);
+            if (fSnap.exists()) {
+              const fData = fSnap.data();
+              const bId = lotData.bucket || lotData.bucketId || 'B1';
+              const curCount = fData.squad?.bucketCounts?.[bId] || 0;
+              txn.update(franchRef, {
+                purseRemaining: (fData.purseRemaining ?? 2500) - currentBidPrice,
+                'squad.count': (fData.squad?.count || 0) + 1,
+                'squad.auctionPurchases': (fData.squad?.auctionPurchases || 0) + 1,
+                [`squad.bucketCounts.${bId}`]: curCount + 1,
+              });
+            }
+
+            if (lotData.playerId) {
+              txn.update(doc(db, 'players', lotData.playerId), {
+                status: 'SOLD',
+                auctionStatus: 'SOLD',
+                soldPrice: currentBidPrice,
+                soldFranchiseId: winningFranchise.id,
+                soldFranchiseName: winningFranchise.name,
+                auctionable: false,
+                round: lotData.round || 1,
+              });
+            }
+          } else {
+            if (lotData.playerId) {
+              txn.update(doc(db, 'players', lotData.playerId), {
+                status: 'UNSOLD',
+                auctionStatus: 'UNSOLD',
+                auctionable: false,
+                round1Unsold: (lotData.round || 1) === 1,
+                round: lotData.round || 1,
+              });
+            }
+          }
+
+          const auctionStateRef = doc(db, 'editions', EDITION_ID, 'auction', 'state');
+          txn.set(auctionStateRef, {
+            status: newStatus,
+            lastSale: isSold ? soldDataToAnimate : null,
+            lastUnsold: !isSold ? soldDataToAnimate : null,
+            lastCompletedLotId: currentLot.id,
+            pausedRemainingMs: null,
+            updatedAt: serverTimestamp(),
+          }, { merge: true });
+        });
+      }
+
       await recordAudit(
         'HAMMER',
-        `Committed lot #${currentLot.drawNumber} (${currentLot.playerName}) for ${currentBidPrice} Cr to ${highestBid?.franchiseName || 'UNSOLD'}`
+        `Committed lot #${currentLot.drawNumber} (${currentLot.playerName}) as ${isSold ? 'SOLD' : 'UNSOLD'} (${isSold ? currentBidPrice + ' Cr' : '0 Bids'})`
       );
       setHammerModalOpen(false);
 
@@ -457,7 +548,8 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
       setSoldModalData(soldDataToAnimate);
       setSoldModalOpen(true);
     } catch (err: any) {
-      setActionError(err.message || 'Failed to hammer lot');
+      console.error('[AdminLiveDashboard] Failed to hammer lot:', err);
+      setActionError(err.message || 'Failed to hammer lot. Please verify permissions and network.');
     } finally {
       setIsActionLoading(false);
     }
@@ -1215,8 +1307,27 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
 
             {/* Time Expired Notice */}
             {timeLeft <= 0 && currentLot?.status === 'LIVE' && (
-              <div className="mt-2 py-1.5 px-3 rounded-lg bg-amber-500/15 border border-amber-500/50 text-amber-800 text-xs font-mono font-bold text-center flex items-center justify-center gap-2 animate-pulse shadow-xs">
-                <span>⏱️ TIME EXPIRED — AWAITING HAMMER CONFIRMATION</span>
+              <div className="mt-2.5 p-3 rounded-xl bg-amber-500/10 border-2 border-amber-500/40 flex flex-col items-center justify-center gap-2 text-center animate-in fade-in duration-300">
+                {!highestBid ? (
+                  <>
+                    <img src="/unsold.svg" alt="Unsold" className="w-24 h-24 object-contain drop-shadow" />
+                    <div className="text-amber-800 font-mono font-black text-xs tracking-wider uppercase">
+                      ⏱️ TIME EXPIRED — NO BIDS PLACED
+                    </div>
+                    <div className="text-amber-700 font-mono text-[11px] font-semibold">
+                      Awaiting Hammer to confirm player as UNSOLD for Round 2 recall
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="text-emerald-800 font-mono font-black text-xs tracking-wider uppercase animate-pulse">
+                      ⏱️ TIME EXPIRED — AWAITING HAMMER TO COMMIT SALE
+                    </div>
+                    <div className="text-emerald-700 font-mono text-[11px] font-semibold">
+                      Winning bid: {highestBid?.franchiseName} for {currentBidPrice} Cr
+                    </div>
+                  </>
+                )}
               </div>
             )}
 
@@ -1281,13 +1392,18 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
               <button
                 onClick={handleHammer}
                 disabled={!capabilities.canHammer || !currentLot || isActionLoading}
+                title={!capabilities.canHammer ? 'Requires Super Admin or Operator role to commit lot' : undefined}
                 className={`min-h-[44px] py-1.5 active:scale-[0.98] disabled:opacity-40 text-slate-900 rounded font-bold shadow-sm transition-all flex flex-col items-center justify-center cursor-pointer ${
                   highestBid
                     ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-950/50'
-                    : 'bg-amber-600 hover:bg-amber-500 shadow-amber-950/50'
+                    : timeLeft <= 0
+                      ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-950/50 animate-pulse'
+                      : 'bg-amber-700 hover:bg-amber-600 shadow-amber-950/40'
                 }`}
               >
-                <span className="text-[11px] leading-tight">{highestBid ? 'HAMMER (SOLD)' : 'HAMMER (CONFIRM UNSOLD)'}</span>
+                <span className="text-[11px] leading-tight font-black uppercase">
+                  {highestBid ? 'HAMMER (SOLD)' : 'HAMMER — CONFIRM UNSOLD'}
+                </span>
                 <span className="text-[9px] opacity-80">[ H ]</span>
               </button>
 

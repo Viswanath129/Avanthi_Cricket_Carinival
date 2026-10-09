@@ -39,6 +39,18 @@ export const placeBid = onCall({ maxInstances: 10 }, async (request) => {
     if (lot.status !== 'LIVE') {
       throw new HttpsError('failed-precondition', `Lot is not live. Current status: ${lot.status}`);
     }
+
+    // Verify auction countdown timer has not expired
+    if (lot.timerDeadline) {
+      const deadlineMs = lot.timerDeadline.toMillis
+        ? lot.timerDeadline.toMillis()
+        : (typeof lot.timerDeadline.seconds === 'number'
+          ? lot.timerDeadline.seconds * 1000
+          : Number(lot.timerDeadline));
+      if (Date.now() >= deadlineMs) {
+        throw new HttpsError('failed-precondition', 'Auction countdown timer expired. Bidding is closed for this lot.');
+      }
+    }
     
     // Read auction state to check franchise status
     const auctionRef = db.collection('editions').doc(lot.editionId).collection('auction').doc('state');
@@ -138,12 +150,16 @@ export const placeBid = onCall({ maxInstances: 10 }, async (request) => {
       metadata: { bidId: bidRef.id, franchiseId, amount: nextBid }, transaction: txn });
     
     // Update lot
-    const newTimerDeadline = admin.firestore.Timestamp.fromMillis(Date.now() + 20000); // 20 sec
+    const newTimerDeadline = admin.firestore.Timestamp.fromMillis(Date.now() + 20000); // 20 sec reset
     txn.update(lotRef, {
       currentPrice: nextBid,
       highestBidderFranchiseId: franchiseId,
+      highestBidderId: franchiseId,
+      highestBidderName: franchise.name || 'Franchise',
       timerDeadline: newTimerDeadline,
       timerDurationMs: 20000,
+      timerRunning: true,
+      pausedRemainingMs: null,
       version: admin.firestore.FieldValue.increment(1),
     });
     

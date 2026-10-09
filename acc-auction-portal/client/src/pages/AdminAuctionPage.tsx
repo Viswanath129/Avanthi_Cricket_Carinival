@@ -113,31 +113,70 @@ export default function AdminAuctionPage() {
     };
   }, []);
 
-  // Timer effect
+  // Timer effect (Authoritative server deadline derivation)
   useEffect(() => {
-    if (!currentLot?.timerDeadline || auctionState?.status === 'PAUSED') {
-      if (auctionState?.status === 'PAUSED') {
-        const pausedSec = typeof auctionState?.pausedRemainingMs === 'number'
-          ? Math.max(0, Math.ceil(auctionState.pausedRemainingMs / 1000))
-          : timeLeft;
-        setTimeLeft(pausedSec);
-      } else {
-        setTimeLeft(0);
-      }
+    if (!currentLot || currentLot.status !== 'LIVE') {
+      setTimeLeft(0);
       return;
     }
+
+    if (auctionState?.status === 'PAUSED' || currentLot.timerRunning === false) {
+      const pausedMs = typeof currentLot.pausedRemainingMs === 'number'
+        ? currentLot.pausedRemainingMs
+        : (typeof auctionState?.pausedRemainingMs === 'number' ? auctionState.pausedRemainingMs : 0);
+      setTimeLeft(Math.max(0, Math.ceil(pausedMs / 1000)));
+      return;
+    }
+
+    const deadlineMs = currentLot.timerDeadline
+      ? (currentLot.timerDeadline.toMillis
+        ? currentLot.timerDeadline.toMillis()
+        : (typeof currentLot.timerDeadline.seconds === 'number'
+          ? currentLot.timerDeadline.seconds * 1000
+          : Number(currentLot.timerDeadline)))
+      : null;
+
+    if (!deadlineMs) {
+      setTimeLeft(0);
+      return;
+    }
+
+    const calcRemaining = () => {
+      const serverNow = Date.now() + serverOffset;
+      const rem = Math.max(0, Math.ceil((deadlineMs - serverNow) / 1000));
+      setTimeLeft(rem);
+      return rem;
+    };
+
+    const initial = calcRemaining();
+    if (initial <= 0) return;
+
     const interval = setInterval(() => {
-      const remaining = computeRemainingSeconds(currentLot.timerDeadline, false);
-      setTimeLeft(remaining);
+      const rem = calcRemaining();
+      if (rem <= 0) {
+        clearInterval(interval);
+      }
     }, 100);
+
     return () => clearInterval(interval);
-  }, [currentLot?.timerDeadline, auctionState?.status, auctionState?.pausedRemainingMs, computeRemainingSeconds]);
+  }, [
+    currentLot?.id,
+    currentLot?.status,
+    currentLot?.timerRunning,
+    currentLot?.pausedRemainingMs,
+    currentLot?.timerDeadline?.seconds || currentLot?.timerDeadline,
+    auctionState?.status,
+    auctionState?.pausedRemainingMs,
+    serverOffset,
+  ]);
 
   const handleOpenLot = async () => {
-    try { await openLotFn({ editionId: EDITION_ID }); } catch (e) { console.error(e); }
+    if (!currentLot?.id) return;
+    try { await openLotFn({ editionId: EDITION_ID, lotId: currentLot.id }); } catch (e) { console.error(e); }
   };
   const handleSkipLot = async () => {
-    try { await skipLotFn({ editionId: EDITION_ID, lotId: currentLot?.id }); } catch (e) { console.error(e); }
+    if (!currentLot?.id) return;
+    try { await skipLotFn({ editionId: EDITION_ID, lotId: currentLot.id }); } catch (e) { console.error(e); }
   };
   const handleHammerLot = () => {
     setHammerModalOpen(true);

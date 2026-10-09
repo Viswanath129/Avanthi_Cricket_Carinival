@@ -176,7 +176,7 @@ describe('ACC 2026 — Round 2 Recall & Sold/Unsold Auction Eligibility', () => 
     });
   });
 
-  describe('4. Timer Expiration Behavior', () => {
+  describe('4. Timer Expiration Behavior & Server-Side Rules', () => {
     it('timer reaching zero does NOT automatically sell or mark unsold without human hammer confirmation', () => {
       const lotState = {
         id: 'lot-10',
@@ -192,5 +192,156 @@ describe('ACC 2026 — Round 2 Recall & Sold/Unsold Auction Eligibility', () => 
       expect(isAwaitingHammer).toBe(true);
       expect(lotState.status).toBe('LIVE'); // Not automatically marked SOLD or UNSOLD
     });
+
+    // Server-side placeBid validation logic
+    function validateBidPlacement(lot: { status: string; timerDeadline: number }, serverNow: number) {
+      if (lot.status !== 'LIVE') {
+        return { allowed: false, error: `Lot is not live. Current status: ${lot.status}` };
+      }
+      if (serverNow >= lot.timerDeadline) {
+        return { allowed: false, error: 'Auction countdown timer expired. Bidding is closed for this lot.' };
+      }
+      return { allowed: true };
+    }
+
+    it('server rejects bids placed at or after timer deadline', () => {
+      const deadline = 50000;
+      const lot = { status: 'LIVE', timerDeadline: deadline };
+
+      // Before deadline: allowed
+      expect(validateBidPlacement(lot, 49999).allowed).toBe(true);
+
+      // Exactly at deadline: rejected
+      const atExpiry = validateBidPlacement(lot, 50000);
+      expect(atExpiry.allowed).toBe(false);
+      expect(atExpiry.error).toContain('Auction countdown timer expired');
+
+      // After deadline: rejected
+      const afterExpiry = validateBidPlacement(lot, 50001);
+      expect(afterExpiry.allowed).toBe(false);
+      expect(afterExpiry.error).toContain('Auction countdown timer expired');
+    });
+
+    // Server-side hammerLot validation logic
+    function validateServerHammer(
+      lot: {
+        status: string;
+        timerDeadline?: number | null;
+        highestBidderFranchiseId?: string | null;
+      },
+      expectedOutcome: 'SOLD' | 'UNSOLD',
+      serverNow: number
+    ) {
+      if (lot.status !== 'LIVE') {
+        return { allowed: false, error: `Cannot hammer. Lot status is ${lot.status}, expected LIVE.` };
+      }
+
+      const hasHighestBidder = Boolean(lot.highestBidderFranchiseId);
+
+      if (expectedOutcome === 'UNSOLD' && hasHighestBidder) {
+        return { allowed: false, error: 'Cannot confirm UNSOLD: A valid bid exists on this lot.' };
+      }
+      if (expectedOutcome === 'SOLD' && !hasHighestBidder) {
+        return { allowed: false, error: 'Cannot confirm SOLD: No winning bid was placed on this lot.' };
+      }
+
+      // UNSOLD requires timer expiry
+      if (!hasHighestBidder && lot.timerDeadline) {
+        if (serverNow < lot.timerDeadline) {
+          return { allowed: false, error: 'Cannot confirm UNSOLD: Auction countdown timer has not expired yet.' };
+        }
+      }
+
+      return { allowed: true, outcome: hasHighestBidder ? 'SOLD' : 'UNSOLD' };
+    }
+
+    it('server rejects UNSOLD hammer if timer has not expired yet', () => {
+      const lot = {
+        status: 'LIVE',
+        timerDeadline: 60000,
+        highestBidderFranchiseId: null,
+      };
+
+      // Timer still running (at 55000 ms, 5s remaining)
+      const res = validateServerHammer(lot, 'UNSOLD', 55000);
+      expect(res.allowed).toBe(false);
+      expect(res.error).toContain('Auction countdown timer has not expired yet');
+    });
+
+    it('server permits UNSOLD hammer once timer has expired and 0 bids exist', () => {
+      const lot = {
+        status: 'LIVE',
+        timerDeadline: 60000,
+        highestBidderFranchiseId: null,
+      };
+
+      // Timer expired (at 60001 ms)
+      const res = validateServerHammer(lot, 'UNSOLD', 60001);
+      expect(res.allowed).toBe(true);
+      expect(res.outcome).toBe('UNSOLD');
+    });
+
+    it('server rejects UNSOLD hammer if bid exists, even after timer expired', () => {
+      const lot = {
+        status: 'LIVE',
+        timerDeadline: 60000,
+        highestBidderFranchiseId: 'franchise-1',
+      };
+
+      const res = validateServerHammer(lot, 'UNSOLD', 60001);
+      expect(res.allowed).toBe(false);
+      expect(res.error).toContain('A valid bid exists on this lot');
+    });
+
+    it('server permits SOLD hammer when valid bid exists', () => {
+      const lot = {
+        status: 'LIVE',
+        timerDeadline: 60000,
+        highestBidderFranchiseId: 'franchise-1',
+      };
+
+      const res = validateServerHammer(lot, 'SOLD', 60001);
+      expect(res.allowed).toBe(true);
+      expect(res.outcome).toBe('SOLD');
+    });
+  });
+
+  describe('5. Client Timer Countdown Stability', () => {
+    it('timer calculates remaining seconds correctly from primitive deadlineMs and serverOffset', () => {
+      const deadlineMs = 1700000030000;
+      const serverOffset = 500; // Client is 500ms behind server
+      const clientNow = 1700000000000;
+      const serverNow = clientNow + serverOffset; // 1700000000500
+
+      const remainingMs = deadlineMs - serverNow; // 29500ms
+      const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000)); // 30s
+      expect(remainingSec).toBe(30);
+
+      // Advance time by 20s
+      const serverNow2 = serverNow + 20000;
+      const remainingMs2 = deadlineMs - serverNow2; // 9500ms
+      const remainingSec2 = Math.max(0, Math.ceil(remainingMs2 / 1000)); // 10s
+      expect(remainingSec2).toBe(10);
+
+      // Advance past deadline
+      const serverNow3 = serverNow + 35000;
+      const remainingMs3 = deadlineMs - serverNow3; // -5500ms
+      const remainingSec3 = Math.max(0, Math.ceil(remainingMs3 / 1000)); // 0s
+      expect(remainingSec3).toBe(0);
+    });
+
+    it('timer is inactive (0) when lot is null or status is not LIVE', () => {
+      const computeTimer = (lot: any) => {
+        if (!lot || lot.status !== 'LIVE') return 0;
+        return 30;
+      };
+
+      expect(computeTimer(null)).toBe(0);
+      expect(computeTimer({ status: 'SOLD' })).toBe(0);
+      expect(computeTimer({ status: 'UNSOLD' })).toBe(0);
+      expect(computeTimer({ status: 'AVAILABLE' })).toBe(0);
+      expect(computeTimer({ status: 'LIVE' })).toBe(30);
+    });
   });
 });
+
