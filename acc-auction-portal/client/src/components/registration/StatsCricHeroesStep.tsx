@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
+import { parseCricHeroesUrl, extractUrlCandidate } from '@shared/engine/cricheroes';
 
 interface StatsCricHeroesStepProps {
   cricHeroesUrl: string;
@@ -38,8 +39,25 @@ export const StatsCricHeroesStep: React.FC<StatsCricHeroesStepProps> = ({
   const [statsOpen, setStatsOpen] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
 
+  // Deterministic validation of the current CricHeroes URL
+  const parseResult = useMemo(() => {
+    if (!cricHeroesUrl || !cricHeroesUrl.trim()) return null;
+    return parseCricHeroesUrl(cricHeroesUrl);
+  }, [cricHeroesUrl]);
+
   const handleSkipCricHeroes = () => {
     onChange('cricHeroesPending', !cricHeroesPending);
+  };
+
+  const handleUrlPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const pasted = e.clipboardData.getData('text');
+    if (pasted) {
+      const extracted = extractUrlCandidate(pasted);
+      if (extracted && extracted !== pasted) {
+        e.preventDefault();
+        onChange('cricHeroesUrl', extracted);
+      }
+    }
   };
 
   return (
@@ -71,47 +89,95 @@ export const StatsCricHeroesStep: React.FC<StatsCricHeroesStepProps> = ({
                 : 'bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
             }`}
           >
-            {cricHeroesPending ? '\u2713 Flagged: Profile Creation Pending' : '[ SKIP FOR NOW \u2014 I\u2019LL ADD LATER ]'}
+            {cricHeroesPending ? '✓ Flagged: Profile Creation Pending' : '[ SKIP FOR NOW — I’LL ADD LATER ]'}
           </button>
         </div>
 
         {cricHeroesPending ? (
           <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-200">
-            <p className="font-bold mb-1">\u24D8 Non-blocking status active</p>
+            <p className="font-bold mb-1">ⓘ Non-blocking status active</p>
             <p>
               Your player account will be submitted with status: <strong>"Profile Creation Pending"</strong>. You can update your CricHeroes URL anytime before the auction directly from your Player Dashboard.
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-2">
-                CricHeroes Profile URL
-              </label>
-              <input
-                type="url"
-                value={cricHeroesUrl}
-                onChange={(e) => onChange('cricHeroesUrl', e.target.value)}
-                placeholder="https://cricheroes.com/player-profile/..."
-                className="w-full min-h-[48px] px-4 py-3 bg-white/60 dark:bg-slate-900/60 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-mono text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all shadow-sm"
-              />
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-2">
+                  CricHeroes Profile URL
+                </label>
+                <input
+                  type="url"
+                  value={cricHeroesUrl}
+                  onChange={(e) => onChange('cricHeroesUrl', e.target.value)}
+                  onPaste={handleUrlPaste}
+                  placeholder="https://cricheroes.com/player-profile/..."
+                  className={`w-full min-h-[48px] px-4 py-3 bg-white/60 dark:bg-slate-900/60 border rounded-xl text-sm font-mono text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 transition-all shadow-sm ${
+                    parseResult
+                      ? parseResult.isValid
+                        ? 'border-emerald-500/80 focus:ring-emerald-500'
+                        : 'border-rose-500/80 focus:ring-rose-500'
+                      : 'border-slate-300 dark:border-slate-700 focus:ring-emerald-500'
+                  }`}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-2">
+                  CricHeroes Mobile (Private)
+                </label>
+                <input
+                  type="tel"
+                  value={cricHeroesMobile}
+                  onChange={(e) => onChange('cricHeroesMobile', e.target.value.replace(/\D/g, '').slice(0, 10))}
+                  placeholder="Mobile registered with CricHeroes app"
+                  className="w-full min-h-[48px] px-4 py-3 bg-white/60 dark:bg-slate-900/60 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-mono text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all shadow-sm"
+                />
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                  May differ from your contact number. Stored privately for record reconciliation.
+                </p>
+              </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-2">
-                CricHeroes Mobile (Private)
-              </label>
-              <input
-                type="tel"
-                value={cricHeroesMobile}
-                onChange={(e) => onChange('cricHeroesMobile', e.target.value.replace(/\D/g, '').slice(0, 10))}
-                placeholder="Mobile registered with CricHeroes app"
-                className="w-full min-h-[48px] px-4 py-3 bg-white/60 dark:bg-slate-900/60 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-mono text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all shadow-sm"
-              />
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                May differ from your contact number. Stored privately for record reconciliation.
-              </p>
-            </div>
+            {/* Validation Feedback Banner */}
+            {parseResult && (
+              parseResult.isValid ? (
+                <div className="p-3 rounded-xl bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-300 dark:border-emerald-800 text-xs text-emerald-900 dark:text-emerald-100 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                    <span className="font-bold text-emerald-700 dark:text-emerald-300">
+                      CricHeroes Profile Verified
+                    </span>
+                    <span className="font-mono bg-white dark:bg-slate-900 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-700 font-semibold">
+                      Player ID: {parseResult.playerId}
+                    </span>
+                    {parseResult.playerSlug && (
+                      <span className="text-slate-600 dark:text-slate-400 text-[11px]">
+                        ({parseResult.playerSlug})
+                      </span>
+                    )}
+                  </div>
+                  {parseResult.canonicalUrl && parseResult.canonicalUrl !== cricHeroesUrl.trim() && (
+                    <button
+                      type="button"
+                      onClick={() => onChange('cricHeroesUrl', parseResult.canonicalUrl!)}
+                      className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 underline hover:text-emerald-900"
+                    >
+                      Use Clean Canonical URL
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="p-3 rounded-xl bg-rose-50/80 dark:bg-rose-950/30 border border-rose-300 dark:border-rose-800 text-xs text-rose-900 dark:text-rose-200">
+                  <div className="flex items-center gap-2 font-bold text-rose-700 dark:text-rose-300 mb-1">
+                    <span>⚠</span>
+                    <span>Invalid Profile URL</span>
+                  </div>
+                  <p>{parseResult.error}</p>
+                </div>
+              )
+            )}
           </div>
         )}
 

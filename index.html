@@ -8030,143 +8030,128 @@
     }
 
     let syncStatsDebounceTimer = null;
+    let cricHeroesLookupSeq = 0;
+
+    function extractCricHeroesUrlCandidate(input) {
+      if (!input) return '';
+      const trimmed = input.trim();
+      const httpMatch = trimmed.match(/https?:\/\/[^\s]+/i);
+      if (httpMatch) return httpMatch[0];
+      const domMatch = trimmed.match(/(?:www\.)?cricheroes\.[a-z]+[^\s]*/i);
+      if (domMatch) return domMatch[0];
+      return trimmed;
+    }
+
+    function parseCricHeroesUrl(rawInput) {
+      if (!rawInput || typeof rawInput !== 'string') {
+        return { isValid: false, isProfile: false, error: 'Please enter a CricHeroes profile URL.' };
+      }
+      const candidate = extractCricHeroesUrlCandidate(rawInput);
+      if (!candidate || candidate.length < 5) {
+        return { isValid: false, isProfile: false, error: 'The provided URL is too short or invalid.' };
+      }
+      let parsed;
+      try {
+        const withScheme = (candidate.startsWith('http://') || candidate.startsWith('https://')) ? candidate : ('https://' + candidate);
+        parsed = new URL(withScheme);
+      } catch (e) {
+        return { isValid: false, isProfile: false, error: 'Malformed URL format. Please provide a valid web address.' };
+      }
+      const hostname = parsed.hostname.toLowerCase();
+      const isDomain = hostname === 'cricheroes.com' || hostname.endsWith('.cricheroes.com') || hostname === 'cricheroes.in' || hostname.endsWith('.cricheroes.in');
+      if (!isDomain) {
+        return { isValid: false, isProfile: false, urlType: 'INVALID_DOMAIN', error: 'Invalid domain (' + parsed.hostname + '). Link must be from cricheroes.com or cricheroes.in.' };
+      }
+      const pathname = parsed.pathname.replace(/\/+$/, '');
+      const segments = pathname.split('/').filter(Boolean);
+      if (segments.length === 0) {
+        return { isValid: false, isProfile: false, urlType: 'HOMEPAGE', error: 'Please provide a direct link to your CricHeroes player profile, not the homepage.' };
+      }
+      const firstSegment = segments[0].toLowerCase();
+      if (firstSegment === 'scorecard' || firstSegment === 'match') {
+        return { isValid: false, isProfile: false, urlType: 'SCORECARD', error: 'This link is for a match scorecard, not your player profile. Open CricHeroes > Profile > Share to copy link.' };
+      }
+      if (firstSegment === 'tournament' || firstSegment === 'series') {
+        return { isValid: false, isProfile: false, urlType: 'TOURNAMENT', error: 'This link is for a tournament, not an individual player profile.' };
+      }
+      if (firstSegment === 'team' || firstSegment === 'club') {
+        return { isValid: false, isProfile: false, urlType: 'TEAM', error: 'This link is for a team/club, not an individual player profile.' };
+      }
+      const isProfilePrefix = firstSegment === 'player-profile' || firstSegment === 'player' || firstSegment === 'user';
+      if (!isProfilePrefix || segments.length < 2) {
+        return { isValid: false, isProfile: false, urlType: 'UNKNOWN', error: 'Unrecognized profile link. Expected format: https://cricheroes.com/player-profile/<id>/<name>' };
+      }
+      const playerId = segments[1].trim();
+      const playerSlug = segments[2] ? segments[2].trim() : null;
+      const canonicalUrl = 'https://cricheroes.com/player-profile/' + playerId + (playerSlug ? '/' + playerSlug : '');
+      return {
+        isValid: true,
+        isProfile: true,
+        playerId: playerId,
+        playerSlug: playerSlug,
+        canonicalUrl: canonicalUrl,
+        error: null
+      };
+    }
+
+    function verifyCricHeroesProfile(url, showToasts) {
+      const badgeEl = document.getElementById("careerStatsBadge");
+      const urlInput = document.getElementById("regCricHeroesUrlInput");
+      const clean = (url || "").trim();
+
+      if (!clean) {
+        regFormData.cricHeroesUrl = "";
+        regFormData.cricHeroesStatus = "PROFILE PENDING";
+        if (badgeEl) {
+          badgeEl.className = "status-badge status-warning";
+          badgeEl.style.cssText = "font-size: 0.65rem;";
+          badgeEl.innerHTML = "SELF-DECLARED";
+        }
+        return;
+      }
+
+      const seq = ++cricHeroesLookupSeq;
+      const res = parseCricHeroesUrl(clean);
+
+      // Race condition safeguard
+      if (seq !== cricHeroesLookupSeq) return;
+
+      if (res.isValid) {
+        regFormData.cricHeroesUrl = res.canonicalUrl;
+        regFormData.cricHeroesStatus = "PROFILE AVAILABLE";
+        if (urlInput && urlInput.value !== res.canonicalUrl && clean !== res.canonicalUrl) {
+          urlInput.value = res.canonicalUrl;
+        }
+        if (badgeEl) {
+          badgeEl.className = "status-badge status-connected";
+          badgeEl.style.cssText = "font-size: 0.65rem; background: rgba(5, 150, 105, 0.12); color: var(--color-green); border: 1px solid rgba(5, 150, 105, 0.3);";
+          badgeEl.innerHTML = "VERIFIED PROFILE LINK (ID: " + res.playerId + ") · STATS SELF-DECLARED";
+        }
+        if (showToasts) {
+          showToast("CricHeroes profile link verified: Player ID " + res.playerId + ". Enter your career stats below (Self-Declared).", "success");
+        }
+      } else {
+        if (badgeEl) {
+          badgeEl.className = "status-badge status-danger";
+          badgeEl.style.cssText = "font-size: 0.65rem; background: rgba(225, 29, 72, 0.12); color: var(--color-red); border: 1px solid rgba(225, 29, 72, 0.3);";
+          badgeEl.innerHTML = "INVALID PROFILE LINK";
+        }
+        if (showToasts) {
+          showToast(res.error || "Invalid CricHeroes profile link.", "error");
+        }
+      }
+    }
+
     function handleCricHeroesInput(val, immediate) {
       if (!val) val = "";
       regFormData.cricHeroesUrl = val;
       if (syncStatsDebounceTimer) clearTimeout(syncStatsDebounceTimer);
       if (immediate) {
-        syncStatsFromCricHeroes(val, true);
+        verifyCricHeroesProfile(val, true);
       } else {
         syncStatsDebounceTimer = setTimeout(() => {
-          syncStatsFromCricHeroes(val, false);
+          verifyCricHeroesProfile(val, false);
         }, 350);
-      }
-    }
-
-    function syncStatsFromCricHeroes(url, force) {
-      if (!url || typeof url !== 'string') return;
-      const cleanUrl = url.trim();
-      if (!cleanUrl || cleanUrl.length < 4) return;
-      if (!force && cleanUrl.length < 10 && !cleanUrl.toLowerCase().includes('cricheroes')) return;
-
-      // Hash URL to create deterministic, authentic numbers for this specific player
-      let hash = 0;
-      for (let i = 0; i < cleanUrl.length; i++) {
-        hash = ((hash << 5) - hash) + cleanUrl.charCodeAt(i);
-        hash |= 0;
-      }
-      const absHash = Math.abs(hash);
-
-      const isBat = !!regFormData.isBatter;
-      const isBowl = !!regFormData.isBowler;
-      const isWk = !!regFormData.isWicketKeeper;
-
-      let matches = 18 + (absHash % 18);
-      let runs = 0;
-      let battingAvg = 0;
-      let strikeRate = 0;
-      let highScore = 0;
-      let wickets = 0;
-      let bowlingAvg = 0;
-      let economy = 0;
-      let bestBowling = "0/0";
-      let catches = 0;
-      let stumpings = 0;
-
-      if (isWk) {
-        matches = 20 + (absHash % 15);
-        runs = 360 + (absHash % 340);
-        battingAvg = +(runs / Math.max(1, (matches * 0.72))).toFixed(1);
-        strikeRate = +(116 + (absHash % 24) + 0.4).toFixed(1);
-        highScore = Math.min(runs, 48 + (absHash % 42));
-        wickets = 0;
-        bowlingAvg = 0;
-        economy = 0;
-        bestBowling = "0/0";
-        catches = 14 + (absHash % 14);
-        stumpings = 5 + (absHash % 7);
-      } else if (isBat && isBowl) {
-        matches = 22 + (absHash % 16);
-        runs = 440 + (absHash % 380);
-        battingAvg = +(runs / Math.max(1, (matches * 0.78))).toFixed(1);
-        strikeRate = +(124 + (absHash % 24) + 0.6).toFixed(1);
-        highScore = Math.min(runs, 56 + (absHash % 36));
-        wickets = 18 + (absHash % 18);
-        bowlingAvg = +(17 + ((absHash % 45) / 10)).toFixed(1);
-        economy = +(6.9 + ((absHash % 18) / 10)).toFixed(1);
-        const wktsInBest = 2 + (absHash % 3);
-        const runsInBest = 12 + (absHash % 18);
-        bestBowling = `${wktsInBest}/${runsInBest}`;
-        catches = 9 + (absHash % 9);
-        stumpings = 0;
-      } else if (isBowl) {
-        matches = 18 + (absHash % 16);
-        runs = 45 + (absHash % 95);
-        battingAvg = +(runs / Math.max(1, (matches * 0.45))).toFixed(1);
-        strikeRate = +(86 + (absHash % 24)).toFixed(1);
-        highScore = Math.min(runs, 18 + (absHash % 22));
-        wickets = 24 + (absHash % 24);
-        bowlingAvg = +(15 + ((absHash % 38) / 10)).toFixed(1);
-        economy = +(6.3 + ((absHash % 17) / 10)).toFixed(1);
-        const wktsInBest = 3 + (absHash % 3);
-        const runsInBest = 11 + (absHash % 17);
-        bestBowling = `${wktsInBest}/${runsInBest}`;
-        catches = 7 + (absHash % 7);
-        stumpings = 0;
-      } else {
-        matches = 20 + (absHash % 18);
-        runs = 540 + (absHash % 420);
-        battingAvg = +(runs / Math.max(1, (matches * 0.82))).toFixed(1);
-        strikeRate = +(128 + (absHash % 26) + 0.5).toFixed(1);
-        highScore = Math.min(runs, 66 + (absHash % 38));
-        wickets = (absHash % 3 === 0) ? 1 + (absHash % 2) : 0;
-        bowlingAvg = wickets > 0 ? +(34 + (absHash % 14)).toFixed(1) : 0;
-        economy = wickets > 0 ? +(8.1 + ((absHash % 15) / 10)).toFixed(1) : 0;
-        bestBowling = wickets > 0 ? `1/${14 + (absHash % 12)}` : "0/0";
-        catches = 8 + (absHash % 8);
-        stumpings = 0;
-      }
-
-      if (!regFormData.careerStats) regFormData.careerStats = {};
-      regFormData.careerStats.matches = matches;
-      regFormData.careerStats.runs = runs;
-      regFormData.careerStats.battingAvg = battingAvg;
-      regFormData.careerStats.strikeRate = strikeRate;
-      regFormData.careerStats.highScore = highScore;
-      regFormData.careerStats.wickets = wickets;
-      regFormData.careerStats.bowlingAvg = bowlingAvg;
-      regFormData.careerStats.economy = economy;
-      regFormData.careerStats.bestBowling = bestBowling;
-      regFormData.careerStats.catches = catches;
-      regFormData.careerStats.stumpings = stumpings;
-
-      const map = {
-        regStatMatches: matches,
-        regStatRuns: runs,
-        regStatBattingAvg: battingAvg,
-        regStatStrikeRate: strikeRate,
-        regStatHighScore: highScore,
-        regStatWickets: wickets,
-        regStatBowlingAvg: bowlingAvg,
-        regStatEconomy: economy,
-        regStatBestBowling: bestBowling,
-        regStatCatches: catches,
-        regStatStumpings: stumpings
-      };
-      for (const id in map) {
-        const el = document.getElementById(id);
-        if (el) el.value = map[id];
-      }
-
-      const badgeEl = document.getElementById("careerStatsBadge");
-      if (badgeEl) {
-        badgeEl.className = "status-badge status-connected";
-        badgeEl.style.cssText = "font-size: 0.65rem; background: rgba(5, 150, 105, 0.12); color: var(--color-green); border: 1px solid rgba(5, 150, 105, 0.3);";
-        badgeEl.innerHTML = "SELF-DECLARED · SYNCED WITH CRICHEROES";
-      }
-
-      if (force || cleanUrl.toLowerCase().includes('cricheroes') || cleanUrl.length >= 20) {
-        showToast(`CricHeroes stats auto-synced: ${matches} M, ${runs} R, ${wickets} W`, "success");
       }
     }
 
@@ -11213,7 +11198,7 @@
                 <div style="background: var(--surface-2); padding: var(--space-4); border-radius: var(--radius-md); border: 1px solid var(--border-subtle); margin-top: var(--space-3);">
                   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                     <label class="form-label" style="margin-bottom: 0;">CAREER STATISTICS (11 OFFICIAL FIELDS)</label>
-                    <span id="careerStatsBadge" class="status-badge ${regFormData.cricHeroesUrl ? 'status-connected' : 'status-warning'}" style="font-size: 0.65rem; ${regFormData.cricHeroesUrl ? 'background: rgba(5, 150, 105, 0.12); color: var(--color-green); border: 1px solid rgba(5, 150, 105, 0.3);' : ''}">${regFormData.cricHeroesUrl ? 'SELF-DECLARED · SYNCED WITH CRICHEROES' : 'SELF-DECLARED'}</span>
+                    <span id="careerStatsBadge" class="status-badge ${regFormData.cricHeroesUrl ? 'status-connected' : 'status-warning'}" style="font-size: 0.65rem; ${regFormData.cricHeroesUrl ? 'background: rgba(5, 150, 105, 0.12); color: var(--color-green); border: 1px solid rgba(5, 150, 105, 0.3);' : ''}">${regFormData.cricHeroesUrl ? 'PROFILE LINK ATTACHED · STATS SELF-DECLARED' : 'SELF-DECLARED'}</span>
                   </div>
                   <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 12px;">
                     Enter your lifetime/recent cricket performance. Figures are labelled 'Self-Declared' and manually verified by the ACC committee.
@@ -11271,7 +11256,7 @@
                   <div class="form-group" style="margin-bottom: 0;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; flex-wrap: wrap; gap: 4px;">
                       <label class="form-label" style="margin-bottom: 0;">CRICHEROES PROFILE LINK</label>
-                      <button type="button" class="btn btn-secondary" style="font-size: 0.7rem; padding: 2px 8px; min-height: 24px; color: var(--color-green); font-weight: 700;" onclick="syncStatsFromCricHeroes(document.getElementById('regCricHeroesUrlInput')?.value || regFormData.cricHeroesUrl, true)">⚡ Auto-Fill Stats</button>
+                      <button type="button" class="btn btn-secondary" style="font-size: 0.7rem; padding: 2px 8px; min-height: 24px; color: var(--color-green); font-weight: 700;" onclick="verifyCricHeroesProfile(document.getElementById('regCricHeroesUrlInput')?.value || regFormData.cricHeroesUrl, true)">🔍 Verify Link</button>
                     </div>
                     <input id="regCricHeroesUrlInput" type="url" class="form-input auth-clean-input" value="${regFormData.cricHeroesUrl || ''}" oninput="handleCricHeroesInput(this.value, false);" onchange="handleCricHeroesInput(this.value, true);" onpaste="setTimeout(() => handleCricHeroesInput(this.value, true), 50);" placeholder="https://cricheroes.com/player-profile/...">
                   </div>

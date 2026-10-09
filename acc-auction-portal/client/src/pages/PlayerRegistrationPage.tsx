@@ -25,6 +25,7 @@ import { StatsCricHeroesStep } from '@/components/registration/StatsCricHeroesSt
 import { ReferenceBasePriceStep } from '@/components/registration/ReferenceBasePriceStep';
 import { ActionBar } from '@/components/registration/ActionBar';
 import { derivePlayerType } from '@shared/engine/playerType';
+import { parseCricHeroesUrl } from '@shared/engine/cricheroes';
 import { CheckCircle2, ShieldCheck, AlertCircle, RefreshCw, ArrowRight, User } from 'lucide-react';
 
 const STEP_LABELS = [
@@ -148,6 +149,13 @@ export default function PlayerRegistrationPage() {
       if (!formData.cricHeroesPending && !formData.cricHeroesUrl.trim()) {
         setFormError('Please enter your CricHeroes URL or check "Skip for now".');
         return false;
+      }
+      if (!formData.cricHeroesPending && formData.cricHeroesUrl.trim()) {
+        const parsed = parseCricHeroesUrl(formData.cricHeroesUrl);
+        if (!parsed.isValid) {
+          setFormError(`CricHeroes link error: ${parsed.error || 'Please enter a valid CricHeroes player profile URL.'}`);
+          return false;
+        }
       }
       return true;
     }
@@ -306,11 +314,19 @@ export default function PlayerRegistrationPage() {
         derived: {
           playerType,
         },
-        cricheroes: {
-          profileUrl: formData.cricHeroesUrl.trim() || null,
-          registeredMobilePrivate: formData.cricHeroesMobile.trim() || null,
-          status: formData.cricHeroesPending ? 'PROFILE_CREATION_PENDING' : 'VERIFIED',
-        },
+        cricheroes: (() => {
+          const rawUrl = formData.cricHeroesUrl.trim();
+          const parsed = rawUrl ? parseCricHeroesUrl(rawUrl) : null;
+          return {
+            profileUrl: parsed?.isValid ? parsed.canonicalUrl : (rawUrl || null),
+            playerId: parsed?.isValid ? parsed.playerId : null,
+            playerSlug: parsed?.isValid ? parsed.playerSlug : null,
+            registeredMobilePrivate: formData.cricHeroesMobile.trim() || null,
+            status: formData.cricHeroesPending
+              ? 'PROFILE_CREATION_PENDING'
+              : (parsed?.isValid ? 'VERIFIED' : 'PENDING'),
+          };
+        })(),
         stats: {
           matches: formData.matchesPlayed,
           runs: formData.runsScored,
