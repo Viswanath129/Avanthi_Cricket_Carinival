@@ -5386,8 +5386,19 @@
         }
       }
 
+      // Validate CricHeroes URL if provided
+      let chParsed = null;
+      if (newCH) {
+        chParsed = parseCricHeroesUrl(newCH);
+        if (!chParsed.isValid) {
+          showToast(`Invalid CricHeroes URL: ${chParsed.error || 'Please provide a valid player profile URL'}`, "error");
+          return;
+        }
+      }
+
       // Critical fields check (Section 20 & TEST 3)
-      const criticalChanged = (newRoll !== p.roll) || (newYear !== Number(p.year)) || (newProg !== p.program) || (newDept !== p.department) || (newEntry !== p.entryType) || (newBucket !== p.bucket) || (newMobile !== p.mobile) || (newCH !== p.cricHeroesUrl);
+      const canonicalCH = chParsed ? chParsed.canonicalUrl : newCH;
+      const criticalChanged = (newRoll !== p.roll) || (newYear !== Number(p.year)) || (newProg !== p.program) || (newDept !== p.department) || (newEntry !== p.entryType) || (newBucket !== p.bucket) || (newMobile !== p.mobile) || (canonicalCH !== p.cricHeroesUrl);
 
       p.name = newName;
       p.roll = newRoll;
@@ -5404,7 +5415,9 @@
       if (newJersey) p.jerseyNumber = newJersey;
       p.mobile = newMobile;
       p.basePrice = newBase;
-      p.cricHeroesUrl = newCH;
+      p.cricHeroesUrl = canonicalCH;
+      if (chParsed?.playerId) p.cricheroesPlayerId = chParsed.playerId;
+      if (chParsed?.slug) p.cricheroesSlug = chParsed.slug;
       p.photo = newPhoto;
       const newFranchiseRef = (document.getElementById("editPlayerReferredByFranchise")?.value || "None").trim();
       p.referredByFranchise = newFranchiseRef;
@@ -13168,16 +13181,31 @@
       if (!p) return;
       const urlEl = document.getElementById("playerPortalCricHeroesUrl");
       const phoneEl = document.getElementById("playerPortalCricHeroesMobile");
-      if (urlEl) p.cricHeroesProfileUrl = urlEl.value.trim();
-      if (phoneEl) p.cricHeroesPhone = phoneEl.value.trim();
-      if (p.cricHeroesProfileUrl) {
-        p.cricHeroesStatus = 'PENDING_ADMIN_RESOLUTION';
+      const rawUrl = urlEl ? urlEl.value.trim() : '';
+
+      if (rawUrl) {
+        const res = parseCricHeroesUrl(rawUrl);
+        if (!res.isValid) {
+          showToast(`Invalid CricHeroes URL: ${res.error || 'Please provide a valid player profile URL'}`, "error");
+          return;
+        }
+        p.cricHeroesProfileUrl = res.canonicalUrl;
+        p.cricHeroesUrl = res.canonicalUrl;
+        if (res.playerId) p.cricheroesPlayerId = res.playerId;
+        if (res.slug) p.cricheroesSlug = res.slug;
+        p.cricHeroesStatus = 'PROVIDED';
+      } else {
+        p.cricHeroesProfileUrl = '';
+        p.cricHeroesUrl = '';
+        p.cricHeroesStatus = 'PENDING';
       }
+
+      if (phoneEl) p.cricHeroesPhone = phoneEl.value.trim();
       saveDatabase();
       appendAuditTrail({
         type: 'PLAYER_CRICHEROES_UPDATED',
         playerId: p.id,
-        cricHeroesUrl: p.cricHeroesProfileUrl,
+        cricHeroesUrl: p.cricHeroesUrl || p.cricHeroesProfileUrl,
         timestamp: Date.now()
       });
       showToast("CricHeroes details updated.", "success");

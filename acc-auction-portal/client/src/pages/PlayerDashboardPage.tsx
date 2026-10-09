@@ -5,6 +5,7 @@ import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '@/lib/firebase';
 import { BUCKET_LABELS, BucketId } from '@shared/types';
+import { parseCricHeroesUrl } from '@shared/engine/cricheroes';
 
 export default function PlayerDashboardPage() {
   const { user, userDoc, signOut } = useAuth();
@@ -120,8 +121,47 @@ export default function PlayerDashboardPage() {
   const handleSaveProfile = async () => {
     setIsSaving(true);
     try {
-      setPlayer({ ...editFormData });
+      const rawUrl = editFormData.cricHeroesUrl ? String(editFormData.cricHeroesUrl).trim() : '';
+      let parsed = null;
+      if (rawUrl) {
+        parsed = parseCricHeroesUrl(rawUrl);
+        if (!parsed.isValid) {
+          alert(`Invalid CricHeroes URL: ${parsed.error || 'Please provide a valid player profile URL.'}`);
+          setIsSaving(false);
+          return;
+        }
+      }
+
+      const updatedPlayer = {
+        ...editFormData,
+        cricHeroesUrl: parsed ? parsed.canonicalUrl : rawUrl,
+        cricHeroesStatus: parsed ? 'PROVIDED' : (rawUrl ? 'PROVIDED' : 'PENDING'),
+      };
+
+      if (userDoc?.playerId) {
+        const playerRef = doc(db, 'players', userDoc.playerId);
+        const patch: Record<string, any> = {
+          cricHeroesUrl: updatedPlayer.cricHeroesUrl,
+          'cricheroes.profileUrl': updatedPlayer.cricHeroesUrl,
+          'cricheroes.status': updatedPlayer.cricHeroesStatus,
+        };
+        if (parsed?.playerId) {
+          patch['cricheroes.playerId'] = parsed.playerId;
+        }
+        if (parsed?.playerSlug) {
+          patch['cricheroes.slug'] = parsed.playerSlug;
+        }
+        if (editFormData.cricHeroesMobile) {
+          patch['cricheroes.registeredMobilePrivate'] = editFormData.cricHeroesMobile.trim();
+        }
+        await updateDoc(playerRef, patch);
+      }
+
+      setPlayer(updatedPlayer);
       setIsEditing(false);
+    } catch (err: any) {
+      console.error('Error saving profile changes:', err);
+      alert('Failed to save changes: ' + (err.message || 'Unknown error'));
     } finally {
       setIsSaving(false);
     }

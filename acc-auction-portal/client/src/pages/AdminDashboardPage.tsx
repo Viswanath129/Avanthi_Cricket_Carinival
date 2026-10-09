@@ -19,6 +19,14 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useLocation } from 'wouter';
 import { BUCKET_LABELS, type BucketId, type PlayerDoc, type FranchiseDoc } from '@shared/types';
 import { 
+  auditPlayerRecords, 
+  buildPlayerRepairPatch, 
+  buildPlayerRollbackPatch, 
+  type CricHeroesAuditReport, 
+  type PlayerAuditRecord 
+} from '@shared/engine/cricHeroesAudit';
+import { parseCricHeroesUrl } from '@shared/engine/cricheroes';
+import { 
   LayoutDashboard, 
   Gavel, 
   RotateCcw, 
@@ -129,8 +137,19 @@ export default function AdminDashboardPage() {
   const [userSearch, setUserSearch] = useState('');
   const [userRoleFilter, setUserRoleFilter] = useState('ALL');
   const [userStatusFilter, setUserStatusFilter] = useState('ALL');
-  const [dataView, setDataView] = useState<'USERS' | 'TRASH' | 'CORRECTIONS' | 'AUDIT'>('USERS');
   const [managementPlayer, setManagementPlayer] = useState<any | null>(null);
+  const [dataView, setDataView] = useState<'USERS' | 'TRASH' | 'CORRECTIONS' | 'AUDIT' | 'CRICHEROES_AUDIT'>('USERS');
+  const [auditReport, setAuditReport] = useState<CricHeroesAuditReport | null>(null);
+  const [cricHeroesAuditFilter, setCricHeroesAuditFilter] = useState<'ALL' | 'PROPOSED' | 'REVIEW' | 'UNRESOLVED' | 'VERIFIED'>('ALL');
+  const [repairRunning, setRepairRunning] = useState(false);
+  const [repairConfirmOpen, setRepairConfirmOpen] = useState(false);
+  const [repairExecutionSummary, setRepairExecutionSummary] = useState<{ timestamp: string; successCount: number; repairedIds: string[] } | null>(null);
+
+  useEffect(() => {
+    if (players && players.length > 0) {
+      setAuditReport(auditPlayerRecords(players, EDITION_ID));
+    }
+  }, [players]);
   const [editDraft, setEditDraft] = useState<any | null>(null);
   const [managementBusy, setManagementBusy] = useState(false);
   const [playerHistory, setPlayerHistory] = useState<any[]>([]);
@@ -554,6 +573,38 @@ export default function AdminDashboardPage() {
     const before: Record<string, unknown> = {}, after: Record<string, unknown> = {};
     fields.forEach(key => { if ((original[key] ?? '') !== (editDraft[key] ?? '')) { before[key] = original[key] ?? ''; after[key] = editDraft[key] ?? ''; } });
     if (JSON.stringify(original.skills || []) !== JSON.stringify(editDraft.skills || [])) { before.skills = original.skills || []; after.skills = editDraft.skills || []; }
+
+    // Validate and normalize CricHeroes URL if changed
+    if (after.cricHeroesUrl !== undefined) {
+      const rawCH = String(after.cricHeroesUrl || '').trim();
+      if (rawCH) {
+        const parsed = parseCricHeroesUrl(rawCH);
+        if (!parsed.isValid) {
+          showToast(`Invalid CricHeroes URL: ${parsed.error}`, 'error');
+          return;
+        }
+        after.cricHeroesUrl = parsed.canonicalUrl;
+        after.cricHeroesStatus = 'VERIFIED';
+        after.cricheroes = {
+          profileUrl: parsed.canonicalUrl,
+          playerId: parsed.playerId,
+          playerSlug: parsed.playerSlug,
+          status: 'VERIFIED',
+          registeredMobilePrivate: original.cricheroes?.registeredMobilePrivate || original.cricHeroesMobile || null,
+        };
+      } else {
+        after.cricHeroesUrl = '';
+        after.cricHeroesStatus = 'PENDING';
+        after.cricheroes = {
+          profileUrl: null,
+          playerId: null,
+          playerSlug: null,
+          status: 'PENDING',
+          registeredMobilePrivate: null,
+        };
+      }
+    }
+
     if (!Object.keys(after).length) { showToast('No profile changes to save.', 'warning'); return; }
     setManagementBusy(true);
     try {
@@ -562,6 +613,84 @@ export default function AdminDashboardPage() {
       setEditDraft(null); showToast('Player profile saved and audit event recorded.');
     } catch (err: any) { showToast(err.message || 'Profile update failed.', 'error'); }
     finally { setManagementBusy(false); }
+  };
+
+  const handleExecuteCricHeroesRepair = async () => {
+    if (!isSuperAdmin || !auditReport || repairRunning) return;
+    setRepairRunning(true);
+    try {
+      const toRepair = auditReport.records.filter(r => r.status === 'PROPOSED_CORRECTION');
+      if (toRepair.length === 0) {
+        showToast('No eligible records to repair.', 'warning');
+        setRepairConfirmOpen(false);
+        return;
+      }
+
+      let successCount = 0;
+      const repairedIds: string[] = [];
+      // Safe batching in chunks of 50
+      for (let i = 0; i < toRepair.length; i += 50) {
+        const chunk = toRepair.slice(i, i + 50);
+        const batch = writeBatch(db);
+        for (const rec of chunk) {
+          const patchObj = buildPlayerRepairPatch(rec, user?.uid || 'SUPER_ADMIN');
+          if (patchObj) {
+            const docRef = doc(db, 'players', patchObj.docId);
+            batch.set(docRef, patchObj.patch, { merge: true });
+            repairedIds.push(patchObj.docId);
+            successCount++;
+          }
+        }
+        await batch.commit();
+      }
+
+      await httpsCallable(functions, 'recordAuditEvent')({
+        action: 'CRICHEROES_DATA_REPAIR',
+        targetType: 'SYSTEM',
+        targetId: EDITION_ID,
+        details: `Repaired CricHeroes data for ${successCount} players with snapshot backups`,
+        editionId: EDITION_ID,
+      });
+
+      setRepairExecutionSummary({
+        timestamp: new Date().toISOString(),
+        successCount,
+        repairedIds,
+      });
+      showToast(`Successfully repaired ${successCount} records! Backups saved.`, 'success');
+      setRepairConfirmOpen(false);
+      setAuditReport(auditPlayerRecords(players, EDITION_ID));
+    } catch (err: any) {
+      showToast(`Repair failed: ${err.message || 'Unknown error'}`, 'error');
+    } finally {
+      setRepairRunning(false);
+    }
+  };
+
+  const handleRollbackPlayer = async (player: any) => {
+    if (!isSuperAdmin || repairRunning) return;
+    const patchObj = buildPlayerRollbackPatch(player, user?.uid || 'SUPER_ADMIN');
+    if (!patchObj) {
+      showToast('No backup snapshot found for this record.', 'warning');
+      return;
+    }
+    setRepairRunning(true);
+    try {
+      await updateDoc(doc(db, 'players', patchObj.docId), patchObj.patch);
+      await httpsCallable(functions, 'recordAuditEvent')({
+        action: 'CRICHEROES_DATA_ROLLBACK',
+        targetType: 'PLAYER',
+        targetId: patchObj.docId,
+        details: 'Restored previous CricHeroes values from backup snapshot',
+        editionId: EDITION_ID,
+      });
+      showToast(`Restored previous CricHeroes values for ${player.name || patchObj.docId}`, 'success');
+      setAuditReport(auditPlayerRecords(players, EDITION_ID));
+    } catch (err: any) {
+      showToast(`Rollback failed: ${err.message}`, 'error');
+    } finally {
+      setRepairRunning(false);
+    }
   };
 
   const archiveManagementPlayer = async (p: any) => {
@@ -1339,12 +1468,12 @@ export default function AdminDashboardPage() {
               <header className="rounded-2xl border border-blue-100 bg-white p-5">
                 <h1 className="font-display font-black text-2xl text-slate-900">DATA MANAGEMENT</h1>
                 <p className="text-sm text-slate-600 mt-1">Manage player and account records without affecting historical auction integrity.</p>
-                <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-3 mt-5">
-                  {([['USERS','MANAGE USERS','Search and manage registered ACC accounts.'],['TRASH','TRASH & RESTORE','Review archived records and restore them.'],['CORRECTIONS','AUCTION CORRECTIONS','Review and reverse eligible auction sales.'],['AUDIT','EXPORT DATABASE','Export the tournament dataset.']] as const).map(([view,title,description]) => <button key={view} onClick={() => view === 'AUDIT' ? setActiveSection('export') : setDataView(view)} className={`rounded-xl border p-4 text-left transition ${dataView===view?'border-blue-500 bg-blue-50':'border-slate-200 bg-white hover:border-blue-300'}`}><b className="block text-sm text-slate-900">{title}</b><span className="mt-1 block text-xs text-slate-600">{description}</span></button>)}
+                <div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-3 mt-5">
+                  {([['USERS','MANAGE USERS','Search and manage registered ACC accounts.'],['TRASH','TRASH & RESTORE','Review archived records and restore them.'],['CORRECTIONS','AUCTION CORRECTIONS','Review and reverse eligible auction sales.'],['AUDIT','EXPORT DATABASE','Export the tournament dataset.'],['CRICHEROES_AUDIT','CRICHEROES AUDIT','Scan & repair CricHeroes URLs and profile mappings.']] as const).map(([view,title,description]) => <button key={view} onClick={() => view === 'AUDIT' ? setActiveSection('export') : setDataView(view)} className={`rounded-xl border p-4 text-left transition ${dataView===view?'border-blue-500 bg-blue-50':'border-slate-200 bg-white hover:border-blue-300'}`}><b className="block text-sm text-slate-900">{title}</b><span className="mt-1 block text-xs text-slate-600">{description}</span></button>)}
                 </div>
               </header>
 
-              <nav className="flex flex-wrap gap-2">{([['USERS','USER MANAGEMENT'],['TRASH','TRASH & RESTORE'],['CORRECTIONS','AUCTION CORRECTIONS'],['AUDIT','AUDIT TIMELINE']] as const).map(([id,label])=><button key={id} onClick={()=>setDataView(id)} className={`rounded-lg px-4 py-2 text-xs font-bold ${dataView===id?'bg-blue-700 text-white':'bg-white border border-slate-200 text-slate-700'}`}>{label}</button>)}</nav>
+              <nav className="flex flex-wrap gap-2">{([['USERS','USER MANAGEMENT'],['TRASH','TRASH & RESTORE'],['CORRECTIONS','AUCTION CORRECTIONS'],['AUDIT','AUDIT TIMELINE'],['CRICHEROES_AUDIT','CRICHEROES AUDIT & REPAIR']] as const).map(([id,label])=><button key={id} onClick={()=>setDataView(id)} className={`rounded-lg px-4 py-2 text-xs font-bold ${dataView===id?'bg-blue-700 text-white':'bg-white border border-slate-200 text-slate-700'}`}>{label}</button>)}</nav>
 
               {dataView === 'USERS' && <section className="rounded-2xl border border-slate-200 bg-white p-4 space-y-4">
                 <div className="flex flex-col md:flex-row gap-3"><input value={userSearch} onChange={e=>setUserSearch(e.target.value)} placeholder="Search name / roll / email / franchise" className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"/><select value={userRoleFilter} onChange={e=>setUserRoleFilter(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">{['ALL','PLAYER','FRANCHISE','FRANCHISE_COORDINATOR','FRANCHISE_TEAM_LEADER','ADMIN'].map(x=><option key={x}>{x}</option>)}</select><select value={userStatusFilter} onChange={e=>setUserStatusFilter(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">{['ALL','ACTIVE','PENDING','BLOCKED','ARCHIVED','DELETED'].map(x=><option key={x}>{x}</option>)}</select></div>
@@ -1356,6 +1485,247 @@ export default function AdminDashboardPage() {
               {dataView === 'CORRECTIONS' && <section className="rounded-2xl border border-slate-200 bg-white p-4"><h2 className="mb-3 text-lg font-bold">AUCTION CORRECTIONS</h2><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-blue-50"><tr>{['LOT','PLAYER','FRANCHISE','PRICE','TIME','STATUS','ACTION'].map(x=><th key={x} className="p-3">{x}</th>)}</tr></thead><tbody className="divide-y">{saleAcquisitions.map(a=><tr key={a.id}><td className="p-3">LOT #{a.drawNumber||a.lotNumber||a.lotId||'—'}</td><td className="p-3 font-semibold">{a.playerName||a.playerId}</td><td className="p-3">{a.franchiseName||a.franchiseId}</td><td className="p-3">{a.price} Credits</td><td className="p-3">{a.createdAt?.toDate?a.createdAt.toDate().toLocaleString():a.createdAt?new Date(a.createdAt).toLocaleString():'—'}</td><td className="p-3">SOLD</td><td className="p-3">{isSuperAdmin?<button disabled={managementBusy} onClick={()=>undoAcquisition(a)} className="rounded bg-red-50 px-3 py-1 text-xs font-bold text-red-700 disabled:opacity-50">{managementBusy?'PROCESSING…':'UNDO SALE'}</button>:<span className="text-xs text-slate-500">Super Admin only</span>}</td></tr>)}{saleAcquisitions.length===0&&<tr><td colSpan={7} className="p-8 text-center text-slate-500">No completed sales found.</td></tr>}</tbody></table></div></section>}
 
               {dataView === 'AUDIT' && <section className="rounded-2xl border border-slate-200 bg-white p-4"><h2 className="mb-3 text-lg font-bold">AUDIT TIMELINE</h2><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-blue-50"><tr>{['TIME','ACTOR','ACTION','TARGET','RESULT'].map(x=><th key={x} className="p-3">{x}</th>)}</tr></thead><tbody className="divide-y">{auditLogs.map((log,i)=><tr key={log.id||i}><td className="p-3">{log.timestamp?.toDate?log.timestamp.toDate().toLocaleString():'—'}</td><td className="p-3">{log.actorName||log.actorUid||log.actor||'—'}</td><td className="p-3 font-semibold">{log.action}</td><td className="p-3">{log.targetId||log.entityId||'—'}</td><td className="p-3">{log.result||'SUCCESS'}</td></tr>)}</tbody></table></div></section>}
+
+              {dataView === 'CRICHEROES_AUDIT' && (
+                <section className="rounded-2xl border border-slate-200 bg-white p-5 space-y-6">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-blue-600" />
+                        <h2 className="text-xl font-black text-slate-900 tracking-tight">
+                          CRICHEROES DATA AUDIT & SAFE REPAIR
+                        </h2>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Deep-scan player records in edition <strong className="font-mono text-slate-700">{EDITION_ID}</strong>. Detect malformed links, map canonical IDs, and repair records without overwriting player stats.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => {
+                          const rep = auditPlayerRecords(players, EDITION_ID);
+                          setAuditReport(rep);
+                          showToast(`Audit refreshed: ${rep.totalRecordsChecked} records checked.`);
+                        }}
+                        className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center gap-1.5 transition-all"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        RUN AUDIT (DRY-RUN)
+                      </button>
+
+                      {isSuperAdmin && (
+                        <button
+                          onClick={() => setRepairConfirmOpen(true)}
+                          disabled={
+                            repairRunning ||
+                            !auditReport ||
+                            auditReport.proposedCorrectionsCount === 0
+                          }
+                          className="px-4 py-2 rounded-xl bg-blue-700 hover:bg-blue-600 disabled:opacity-40 text-white font-bold text-xs uppercase tracking-wider transition-all shadow-sm flex items-center gap-1.5"
+                        >
+                          {repairRunning ? 'REPAIRING DATA...' : `APPLY REPAIRS (${auditReport?.proposedCorrectionsCount || 0})`}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Metric Cards Banner */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                    <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50">
+                      <span className="text-[10px] font-bold uppercase text-slate-500 block">Total Scanned</span>
+                      <span className="text-xl font-black text-slate-900 font-mono mt-0.5 block">
+                        {auditReport?.totalRecordsChecked || 0}
+                      </span>
+                    </div>
+
+                    <div className="p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/70">
+                      <span className="text-[10px] font-bold uppercase text-emerald-700 block">Verified Matches</span>
+                      <span className="text-xl font-black text-emerald-800 font-mono mt-0.5 block">
+                        {auditReport?.verifiedMatchesCount || 0}
+                      </span>
+                    </div>
+
+                    <div className="p-3.5 rounded-xl border border-blue-200 bg-blue-50/70">
+                      <span className="text-[10px] font-bold uppercase text-blue-700 block">Proposed Corrections</span>
+                      <span className="text-xl font-black text-blue-800 font-mono mt-0.5 block">
+                        {auditReport?.proposedCorrectionsCount || 0}
+                      </span>
+                    </div>
+
+                    <div className="p-3.5 rounded-xl border border-amber-200 bg-amber-50/70">
+                      <span className="text-[10px] font-bold uppercase text-amber-700 block">Review Required</span>
+                      <span className="text-xl font-black text-amber-800 font-mono mt-0.5 block">
+                        {auditReport?.reviewRequiredCount || 0}
+                      </span>
+                    </div>
+
+                    <div className="p-3.5 rounded-xl border border-rose-200 bg-rose-50/70">
+                      <span className="text-[10px] font-bold uppercase text-rose-700 block">Unresolved / Invalid</span>
+                      <span className="text-xl font-black text-rose-800 font-mono mt-0.5 block">
+                        {auditReport?.unresolvedCount || 0}
+                      </span>
+                    </div>
+
+                    <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-100/70">
+                      <span className="text-[10px] font-bold uppercase text-slate-600 block">No URL / Pending</span>
+                      <span className="text-xl font-black text-slate-700 font-mono mt-0.5 block">
+                        {auditReport?.noUrlCount || 0}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Filter Chips */}
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    {[
+                      ['ALL', `ALL (${auditReport?.records.length || 0})`],
+                      ['PROPOSED', `PROPOSED CORRECTIONS (${auditReport?.proposedCorrectionsCount || 0})`],
+                      ['REVIEW', `NEEDS REVIEW (${auditReport?.reviewRequiredCount || 0})`],
+                      ['UNRESOLVED', `UNRESOLVED (${auditReport?.unresolvedCount || 0})`],
+                      ['VERIFIED', `VERIFIED MATCHES (${auditReport?.verifiedMatchesCount || 0})`],
+                    ].map(([filterKey, label]) => (
+                      <button
+                        key={filterKey}
+                        onClick={() => setCricHeroesAuditFilter(filterKey as any)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                          cricHeroesAuditFilter === filterKey
+                            ? 'bg-slate-900 text-white'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Table of Records */}
+                  <div className="overflow-x-auto rounded-xl border border-slate-200">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 text-slate-700 border-b border-slate-200 font-bold uppercase tracking-wider text-[11px]">
+                        <tr>
+                          <th className="p-3">Player</th>
+                          <th className="p-3">Stored CricHeroes Link</th>
+                          <th className="p-3">Audit Status & Issues</th>
+                          <th className="p-3">Proposed Value / Canonical ID</th>
+                          <th className="p-3 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {(auditReport?.records || [])
+                          .filter(r => {
+                            if (cricHeroesAuditFilter === 'PROPOSED') return r.status === 'PROPOSED_CORRECTION';
+                            if (cricHeroesAuditFilter === 'REVIEW') return r.status === 'REVIEW_REQUIRED';
+                            if (cricHeroesAuditFilter === 'UNRESOLVED') return r.status === 'UNRESOLVED';
+                            if (cricHeroesAuditFilter === 'VERIFIED') return r.status === 'VERIFIED_MATCH';
+                            return true;
+                          })
+                          .map(rec => {
+                            const matchedPlayer = players.find(p => p.id === rec.id || p.rollNumber === rec.rollNumber);
+                            return (
+                              <tr key={rec.id} className="hover:bg-slate-50/60 transition-colors">
+                                <td className="p-3">
+                                  <span className="font-bold text-slate-900 block">{rec.name}</span>
+                                  <span className="font-mono text-[11px] text-slate-500 block">{rec.rollNumber}</span>
+                                </td>
+
+                                <td className="p-3 max-w-xs">
+                                  {rec.storedUrl ? (
+                                    <a
+                                      href={rec.storedUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="font-mono text-[11px] text-blue-600 hover:underline block truncate max-w-[280px]"
+                                      title={rec.storedUrl}
+                                    >
+                                      {rec.storedUrl}
+                                    </a>
+                                  ) : (
+                                    <span className="text-slate-400 italic">No link provided</span>
+                                  )}
+                                  <span className="text-[10px] text-slate-400 block mt-0.5">
+                                    Status: {rec.storedStatus || 'None'}
+                                  </span>
+                                </td>
+
+                                <td className="p-3">
+                                  <span
+                                    className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider mb-1 ${
+                                      rec.status === 'VERIFIED_MATCH'
+                                        ? 'bg-emerald-100 text-emerald-800'
+                                        : rec.status === 'PROPOSED_CORRECTION'
+                                        ? 'bg-blue-100 text-blue-800'
+                                        : rec.status === 'REVIEW_REQUIRED'
+                                        ? 'bg-amber-100 text-amber-800'
+                                        : rec.status === 'UNRESOLVED'
+                                        ? 'bg-rose-100 text-rose-800'
+                                        : 'bg-slate-100 text-slate-700'
+                                    }`}
+                                  >
+                                    {rec.status.replace('_', ' ')}
+                                  </span>
+                                  {rec.issues.map((issue, idx) => (
+                                    <div key={idx} className="text-[11px] text-slate-600 mt-0.5 flex items-start gap-1">
+                                      <span className="text-rose-500 font-bold">•</span>
+                                      <span>{issue.description}</span>
+                                    </div>
+                                  ))}
+                                </td>
+
+                                <td className="p-3">
+                                  {rec.proposedValues ? (
+                                    <div className="space-y-0.5">
+                                      <span className="font-mono text-[11px] font-bold text-slate-800 block truncate max-w-[260px]">
+                                        {rec.proposedValues.url}
+                                      </span>
+                                      <div className="flex items-center gap-2 text-[10px]">
+                                        <span className="font-bold text-blue-700">
+                                          Player ID: #{rec.proposedValues.playerId}
+                                        </span>
+                                        {rec.proposedValues.playerSlug && (
+                                          <span className="text-slate-500">
+                                            ({rec.proposedValues.playerSlug})
+                                          </span>
+                                        )}
+                                      </div>
+                                      <span className="text-[10px] text-slate-500 block italic">
+                                        {rec.proposedValues.actionNote}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-slate-400 text-xs">—</span>
+                                  )}
+                                </td>
+
+                                <td className="p-3 text-right">
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    {matchedPlayer && (
+                                      <button
+                                        onClick={() => setEditDraft({ ...matchedPlayer })}
+                                        className="px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs"
+                                      >
+                                        EDIT
+                                      </button>
+                                    )}
+                                    {rec.hasBackup && isSuperAdmin && matchedPlayer && (
+                                      <button
+                                        onClick={() => handleRollbackPlayer(matchedPlayer)}
+                                        disabled={repairRunning}
+                                        className="px-2.5 py-1 rounded bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-bold text-xs"
+                                        title="Restore backed up values prior to last repair"
+                                      >
+                                        RESTORE
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              )}
 
               {/* Trash Bin Table */}
               <div className="p-6 rounded-2xl bg-white/[0.03] border border-white/[0.08] space-y-4">
@@ -1589,6 +1959,30 @@ export default function AdminDashboardPage() {
                     </div>
                     <button onClick={() => setActiveSection('export')} className="w-full py-2.5 px-4 rounded-lg bg-white border border-blue-300 hover:bg-blue-50 text-blue-700 font-bold text-xs uppercase tracking-wider transition-colors">
                       EXPORT DATABASE
+                    </button>
+                  </div>
+
+                  {/* CARD 7: CRICHEROES DATA AUDIT & REPAIR */}
+                  <div className="p-5 rounded-xl border border-blue-200 bg-blue-50/50 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-bold text-sm text-blue-900 uppercase">7. CRICHEROES AUDIT & REPAIR</h3>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-200 text-blue-800 font-mono">
+                          {auditReport ? `${auditReport.proposedCorrectionsCount} PROPOSED` : 'AUDIT READY'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 mt-1 mb-4">
+                        Deep-scan stored CricHeroes URLs, resolve unmapped player IDs, and apply safe batch repairs with automated snapshot backups.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setDataView('CRICHEROES_AUDIT');
+                        setActiveSection('datamanagement');
+                      }}
+                      className="w-full py-2.5 px-4 rounded-lg bg-blue-700 hover:bg-blue-600 text-white font-bold text-xs uppercase tracking-wider transition-colors shadow-sm"
+                    >
+                      OPEN CRICHEROES AUDIT
                     </button>
                   </div>
                 </div>
@@ -2675,6 +3069,56 @@ export default function AdminDashboardPage() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+      {repairConfirmOpen && auditReport && (
+        <div className="fixed inset-0 z-[75] bg-slate-900/50 flex items-center justify-center p-4">
+          <div className="max-w-lg w-full bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 space-y-4">
+            <div className="flex items-center gap-2 text-blue-700">
+              <Shield className="w-5 h-5" />
+              <h3 className="font-display font-black text-lg text-slate-900">
+                CONFIRM CRICHEROES DATA REPAIR
+              </h3>
+            </div>
+            <p className="text-xs text-slate-600">
+              You are about to repair <strong>{auditReport.proposedCorrectionsCount}</strong> player records in edition <strong>{EDITION_ID}</strong>.
+            </p>
+
+            <div className="p-4 rounded-xl bg-blue-50 border border-blue-200 space-y-2 text-xs text-slate-700">
+              <div className="flex justify-between">
+                <span className="font-semibold">Records to update:</span>
+                <span className="font-mono font-bold text-blue-900">{auditReport.proposedCorrectionsCount}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="font-semibold">Snapshot backups:</span>
+                <span className="text-emerald-700 font-bold">YES (Saved to cricHeroesAuditBackup)</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="font-semibold">Career stats preserved:</span>
+                <span className="text-emerald-700 font-bold">YES (Zero stats overwritten)</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="font-semibold">Audit log entry:</span>
+                <span className="text-slate-800 font-bold">YES (Recorded in audit_logs)</span>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setRepairConfirmOpen(false)}
+                className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 text-xs font-bold hover:bg-slate-50"
+              >
+                CANCEL
+              </button>
+              <button
+                onClick={handleExecuteCricHeroesRepair}
+                disabled={repairRunning}
+                className="px-5 py-2 rounded-xl bg-blue-700 hover:bg-blue-600 text-white text-xs font-bold uppercase tracking-wider disabled:opacity-50"
+              >
+                {repairRunning ? 'APPLYING REPAIRS...' : 'CONFIRM & APPLY REPAIRS'}
+              </button>
+            </div>
           </div>
         </div>
       )}
