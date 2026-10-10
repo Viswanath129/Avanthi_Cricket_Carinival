@@ -3087,14 +3087,15 @@
     // ========================================================
     // 2. ACTIVE AUCTION SESSION STATE
     // ========================================================
-    let lotIndex = 0;
-    let currentBid = players[0] ? players[0].basePrice : 60;
+    // An auction has no current player until an operator explicitly reveals a lot.
+    let lotIndex = null;
+    let currentBid = 0;
     let leadingBidderId = null;
     let timerSeconds = 30;
     let timerDuration = 30000;
     let timerMode = 'FIRST_BID'; // 'FIRST_BID' (30s) or 'BID' (20s)
-    let timerDeadline = Date.now() + 30000;
-    let timerStartedAt = Date.now();
+    let timerDeadline = null;
+    let timerStartedAt = null;
     let lastBidAt = null;
     let timerVersion = 1;
     let pausedRemainingMs = null;
@@ -3149,6 +3150,38 @@
       setDrawMode(drawMode === 'AUTO' ? 'MANUAL' : 'AUTO');
     }
     window.setAuctionBucket = setAuctionBucket;
+
+    function startLiveAuction() {
+      const authCtx = getCurrentUserContext();
+      if (!authCtx.isAdmin) {
+        showToast("Only an auction administrator can start a live auction session.", "error");
+        return;
+      }
+      if (auctionState === 'LIVE' && Number.isInteger(lotIndex) && !confirm('Clear the current revealed lot and start a new empty auction floor?')) {
+        return;
+      }
+      // A session begins with the number grid, never with a preselected player.
+      lotIndex = null;
+      currentBid = 0;
+      leadingBidderId = null;
+      passedFranchiseIds = [];
+      auctionState = 'IDLE';
+      auctionPaused = false;
+      timerMode = 'FIRST_BID';
+      timerDuration = 30000;
+      timerSeconds = 30;
+      timerDeadline = null;
+      timerStartedAt = null;
+      lastBidAt = null;
+      timerRunning = false;
+      timerVersion = (timerVersion || 1) + 1;
+      AuctionTimerEngine.stopLoop();
+      AuctionTimerEngine.renderTick();
+      broadcastAuthoritativeState();
+      showToast("Live auction ready. Choose a Showcase Number and press REVEAL to call the first player.", "success");
+      renderCurrentView();
+    }
+    window.startLiveAuction = startLiveAuction;
     window.setDrawMode = setDrawMode;
     window.toggleDrawMode = toggleDrawMode;
     window.getPlayerAuctionBucket = getPlayerAuctionBucket;
@@ -9836,7 +9869,7 @@
     // VIEW 2: PUBLIC LIVE AUCTION FLOOR
     // ========================================================
     function renderLiveAuctionView() {
-      const cur = players[lotIndex] || players[0];
+      const cur = (Number.isInteger(lotIndex) && auctionState !== 'IDLE') ? players[lotIndex] : null;
       const leader = franchises.find(f => f.id === leadingBidderId);
       if (cur && typeof cur.basePrice === 'number' && (!leader || currentBid < cur.basePrice)) {
         currentBid = cur.basePrice;
@@ -9854,7 +9887,7 @@
           <div class="live-top-bar">
             <div class="live-top-badges">
               <span class="status-badge ${isDatabaseWorking() ? 'status-live' : 'status-offline'}" id="liveAuctionFloorBadge" style="color: ${isDatabaseWorking() ? 'var(--color-green)' : 'var(--color-red)'}; border-color: ${isDatabaseWorking() ? 'rgba(5, 150, 105, 0.4)' : 'rgba(225, 29, 72, 0.4)'};"><span class="live-dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${isDatabaseWorking() ? 'var(--color-green)' : 'var(--color-red)'};box-shadow:0 0 6px ${isDatabaseWorking() ? 'var(--color-green)' : 'var(--color-red)'};margin-right:4px;${isDatabaseWorking() ? 'animation:livePulse 1.8s infinite ease-in-out;' : ''}"></span>LIVE BROADCAST</span>
-              <span class="label-micro font-mono">LOT ${lotIndex + 1} OF ${players.length}</span>
+              <span class="label-micro font-mono">${cur ? `LOT ${lotIndex + 1} OF ${players.length}` : 'AWAITING PLAYER REVEAL'}</span>
               <span class="status-badge ${isDatabaseWorking() ? 'status-connected' : 'status-offline'}" id="liveAuctionEngineBadge" style="color: ${isDatabaseWorking() ? 'var(--color-green)' : 'var(--color-red)'}; border-color: ${isDatabaseWorking() ? 'rgba(5, 150, 105, 0.4)' : 'rgba(225, 29, 72, 0.4)'};">${isDatabaseWorking() ? 'ENGINE CONNECTED' : 'DATABASE OFFLINE'}</span>
             </div>
             <div class="live-top-action">
@@ -10034,7 +10067,7 @@
         `;
       }
 
-      const cur = players[lotIndex] || players[0] || null;
+      const cur = (Number.isInteger(lotIndex) && auctionState !== 'IDLE') ? players[lotIndex] : null;
       const leader = franchises.find(f => f.id === leadingBidderId);
       if (cur && typeof cur.basePrice === 'number' && (!leader || currentBid < cur.basePrice)) {
         currentBid = cur.basePrice;
@@ -12012,7 +12045,8 @@
         const resetPayload = {
           isFullReset: true,
           status: 'IDLE',
-          lotIndex: 0,
+          lotIndex: null,
+          auctionState: 'IDLE',
           currentBid: 0,
           leadingBidderId: null,
           timerSeconds: 30,
@@ -12050,7 +12084,8 @@
       if (typeof franchiseMembers !== 'undefined') franchiseMembers = [];
 
       // 4. Reset bidding and timer loop
-      lotIndex = 0;
+      lotIndex = null;
+      auctionState = 'IDLE';
       currentBid = 0;
       leadingBidderId = null;
       passedFranchiseIds = [];
@@ -13908,7 +13943,7 @@
 
 
     function renderAdminConsoleView() {
-      const cur = players[lotIndex] || players[0];
+      const cur = (Number.isInteger(lotIndex) && auctionState !== 'IDLE') ? players[lotIndex] : null;
       const leader = franchises.find(f => f.id === leadingBidderId);
       const isSuperAdmin = currentUser.role === 'SUPER_ADMIN';
       if (cur && typeof cur.basePrice === 'number' && (!leader || currentBid < cur.basePrice)) {
@@ -14625,6 +14660,9 @@
                   </div>
                 </div>
                 <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                  <button class="btn btn-primary" style="font-size: 0.75rem; padding: 6px 14px; min-height: 32px; font-weight: 800; background: #059669; border-color: #059669; color: #fff;" onclick="startLiveAuction()">
+                    ${auctionState === 'IDLE' ? 'START LIVE AUCTION' : 'START NEW AUCTION'}
+                  </button>
                   <div style="display: inline-flex; background: #f1f5f9; padding: 2px; border-radius: 6px; border: 1px solid #cbd5e1;">
                     <button type="button" style="padding: 5px 12px; font-size: 0.72rem; font-weight: 800; border-radius: 4px; border: none; cursor: pointer; background: ${drawMode === 'AUTO' ? '#059669' : 'transparent'}; color: ${drawMode === 'AUTO' ? '#ffffff' : '#475569'}; transition: all 0.15s ease;" onclick="setDrawMode('AUTO')">
                       ⚡ AUTO DRAW
@@ -14776,8 +14814,8 @@
                   ${!cur ? `
                     <div style="padding: 24px 16px; text-align: center; background: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 10px; margin-bottom: 6px;">
                       <div style="font-size: 2.2rem; margin-bottom: 6px;">🏏</div>
-                      <div style="font-family: var(--font-display); font-size: 1.15rem; font-weight: 800; color: #334155;">NO PLAYERS ON AUCTION FLOOR</div>
-                      <div style="font-size: 0.78rem; color: #64748b; margin-top: 4px;">The player catalog is currently empty. Register or import players to begin auction lots.</div>
+                      <div style="font-family: var(--font-display); font-size: 1.15rem; font-weight: 800; color: #334155;">NO PLAYER REVEALED</div>
+                      <div style="font-size: 0.78rem; color: #64748b; margin-top: 4px;">Choose Showcase Numbers, then press REVEAL on a lot to place that player on the auction floor.</div>
                     </div>
                   ` : `
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; border-bottom: 1px solid #f1f5f9; padding-bottom: 10px;">
@@ -14815,7 +14853,7 @@
                   `}
 
                   <!-- TIMER + CURRENT BID + LEADING BIDDER -->
-                  <div class="admin-timer-bid-row" style="display: flex; align-items: center; justify-content: space-around; gap: 16px; margin: 4px 0;">
+                  <div class="admin-timer-bid-row" style="display: ${cur ? 'flex' : 'none'}; align-items: center; justify-content: space-around; gap: 16px; margin: 4px 0;">
                     <!-- Dominant Circular Countdown Timer (Large & Visually Dominant) -->
                     <div style="position: relative; width: 120px; height: 120px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
                       <svg width="120" height="120" viewBox="0 0 120 120" style="transform: rotate(-90deg);">
@@ -14850,9 +14888,9 @@
                   <!-- ACTION HIERARCHY -->
                   <div style="display: flex; flex-direction: column; gap: 6px; width: 100%;">
                     <!-- PRIMARY: Hammer (dominant full-width) -->
-                    <button class="btn btn-primary" style="width: 100%; min-height: 46px; padding: 10px 16px; font-weight: 900; font-size: 1.05rem; border-radius: 8px; cursor: pointer; background: linear-gradient(135deg, #059669, #047857); color: #ffffff; border: none; box-shadow: 0 3px 12px rgba(5, 150, 105, 0.25); transition: all 0.15s ease; letter-spacing: 0.5px;" onclick="openHammerConfirmModal()">
+                    ${cur ? `<button class="btn btn-primary" style="width: 100%; min-height: 46px; padding: 10px 16px; font-weight: 900; font-size: 1.05rem; border-radius: 8px; cursor: pointer; background: linear-gradient(135deg, #059669, #047857); color: #ffffff; border: none; box-shadow: 0 3px 12px rgba(5, 150, 105, 0.25); transition: all 0.15s ease; letter-spacing: 0.5px;" onclick="openHammerConfirmModal()">
                       [H] HAMMER — CONFIRM SALE
-                    </button>
+                    </button>` : ''}
 
                     <!-- DRAW / LOT SELECTION ROW -->
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
@@ -14865,7 +14903,7 @@
                     </div>
 
                     <!-- SECONDARY: Pause + Skip + Behalf Bid (3-column grid) -->
-                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px;">
+                    ${cur ? `<div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px;">
                       <button class="btn btn-secondary" style="min-height: 38px; padding: 6px 10px; font-size: 0.75rem; font-weight: 700; border-radius: 6px; cursor: pointer; background: ${auctionPaused ? '#f0fdf4' : '#fffbeb'}; color: ${auctionPaused ? '#047857' : '#b45309'}; border: 1px solid ${auctionPaused ? '#bbf7d0' : '#fde68a'}; transition: all 0.15s ease;" onclick="toggleAuctionPause()">
                         [P] ${auctionPaused ? 'RESUME' : 'PAUSE'}
                       </button>
@@ -14875,10 +14913,10 @@
                       <button class="btn btn-secondary" style="min-height: 38px; padding: 6px 10px; font-size: 0.75rem; font-weight: 700; border-radius: 6px; cursor: pointer; background: #f0fdf4; color: #047857; border: 1px solid #bbf7d0; transition: all 0.15s ease;" onclick="openBehalfBidModal()">
                         [B] BEHALF BID
                       </button>
-                    </div>
+                    </div>` : ''}
 
                     <!-- TERTIARY / EMERGENCY: Assign + Relax + Undo -->
-                    <div style="display: grid; grid-template-columns: ${isSuperAdmin ? '1fr 1fr 1fr' : '1fr 1fr'}; gap: 6px;">
+                    ${cur ? `<div style="display: grid; grid-template-columns: ${isSuperAdmin ? '1fr 1fr 1fr' : '1fr 1fr'}; gap: 6px;">
                       <button class="btn btn-secondary" style="min-height: 30px; font-size: 0.68rem; font-weight: 700; padding: 4px 6px; border-radius: 5px; cursor: pointer; background: #f0f9ff; color: #0284c7; border: 1px solid #bae6fd; transition: all 0.15s ease;" onclick="openDirectAssignModal()" title="Direct Assign Player">
                         [A] DIRECT ASSIGN
                       </button>
@@ -14890,7 +14928,7 @@
                       <button class="btn btn-secondary" style="min-height: 30px; font-size: 0.68rem; font-weight: 700; padding: 4px 6px; border-radius: 5px; cursor: pointer; background: #fff1f2; color: #be123c; border: 1px solid #fecdd3; transition: all 0.15s ease;" onclick="openUndoModal()" title="Revert Any Sold Lot">
                         [U] UNDO SALE
                       </button>
-                    </div>
+                    </div>` : ''}
 
                     <div style="display: flex; justify-content: space-between; font-size: 0.62rem; color: #94a3b8; padding-top: 2px;">
                       <span>Shortcuts: Space: Draw · N: Lot Numbers · D: Draw Mode · Enter: Confirm · Esc: Cancel</span>
@@ -16534,7 +16572,7 @@
     }
 
     function renderProjectorView() {
-      const cur = players[lotIndex] || players[0] || null;
+      const cur = (Number.isInteger(lotIndex) && auctionState !== 'IDLE') ? players[lotIndex] : null;
       const leader = franchises.find(f => f.id === leadingBidderId);
       if (cur && typeof cur.basePrice === 'number' && (!leader || currentBid < cur.basePrice)) {
         currentBid = cur.basePrice;
@@ -17015,10 +17053,10 @@
           playerId: null
         },
         auction: {
-          lotIndex: 0,
-          currentBid: (typeof players !== 'undefined' && players[0]) ? players[0].basePrice : 60,
+          lotIndex: null,
+          currentBid: 0,
           leadingBidderId: null,
-          timerSeconds: 17,
+          timerSeconds: 30,
           timerDeadline: 0,
           timerRunning: false,
           auctionPaused: false,
@@ -17651,7 +17689,7 @@
       const sOffset = (window.ClockSync && typeof window.ClockSync.getOffset === 'function')
         ? window.ClockSync.getOffset()
         : ((window.RealtimeStore && window.RealtimeStore.state && window.RealtimeStore.state.connection && window.RealtimeStore.state.connection.serverTimeOffset) || 0);
-      const currentLotObj = players[lotIndex] || null;
+      const currentLotObj = (Number.isInteger(lotIndex) && ['LIVE', 'EXPIRED'].includes(auctionState)) ? players[lotIndex] : null;
       if (currentLotObj && typeof currentLotObj.basePrice === 'number') {
         if (!leadingBidderId || currentBid < currentLotObj.basePrice) {
           currentBid = currentLotObj.basePrice;
@@ -17674,11 +17712,6 @@
         auctionPaused: !!auctionPaused,
         pausedRemainingMs: auctionPaused ? (typeof pausedRemainingMs === 'number' ? pausedRemainingMs : (timerSeconds * 1000)) : null,
         passedFranchiseIds,
-        franchises,
-        deletedFranchises: deletedFranchises || [],
-        players,
-        deletedPlayers,
-        auditLog,
         currentLot: currentLotObj,
         lotVersion: ((window.RealtimeStore && window.RealtimeStore.state.auction.lotVersion) || 1) + 1,
         timestamp: sNow
@@ -17702,6 +17735,8 @@
       }
 
       if (auctionDocRef) {
+        // Directory records have their own canonical collections and listeners. Do
+        // not let an older bidding tab overwrite an admin's approval decision.
         auctionDocRef.set(payload, { merge: true }).catch(err => console.error("Firestore sync error:", err));
       }
     }
@@ -17720,7 +17755,9 @@
         // Self-echo: admin's own Firestore write came back with same version — skip timer re-sync
         if (data.timerVersion === timerVersion && isAdminAuthor) {
           // Still update non-timer fields (franchises, players, etc.) but skip timer manipulation
-          lotIndex = typeof data.lotIndex === "number" ? data.lotIndex : lotIndex;
+          if (Object.prototype.hasOwnProperty.call(data, 'lotIndex')) {
+            lotIndex = Number.isInteger(data.lotIndex) ? data.lotIndex : null;
+          }
           leadingBidderId = data.leadingBidderId !== undefined ? data.leadingBidderId : leadingBidderId;
           if (typeof data.currentBid === "number") currentBid = data.currentBid;
           passedFranchiseIds = Array.isArray(data.passedFranchiseIds) ? data.passedFranchiseIds : passedFranchiseIds;
@@ -17732,7 +17769,9 @@
         timerVersion = data.timerVersion;
       }
 
-      lotIndex = typeof data.lotIndex === "number" ? data.lotIndex : lotIndex;
+      if (Object.prototype.hasOwnProperty.call(data, 'lotIndex')) {
+        lotIndex = Number.isInteger(data.lotIndex) ? data.lotIndex : null;
+      }
       auctionState = typeof data.auctionState === 'string' ? data.auctionState : auctionState;
       leadingBidderId = data.leadingBidderId !== undefined ? data.leadingBidderId : leadingBidderId;
 
@@ -17901,7 +17940,7 @@
           passedFranchiseIds,
           lotVersion: data.lotVersion || 1
         };
-        window.RealtimeStore.state.currentLot = players[lotIndex] || null;
+        window.RealtimeStore.state.currentLot = (Number.isInteger(lotIndex) && auctionState !== 'IDLE') ? players[lotIndex] || null : null;
         window.RealtimeStore.state.players = players;
         window.RealtimeStore.state.franchise = franchises;
       }

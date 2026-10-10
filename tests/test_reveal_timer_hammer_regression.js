@@ -43,6 +43,23 @@ test('revealing a player creates a LIVE 30-second deadline, not a WAITING placeh
   assert.strictEqual(canBid(state, now), true);
 });
 
+test('a fresh auction renders no default player until REVEAL is pressed', () => {
+  assert(source.includes('let lotIndex = null;'));
+  assert(source.includes("const cur = (Number.isInteger(lotIndex) && auctionState !== 'IDLE') ? players[lotIndex] : null;"));
+  assert(source.includes('NO PLAYER REVEALED'));
+  const rendererHead = source.slice(source.indexOf('function renderAdminConsoleView'), source.indexOf('function renderAdminConsoleView') + 200);
+  assert(rendererHead.includes("const cur = (Number.isInteger(lotIndex) && auctionState !== 'IDLE') ? players[lotIndex] : null;"));
+  assert(source.includes('function startLiveAuction()'));
+  assert(source.includes('START LIVE AUCTION'));
+  assert(source.includes('AWAITING PLAYER REVEAL'));
+});
+
+test('auction updates do not write stale player or franchise directories', () => {
+  const broadcast = source.slice(source.indexOf('function broadcastAuthoritativeState'), source.indexOf('function applyAuthoritativeAuctionState'));
+  assert(!broadcast.includes('        players,'));
+  assert(!broadcast.includes('        franchises,'));
+});
+
 test('a bid is rejected after the revealed lot expires', () => {
   assert(source.includes("BID REJECTED: This lot's bidding window has closed."));
   const now = 1_000_000;
