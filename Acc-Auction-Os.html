@@ -6283,6 +6283,20 @@
       const cur = players[lotIndex];
       if (!f || !cur || cur.status !== 'AVAILABLE' || auctionPaused) return;
 
+      // A bid is valid only while the revealed lot's authoritative window is live.
+      // Do this before changing price/leadership so an expired client cannot revive a lot.
+      const remainingMs = AuctionTimerEngine.getRemainingMs();
+      if (auctionState !== 'LIVE' || !timerRunning || !timerDeadline || remainingMs <= 0) {
+        if (remainingMs <= 0) {
+          timerRunning = false;
+          auctionState = 'EXPIRED';
+          AuctionTimerEngine.stopLoop();
+          AuctionTimerEngine.renderTick();
+        }
+        showToast("BID REJECTED: This lot's bidding window has closed.", "error");
+        return;
+      }
+
       // Strict Super Admin Approval Gate
       if (f.approvalStatus !== 'APPROVED' || f.status === 'PENDING_APPROVAL' || f.status === 'DISABLED' || f.status === 'REJECTED') {
         showToast(`BID REJECTED: Franchise "${f.name}" is pending Super Admin approval.`, "error");
@@ -6765,16 +6779,15 @@
       adminNavTab = 'AUCTION';
       try { localStorage.setItem("acc_last_admin_tab", "AUCTION"); } catch(e) {}
       auctionPaused = false;
+      auctionState = 'LIVE';
       timerMode = 'FIRST_BID';
       timerDuration = 30000;
-      timerSeconds = 30;
-      timerDeadline = null;
-      timerRunning = false;
-      timerVersion = (timerVersion || 1) + 1;
       pausedRemainingMs = null;
       frozenRemainingSeconds = null;
       AuctionTimerEngine.stopLoop();
-      AuctionTimerEngine.renderTick();
+      // Revealing a lot is the authoritative start event: every surface receives
+      // the same fresh 30-second deadline rather than a local WAITING placeholder.
+      AuctionTimerEngine.reset(30000);
       saveDatabase();
       broadcastAuthoritativeState();
       renderCurrentView();
@@ -7109,22 +7122,39 @@
     function openHammerConfirmModal() {
       const cur = players[lotIndex];
       const leader = franchises.find(f => f.id === leadingBidderId);
-      if (!leader || !cur) {
-        showToast("No active bid to hammer.", "error");
+      const isAdmin = currentUser && (currentUser.role === 'ADMIN' || currentUser.role === 'SUPER_ADMIN');
+      if (!isAdmin) {
+        showToast("Only an authorized auction administrator can confirm the hammer.", "error");
+        return;
+      }
+      if (!cur || cur.status !== 'AVAILABLE') {
+        showToast("This lot has already been finalized or is no longer active.", "error");
+        return;
+      }
+      const remainingMs = AuctionTimerEngine.getRemainingMs();
+      if (!timerDeadline || !['LIVE', 'EXPIRED'].includes(auctionState)) {
+        showToast("No valid active auction session is available to hammer.", "error");
+        return;
+      }
+      if (auctionPaused || remainingMs > 0) {
+        showToast("Hammer confirmation is available only after the timer expires.", "warning");
         return;
       }
       const modal = document.getElementById("modalContainer");
+      const isSold = !!leader;
       modal.innerHTML = `
         <div class="modal-overlay">
           <div class="modal-dialog" onclick="event.stopPropagation();" style="padding: var(--space-6); max-width: 520px; text-align: center;">
             <span class="status-badge status-inplay">TIMER EXPIRED · HAMMER CONFIRMATION</span>
-            <h2 style="font-family: var(--font-display); font-size: 1.5rem; font-weight: 800; color: var(--text-bright); margin: 12px 0 8px;">CONFIRM HAMMER SALE?</h2>
+            <h2 style="font-family: var(--font-display); font-size: 1.5rem; font-weight: 800; color: var(--text-bright); margin: 12px 0 8px;">${isSold ? 'CONFIRM HAMMER SALE?' : 'CONFIRM UNSOLD LOT?'}</h2>
             <p style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: var(--space-4); line-height: 1.5;">
-              <strong>${cur.name}</strong> (${cur.bucket}) to <strong>${leader.name}</strong> for <strong class="font-mono" style="color: var(--color-green);">${currentBid} CREDITS</strong>
+              ${isSold
+                ? `<strong>${cur.name}</strong> (${cur.bucket}) to <strong>${leader.name}</strong> for <strong class="font-mono" style="color: var(--color-green);">${currentBid} CREDITS</strong>`
+                : `<strong>${cur.name}</strong> (${cur.bucket}) received no valid bids before the deadline and will be marked <strong>UNSOLD</strong>.`}
             </p>
             <div style="display: flex; gap: 12px; justify-content: center;">
               <button class="btn btn-secondary" onclick="closeModal(); showToast('Hammer sale cancelled. Lot remains active.', 'info');" style="min-width: 120px;">CANCEL</button>
-              <button class="btn btn-primary" onclick="closeModal(); executeHammerSale();" style="min-width: 120px; background: var(--color-green);">CONFIRM SALE</button>
+              <button class="btn btn-primary" onclick="closeModal(); ${isSold ? 'executeHammerSale()' : 'executeHammerUnsold()'};" style="min-width: 120px; background: var(--color-green);">${isSold ? 'CONFIRM SALE' : 'CONFIRM UNSOLD'}</button>
             </div>
           </div>
         </div>
@@ -7134,8 +7164,9 @@
     function executeHammerSale() {
       const cur = players[lotIndex];
       const leader = franchises.find(f => f.id === leadingBidderId);
-      if (!leader || !cur) {
-        showToast("Cannot hammer: No active franchise bids on this lot yet.", "error");
+      const remainingMs = AuctionTimerEngine.getRemainingMs();
+      if (!cur || cur.status !== 'AVAILABLE' || !leader || !timerDeadline || !['LIVE', 'EXPIRED'].includes(auctionState) || auctionPaused || remainingMs > 0) {
+        showToast("Cannot confirm SOLD: the lot is not an expired active lot with a valid winning bid.", "error");
         return;
       }
 
@@ -7148,6 +7179,10 @@
       cur.franchiseName = leader.name;
       leader.purse -= currentBid;
       leader.squad.push({ ...cur });
+      auctionState = 'FINALIZED';
+      timerRunning = false;
+      timerDeadline = null;
+      AuctionTimerEngine.stopLoop();
 
       playHammerSound();
 
@@ -7210,7 +7245,16 @@
 
     function executeHammerUnsold() {
       const cur = players[lotIndex];
+      const remainingMs = AuctionTimerEngine.getRemainingMs();
+      if (!cur || cur.status !== 'AVAILABLE' || leadingBidderId || !timerDeadline || !['LIVE', 'EXPIRED'].includes(auctionState) || auctionPaused || remainingMs > 0) {
+        showToast("Cannot confirm UNSOLD: wait for an expired lot with no valid bids.", "error");
+        return;
+      }
       cur.status = "UNSOLD";
+      auctionState = 'FINALIZED';
+      timerRunning = false;
+      timerDeadline = null;
+      AuctionTimerEngine.stopLoop();
       showSpeeder("LOT UNSOLD", `${cur.name} passed unsold at base price`, 800);
       auditLog.unshift({
         time: new Date().toLocaleTimeString(),
@@ -17626,6 +17670,7 @@
         lastBidAt: lastBidAt || null,
         timerVersion: timerVersion || 1,
         timerRunning: !!timerRunning,
+        auctionState,
         auctionPaused: !!auctionPaused,
         pausedRemainingMs: auctionPaused ? (typeof pausedRemainingMs === 'number' ? pausedRemainingMs : (timerSeconds * 1000)) : null,
         passedFranchiseIds,
@@ -17688,6 +17733,7 @@
       }
 
       lotIndex = typeof data.lotIndex === "number" ? data.lotIndex : lotIndex;
+      auctionState = typeof data.auctionState === 'string' ? data.auctionState : auctionState;
       leadingBidderId = data.leadingBidderId !== undefined ? data.leadingBidderId : leadingBidderId;
 
       const curLot = (Array.isArray(data.players) && data.players[lotIndex]) || (typeof players !== 'undefined' && players[lotIndex]) || null;
