@@ -48,8 +48,16 @@ exports.approveFranchise = (0, https_1.onCall)(async (request) => {
     if (!franchiseSnap.exists)
         throw new https_1.HttpsError('not-found', 'Franchise not found.');
     const franchise = franchiseSnap.data();
+    // `status` is the operational state used by bid validation, while
+    // `approvalStatus` records governance.  Keeping only one of these fields was
+    // the reason an approved franchise could still render as pending or be
+    // rejected by a bidding screen using the other field.
+    if (franchise.approvalStatus === 'APPROVED' && franchise.status === 'ACTIVE') {
+        return { success: true, franchiseId, alreadyApproved: true };
+    }
     await franchiseRef.update({
-        status: 'APPROVED',
+        status: 'ACTIVE',
+        approvalStatus: 'APPROVED',
         purseInitial: 1000,
         purseRemaining: 1000,
         squad: {
@@ -61,7 +69,7 @@ exports.approveFranchise = (0, https_1.onCall)(async (request) => {
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
     await (0, audit_1.writeAuditEvent)({ actor: caller, action: 'APPROVE_FRANCHISE', targetType: 'FRANCHISE', targetId: franchiseId,
-        editionId: franchise.editionId, before: { status: franchise.status }, after: { status: 'APPROVED', purseInitial: 1000 } });
-    return { success: true, franchiseId };
+        editionId: franchise.editionId, before: { status: franchise.status, approvalStatus: franchise.approvalStatus }, after: { status: 'ACTIVE', approvalStatus: 'APPROVED', purseInitial: 1000 } });
+    return { success: true, franchiseId, status: 'ACTIVE', approvalStatus: 'APPROVED' };
 });
 //# sourceMappingURL=approveFranchise.js.map

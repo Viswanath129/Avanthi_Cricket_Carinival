@@ -95,7 +95,9 @@ export const hammerLot = onCall({ maxInstances: 5 }, async (request) => {
       const franchiseSnap = await txn.get(franchiseRef);
       if (!franchiseSnap.exists) throw new HttpsError('internal', 'Franchise not found during hammer.');
       const franchise = franchiseSnap.data()!;
-      if (['DISABLED', 'BLOCKED', 'REJECTED'].includes(franchise.status)) {
+      // A historical bid is not enough: the winning franchise must still be an
+      // approved, active participant at the exact hammer transaction.
+      if (franchise.status !== 'ACTIVE' || (franchise.approvalStatus && franchise.approvalStatus !== 'APPROVED')) {
         throw new HttpsError('failed-precondition', 'Winning franchise is no longer eligible to acquire this lot.');
       }
       winningFranchiseName = franchise.name || 'Franchise';

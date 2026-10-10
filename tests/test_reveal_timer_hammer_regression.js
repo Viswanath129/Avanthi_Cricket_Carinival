@@ -58,6 +58,16 @@ test('auction updates do not write stale player or franchise directories', () =>
   const broadcast = source.slice(source.indexOf('function broadcastAuthoritativeState'), source.indexOf('function applyAuthoritativeAuctionState'));
   assert(!broadcast.includes('        players,'));
   assert(!broadcast.includes('        franchises,'));
+  const apply = source.slice(source.indexOf('function applyAuthoritativeAuctionState'), source.indexOf('// SECTION 52: DEBUG PANEL'));
+  assert(apply.includes('Ignored legacy session payload without a session id.'));
+  assert(!apply.includes('data.franchises.forEach'));
+  assert(!apply.includes('data.players.forEach'));
+});
+
+test('each reveal has a session boundary so old callbacks cannot replace a newer lot', () => {
+  assert(source.includes("let auctionSessionId = null;"));
+  assert(source.includes("auctionSessionId = 'lot_' + Date.now()"));
+  assert(source.includes("Ignored state from an older revealed-lot session."));
 });
 
 test('a bid is rejected after the revealed lot expires', () => {

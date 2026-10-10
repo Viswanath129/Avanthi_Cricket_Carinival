@@ -48,13 +48,20 @@ exports.approvePlayer = (0, https_1.onCall)(async (request) => {
     if (!playerSnap.exists)
         throw new https_1.HttpsError('not-found', 'Player not found.');
     const player = playerSnap.data();
-    const newStatus = approvalAction === 'APPROVE' ? 'APPROVED' : 'REJECTED';
+    const approved = approvalAction === 'APPROVE';
+    const newStatus = approved ? 'AVAILABLE' : 'REJECTED';
+    const newApprovalStatus = approved ? 'APPROVED' : 'REJECTED';
     await playerRef.update({
-        'registration.status': newStatus,
+        'registration.status': newApprovalStatus,
+        status: newStatus,
+        approvalStatus: newApprovalStatus,
+        verificationStatus: approved ? 'VERIFIED' : 'REJECTED',
+        auctionEligible: approved,
+        publicVisibility: approved,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
     await (0, audit_1.writeAuditEvent)({ actor: caller, action: `PLAYER_${approvalAction}`, targetType: 'PLAYER', targetId: playerId,
-        editionId: player.editionId, before: { status: player.registration?.status }, after: { status: newStatus } });
-    return { success: true, playerId, status: newStatus };
+        editionId: player.editionId, before: { status: player.status, approvalStatus: player.approvalStatus }, after: { status: newStatus, approvalStatus: newApprovalStatus } });
+    return { success: true, playerId, status: newStatus, approvalStatus: newApprovalStatus };
 });
 //# sourceMappingURL=approvePlayer.js.map

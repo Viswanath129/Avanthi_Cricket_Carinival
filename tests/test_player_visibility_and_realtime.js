@@ -157,6 +157,7 @@ assert.strictEqual(vm.runInContext("isPlayerPubliclyVisible(players.find(p => p.
 console.log("[PASS] Admin RESTORE: same canonical player and prior valid state restored");
 
 console.log("\n--- TEST 3: NO RESURRECTION OF DELETED PLAYERS IN STATE MERGE ---");
+const canonicalPlayerBeforeLegacySession = vm.runInContext("JSON.stringify(players.find(p => p.id === 777))", ctx);
 vm.runInContext(`
 applyAuthoritativeAuctionState({
   lotIndex: 0,
@@ -172,10 +173,10 @@ applyAuthoritativeAuctionState({
 `, ctx);
 
 let check777 = vm.runInContext("players.find(p => p.id === 777 || p.roll === '26811A0577')", ctx);
-assert.strictEqual(check777, undefined, "Deleted player was NOT resurrected by applyAuthoritativeAuctionState");
+assert.strictEqual(JSON.stringify(check777), canonicalPlayerBeforeLegacySession, "Legacy auction snapshots cannot overwrite the canonical player lifecycle");
 let check888 = vm.runInContext("players.find(p => p.id === 888)", ctx);
-assert.notStrictEqual(check888, undefined, "Active player 888 successfully synced");
-console.log("[PASS] applyAuthoritativeAuctionState eliminates the resurrection bug and filters deleted players.");
+assert.strictEqual(check888, undefined, "Auction-session snapshots cannot add or overwrite canonical players");
+console.log("[PASS] applyAuthoritativeAuctionState ignores legacy directory snapshots, preventing approval reversion and player resurrection.");
 
 console.log("\n--- TEST 4: PUBLIC VIEW & HOME RENDERING INTEGRITY ---");
 const publicHTML = vm.runInContext("renderPublicView();", ctx);

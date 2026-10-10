@@ -3102,6 +3102,10 @@
     let timerRunning = false;
     let auctionPaused = false;
     let auctionState = 'IDLE';
+    // Identifies one revealed lot.  A timer update from a previous reveal must
+    // never be allowed to revive or replace the current floor.
+    let auctionSessionId = null;
+    let auctionSessionStartedAt = null;
     let timerInterval = null;
     let passedFranchiseIds = [];
     let bidOrder = [];
@@ -3166,6 +3170,8 @@
       leadingBidderId = null;
       passedFranchiseIds = [];
       auctionState = 'IDLE';
+      auctionSessionId = null;
+      auctionSessionStartedAt = null;
       auctionPaused = false;
       timerMode = 'FIRST_BID';
       timerDuration = 30000;
@@ -6813,6 +6819,10 @@
       try { localStorage.setItem("acc_last_admin_tab", "AUCTION"); } catch(e) {}
       auctionPaused = false;
       auctionState = 'LIVE';
+      // A new reveal is a new session, even if it is the same player recalled
+      // from the UNSOLD pool.  This is the stale-callback boundary.
+      auctionSessionId = 'lot_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+      auctionSessionStartedAt = Date.now();
       timerMode = 'FIRST_BID';
       timerDuration = 30000;
       pausedRemainingMs = null;
@@ -17709,6 +17719,8 @@
         timerVersion: timerVersion || 1,
         timerRunning: !!timerRunning,
         auctionState,
+        auctionSessionId,
+        auctionSessionStartedAt,
         auctionPaused: !!auctionPaused,
         pausedRemainingMs: auctionPaused ? (typeof pausedRemainingMs === 'number' ? pausedRemainingMs : (timerSeconds * 1000)) : null,
         passedFranchiseIds,
@@ -17743,6 +17755,22 @@
 
     function applyAuthoritativeAuctionState(data, broadcast = false) {
       if (!data) return;
+
+      // The session document used to contain complete player/franchise arrays.
+      // Those fields are legacy snapshots and are deliberately ignored: their
+      // stale values previously reverted approvals made in the canonical
+      // directories.  Auction state is now the only payload accepted here.
+      const incomingSessionStartedAt = Number(data.auctionSessionStartedAt || 0);
+      if (auctionSessionId && !data.auctionSessionId) {
+        console.warn('[Auction] Ignored legacy session payload without a session id.');
+        return;
+      }
+      if (auctionSessionStartedAt && incomingSessionStartedAt && incomingSessionStartedAt < auctionSessionStartedAt) {
+        console.warn('[Auction] Ignored state from an older revealed-lot session.');
+        return;
+      }
+      if (typeof data.auctionSessionId === 'string') auctionSessionId = data.auctionSessionId;
+      if (incomingSessionStartedAt) auctionSessionStartedAt = incomingSessionStartedAt;
 
       // Section 22: Stale Event Protection via Monotonic timerVersion
       // Also: self-echo protection — if the admin authored this state, skip timer re-application
@@ -17848,80 +17876,10 @@
         }
       }
 
-      if (data.isFullReset || (Array.isArray(data.deletedFranchises) && data.deletedFranchises.length === 0)) {
-        if (data.isFullReset) deletedFranchises = [];
-      } else if (Array.isArray(data.deletedFranchises)) {
-        const dfMap = new Map();
-        (deletedFranchises || []).forEach(d => {
-          const k = String(d.id || d.franchiseId || '').toUpperCase();
-          if (k) dfMap.set(k, d);
-        });
-        data.deletedFranchises.forEach(d => {
-          const k = String(d.id || d.franchiseId || '').toUpperCase();
-          if (k) dfMap.set(k, d);
-        });
-        deletedFranchises = Array.from(dfMap.values());
-      }
-
-      if (data.isFullReset || (Array.isArray(data.franchises) && data.franchises.length === 0)) {
-        franchises = [];
-      } else if (Array.isArray(data.franchises) && data.franchises.length > 0) {
-        const dfSet = new Set((deletedFranchises || []).map(d => String(d.id || d.franchiseId || '').toUpperCase()));
-        const fMap = new Map();
-        franchises.forEach(f => {
-          const key = String(f.id || f.franchiseId || '').toUpperCase();
-          if (key && !dfSet.has(key) && f.status !== 'DELETED' && f.status !== 'ARCHIVED') {
-            fMap.set(key, f);
-          }
-        });
-        data.franchises.forEach(f => {
-          const key = String(f.id || f.franchiseId || '').toUpperCase();
-          if (key && !dfSet.has(key) && f.status !== 'DELETED' && f.status !== 'ARCHIVED') {
-            const existing = fMap.get(key);
-            fMap.set(key, existing ? { ...existing, ...f } : f);
-          }
-        });
-        franchises = Array.from(fMap.values());
-      }
-
-      if (data.isFullReset || (Array.isArray(data.deletedPlayers) && data.deletedPlayers.length === 0)) {
-        if (data.isFullReset) deletedPlayers = [];
-      } else if (Array.isArray(data.deletedPlayers)) {
-        const dMap = new Map();
-        deletedPlayers.forEach(d => {
-          const k = (d.roll || d.rollNumberNormalized || d.id || '').toString().toUpperCase();
-          if (k) dMap.set(k, d);
-        });
-        data.deletedPlayers.forEach(d => {
-          const k = (d.roll || d.rollNumberNormalized || d.id || '').toString().toUpperCase();
-          if (k) dMap.set(k, d);
-        });
-        deletedPlayers = Array.from(dMap.values());
-      }
-
-      if (data.isFullReset || (Array.isArray(data.players) && data.players.length === 0)) {
-        players = [];
-      } else if (Array.isArray(data.players)) {
-        const dSet = new Set(deletedPlayers.map(d => (d.roll || d.rollNumberNormalized || d.id || '').toString().toUpperCase()));
-        const playerMap = new Map();
-        players.forEach(p => {
-          const key = (p.roll || p.rollNumberNormalized || p.id || '').toString().toUpperCase();
-          if (key && !dSet.has(key) && p.status !== 'DELETED' && p.status !== 'ARCHIVED') {
-            playerMap.set(key, p);
-          }
-        });
-        data.players.forEach(p => {
-          const key = (p.roll || p.rollNumberNormalized || p.id || '').toString().toUpperCase();
-          if (key && !dSet.has(key) && p.status !== 'DELETED' && p.status !== 'ARCHIVED') {
-            const existing = playerMap.get(key);
-            playerMap.set(key, existing ? { ...existing, ...p } : p);
-          }
-        });
-        players = Array.from(playerMap.values());
-      }
-      if (Array.isArray(data.auditLog) && data.auditLog.length > 0) {
-        auditLog = data.auditLog;
-      }
+      // Player, franchise and audit documents are each subscribed from their
+      // own canonical collection.  Never merge legacy copies from the auction
+      // session document; doing so makes approved registrations reappear as
+      // pending after another browser submits a bid.
 
       if (window.RealtimeStore) {
         window.RealtimeStore.state.auction = {
