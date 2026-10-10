@@ -8,10 +8,8 @@ import {
   orderBy, 
   limit, 
   updateDoc, 
-  setDoc,
-  serverTimestamp, 
-  Timestamp,
-  runTransaction 
+  serverTimestamp,
+  runTransaction
 } from 'firebase/firestore';
 import { ref as rtdbRef, onValue } from 'firebase/database';
 import { httpsCallable } from 'firebase/functions';
@@ -32,7 +30,7 @@ import {
 } from '@shared/types';
 import { checkScarcity } from '@shared/engine/scarcity';
 import { checkBucketEligibility } from '@shared/engine/bucketEligibility';
-import { mergeAuditTimeline, auditTimestampValue, formatAuditTime, formatAuditAction, formatAuditDetails } from '@/services/auditTimeline';
+import { mergeAuditTimeline, auditTimestampValue, formatAuditTime, formatAuditAction, formatAuditActor, formatAuditDetails } from '@/services/auditTimeline';
 import SoldConfirmationModal, { type SoldPlayerDetails } from '@/components/SoldConfirmationModal';
 import { getNextEligibleUnsoldLot } from '@shared/engine/auctionOrder';
 
@@ -299,6 +297,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
     currentLot?.pausedRemainingMs,
     currentLot?.timerDeadline?.seconds || currentLot?.timerDeadline,
     auctionState?.status,
+    auctionState?.auctionSessionId,
     auctionState?.pausedRemainingMs,
     auctionState?.timerDeadline?.seconds || auctionState?.timerDeadline,
     serverOffset,
@@ -473,80 +472,12 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
         outcome: isSold ? 'SOLD' : 'UNSOLD',
       };
 
-      try {
-        await hammerLotFn({
-          editionId: EDITION_ID,
-          lotId: currentLot.id,
-          expectedOutcome: isSold ? 'SOLD' : 'UNSOLD',
-        });
-      } catch (cloudFnErr: any) {
-        console.warn('[Hammer] hammerLot Cloud Function error, executing authoritative Firestore transaction fallback:', cloudFnErr);
-        // Direct atomic fallback transaction
-        await runTransaction(db, async (txn) => {
-          const lotRef = doc(db, 'lots', currentLot.id);
-          const lotSnap = await txn.get(lotRef);
-          if (!lotSnap.exists()) throw new Error('Lot document not found in database.');
-          const lotData = lotSnap.data();
-
-          const hasBidder = isSold;
-          const newStatus = hasBidder ? 'SOLD' : 'UNSOLD';
-
-          txn.update(lotRef, {
-            status: newStatus,
-            timerRunning: false,
-            timerDeadline: null,
-            pausedRemainingMs: null,
-          });
-
-          if (hasBidder && winningFranchise) {
-            const franchRef = doc(db, 'franchises', winningFranchise.id);
-            const fSnap = await txn.get(franchRef);
-            if (fSnap.exists()) {
-              const fData = fSnap.data();
-              const bId = lotData.bucket || lotData.bucketId || 'B1';
-              const curCount = fData.squad?.bucketCounts?.[bId] || 0;
-              txn.update(franchRef, {
-                purseRemaining: (fData.purseRemaining ?? 2500) - currentBidPrice,
-                'squad.count': (fData.squad?.count || 0) + 1,
-                'squad.auctionPurchases': (fData.squad?.auctionPurchases || 0) + 1,
-                [`squad.bucketCounts.${bId}`]: curCount + 1,
-              });
-            }
-
-            if (lotData.playerId) {
-              txn.update(doc(db, 'players', lotData.playerId), {
-                status: 'SOLD',
-                auctionStatus: 'SOLD',
-                soldPrice: currentBidPrice,
-                soldFranchiseId: winningFranchise.id,
-                soldFranchiseName: winningFranchise.name,
-                auctionable: false,
-                round: lotData.round || 1,
-              });
-            }
-          } else {
-            if (lotData.playerId) {
-              txn.update(doc(db, 'players', lotData.playerId), {
-                status: 'UNSOLD',
-                auctionStatus: 'UNSOLD',
-                auctionable: false,
-                round1Unsold: (lotData.round || 1) === 1,
-                round: lotData.round || 1,
-              });
-            }
-          }
-
-          const auctionStateRef = doc(db, 'editions', EDITION_ID, 'auction', 'state');
-          txn.set(auctionStateRef, {
-            status: newStatus,
-            lastSale: isSold ? soldDataToAnimate : null,
-            lastUnsold: !isSold ? soldDataToAnimate : null,
-            lastCompletedLotId: currentLot.id,
-            pausedRemainingMs: null,
-            updatedAt: serverTimestamp(),
-          }, { merge: true });
-        });
-      }
+      await hammerLotFn({
+        editionId: EDITION_ID,
+        lotId: currentLot.id,
+        auctionSessionId: auctionState?.auctionSessionId,
+        expectedOutcome: isSold ? 'SOLD' : 'UNSOLD',
+      });
 
       await recordAudit(
         'HAMMER',
@@ -611,43 +542,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
     try {
       setIsActionLoading(true);
       setActionError(null);
-      try {
-        await pauseResumeFn({ editionId: EDITION_ID, action: nextStatus });
-      } catch (cloudFnErr) {
-        console.warn('pauseResumeFn unavailable, applying direct Firestore update:', cloudFnErr);
-        if (nextStatus === 'PAUSE') {
-          const deadline = currentLot?.timerDeadline?.toMillis ? currentLot.timerDeadline.toMillis() : Number(currentLot?.timerDeadline || 0);
-          const remainingMs = deadline > 0 ? Math.max(0, deadline - (Date.now() + serverOffset)) : 30000;
-          await updateDoc(doc(db, 'editions', EDITION_ID, 'auction', 'state'), {
-            status: 'PAUSED',
-            pausedRemainingMs: remainingMs,
-            updatedAt: serverTimestamp(),
-          });
-          if (currentLot?.id) {
-            await updateDoc(doc(db, 'lots', currentLot.id), {
-              timerRunning: false,
-              pausedRemainingMs: remainingMs,
-            });
-          }
-        } else {
-          const remainingMs = typeof currentLot?.pausedRemainingMs === 'number'
-            ? currentLot.pausedRemainingMs
-            : (typeof auctionState?.pausedRemainingMs === 'number' ? auctionState.pausedRemainingMs : 30000);
-          const newDeadline = Timestamp.fromMillis(Date.now() + serverOffset + Math.max(1000, remainingMs));
-          await updateDoc(doc(db, 'editions', EDITION_ID, 'auction', 'state'), {
-            status: 'LIVE',
-            pausedRemainingMs: null,
-            updatedAt: serverTimestamp(),
-          });
-          if (currentLot?.id) {
-            await updateDoc(doc(db, 'lots', currentLot.id), {
-              timerDeadline: newDeadline,
-              timerRunning: true,
-              pausedRemainingMs: null,
-            });
-          }
-        }
-      }
+      await pauseResumeFn({ editionId: EDITION_ID, action: nextStatus });
       await recordAudit('PAUSE_RESUME', `${isLive ? 'Paused' : 'Resumed'} live auction`);
     } catch (err: any) {
       setActionError(err.message || 'Failed to toggle pause/resume');
@@ -691,34 +586,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
     try {
       setIsActionLoading(true);
       setActionError(null);
-      try {
-        await openLotFn({ editionId: EDITION_ID, lotId: target.id });
-      } catch (cloudFnErr) {
-        console.warn('openLotFn unavailable, applying direct Firestore update:', cloudFnErr);
-        const deadline = Timestamp.fromMillis(Date.now() + 30000);
-        await updateDoc(doc(db, 'lots', target.id), {
-          status: 'LIVE',
-          auctionStatus: 'BIDDING',
-          currentPrice: target.basePrice || 20,
-          highestBidderId: null,
-          highestBidderName: null,
-          highestBidderFranchiseId: null,
-          timerDeadline: deadline,
-          timerDurationMs: 30000,
-          timerRunning: true,
-          pausedRemainingMs: null,
-        });
-        await setDoc(doc(db, 'editions', EDITION_ID, 'auction', 'state'), {
-          currentLotId: target.id,
-          status: 'LIVE',
-          auctionStatus: 'BIDDING',
-          timerDeadline: deadline,
-          timerDurationMs: 30000,
-          timerRunning: true,
-          pausedRemainingMs: null,
-          updatedAt: serverTimestamp(),
-        }, { merge: true });
-      }
+      await openLotFn({ editionId: EDITION_ID, lotId: target.id });
       await recordAudit('GUEST_DRAW', `Called lot #${target.drawNumber} (${target.playerName})`);
       setGuestLotInput('');
     } catch (err: any) {
@@ -739,34 +607,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
     try {
       setIsActionLoading(true);
       setActionError(null);
-      try {
-        await openLotFn({ editionId: EDITION_ID, lotId: nextLot.id });
-      } catch (cloudFnErr) {
-        console.warn('openLotFn unavailable, applying direct Firestore update:', cloudFnErr);
-        const deadline = Timestamp.fromMillis(Date.now() + 30000);
-        await updateDoc(doc(db, 'lots', nextLot.id), {
-          status: 'LIVE',
-          auctionStatus: 'BIDDING',
-          currentPrice: nextLot.basePrice || 20,
-          highestBidderId: null,
-          highestBidderName: null,
-          highestBidderFranchiseId: null,
-          timerDeadline: deadline,
-          timerDurationMs: 30000,
-          timerRunning: true,
-          pausedRemainingMs: null,
-        });
-        await setDoc(doc(db, 'editions', EDITION_ID, 'auction', 'state'), {
-          currentLotId: nextLot.id,
-          status: 'LIVE',
-          auctionStatus: 'BIDDING',
-          timerDeadline: deadline,
-          timerDurationMs: 30000,
-          timerRunning: true,
-          pausedRemainingMs: null,
-          updatedAt: serverTimestamp(),
-        }, { merge: true });
-      }
+      await openLotFn({ editionId: EDITION_ID, lotId: nextLot.id });
       await recordAudit('AUTO_DRAW', `System drew lot #${nextLot.drawNumber} (${nextLot.playerName})`);
     } catch (err: any) {
       setActionError(err.message || 'Failed to auto-draw next lot');
@@ -822,6 +663,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
       setActionError(null);
       await placeBidFn({
         lotId: currentLot.id,
+        auctionSessionId: auctionState?.auctionSessionId,
         franchiseId: behalfFranchiseId,
         amount: behalfAmount,
         clientActionId: `behalf-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -1698,7 +1540,7 @@ export default function AdminLiveDashboard({ mode = 'SUPER_ADMIN' }: AdminLiveDa
                     </span>
                   </div>
                   <div className="text-[10px] text-slate-300 truncate mt-0.5">
-                    {formatAuditDetails(log)}
+                    {formatAuditDetails(log)} · {formatAuditActor(log)}
                   </div>
                 </div>
               ))}

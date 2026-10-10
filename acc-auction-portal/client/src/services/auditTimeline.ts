@@ -24,15 +24,24 @@ export function extractAuditTimestamp(row: any): number {
 
 export function formatAuditTime(row: any): string {
   const ms = extractAuditTimestamp(row);
-  if (!ms || ms <= 0 || isNaN(ms)) return 'now';
+  if (!ms || ms <= 0 || isNaN(ms)) return 'Time unavailable';
   const d = new Date(ms);
-  if (isNaN(d.getTime())) return 'now';
+  if (isNaN(d.getTime())) return 'Time unavailable';
   return d.toLocaleTimeString();
 }
 
 export function formatAuditAction(row: any): string {
   const act = row?.action || row?.event || row?.type || row?.name;
-  return act ? String(act).trim() : 'ACTION';
+  const normalized = act == null ? '' : String(act).trim();
+  return normalized || 'Unknown action';
+}
+
+export function formatAuditActor(row: any): string {
+  const actor = row?.actorName ?? row?.metadata?.actorName ?? row?.actorUid ?? row?.actor;
+  if (typeof actor === 'string' && actor.trim()) return actor.trim();
+  if (actor?.name) return String(actor.name);
+  if (actor?.uid) return String(actor.uid);
+  return 'System';
 }
 
 export function formatAuditDetails(row: any): string {

@@ -11,9 +11,9 @@ export const placeBid = onCall({ maxInstances: 10 }, async (request) => {
   ]);
   
   // 2. Extract input
-  const { lotId, clientActionId } = request.data;
-  if (!lotId || !clientActionId) {
-    throw new HttpsError('invalid-argument', 'lotId and clientActionId are required.');
+  const { lotId, auctionSessionId, clientActionId } = request.data;
+  if (!lotId || !auctionSessionId || !clientActionId) {
+    throw new HttpsError('invalid-argument', 'lotId, auctionSessionId, and clientActionId are required.');
   }
   
   // 3. Resolve franchise
@@ -57,6 +57,12 @@ export const placeBid = onCall({ maxInstances: 10 }, async (request) => {
     const auctionSnap = await txn.get(auctionRef);
     if (!auctionSnap.exists) throw new HttpsError('not-found', 'Auction state not found.');
     const auctionState = auctionSnap.data()!;
+    if (auctionState.currentLotId !== lotId) {
+      throw new HttpsError('failed-precondition', 'This lot is no longer the active auction lot. Refresh before bidding.');
+    }
+    if (!auctionState.auctionSessionId || auctionState.auctionSessionId !== auctionSessionId || lot.auctionSessionId !== auctionSessionId) {
+      throw new HttpsError('failed-precondition', 'Auction session is stale or does not match the active lot. Refresh before bidding.');
+    }
     
     // Check franchise is IN_PLAY
     const franchiseStatus = auctionState.franchiseStatuses?.[franchiseId];
@@ -144,6 +150,7 @@ export const placeBid = onCall({ maxInstances: 10 }, async (request) => {
       previousAmount: lot.currentPrice,
       sequenceNumber,
       clientActionId,
+      auctionSessionId,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 

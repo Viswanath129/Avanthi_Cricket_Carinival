@@ -41,22 +41,42 @@ const audit_1 = require("../utils/audit");
 exports.hammerLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => {
     // Super Admin or Operator can hammer
     const caller = await (0, auth_1.verifyCaller)(request.auth?.uid, ['SUPER_ADMIN', 'ADMIN']);
-    const { lotId, expectedOutcome } = request.data || {};
-    if (!lotId)
-        throw new https_1.HttpsError('invalid-argument', 'lotId is required.');
+    const { lotId, auctionSessionId, expectedOutcome } = request.data || {};
+    if (!lotId || !auctionSessionId)
+        throw new https_1.HttpsError('invalid-argument', 'lotId and auctionSessionId are required.');
     const result = await auth_1.db.runTransaction(async (txn) => {
         const lotRef = auth_1.db.collection('lots').doc(lotId);
         const lotSnap = await txn.get(lotRef);
         if (!lotSnap.exists)
             throw new https_1.HttpsError('not-found', 'Lot not found.');
         const lot = lotSnap.data();
+        const auctionRef = auth_1.db.collection('editions').doc(lot.editionId).collection('auction').doc('state');
+        const auctionSnap = await txn.get(auctionRef);
+        if (!auctionSnap.exists)
+            throw new https_1.HttpsError('not-found', 'Active auction session not found.');
+        const auctionState = auctionSnap.data();
+        if (auctionState.currentLotId !== lotId) {
+            throw new https_1.HttpsError('failed-precondition', 'Lot does not match the active auction session.');
+        }
+        if (auctionState.auctionSessionId !== auctionSessionId || lot.auctionSessionId !== auctionSessionId) {
+            throw new https_1.HttpsError('failed-precondition', 'Auction session is stale or does not match the active lot.');
+        }
         const eligibleStatuses = new Set(['LIVE', 'BIDDING', 'TIME_EXPIRED']);
         if (!eligibleStatuses.has(lot.status)) {
             throw new https_1.HttpsError('failed-precondition', `Cannot hammer. Lot status is ${lot.status}, expected LIVE, BIDDING, or TIME_EXPIRED.`);
         }
-        const hasHighestBidder = Boolean(lot.highestBidderFranchiseId || lot.highestBidderId);
+        // A sale is based on accepted bids in this session, never on a stale UI field.
+        const acceptedBids = await txn.get(auth_1.db.collection('bids').where('lotId', '==', lotId));
+        const sessionBids = acceptedBids.docs
+            .map((bid) => bid.data())
+            .filter((bid) => bid.auctionSessionId === auctionSessionId);
+        const winningBid = sessionBids.reduce((winner, bid) => !winner || Number(bid.amount) > Number(winner.amount) ? bid : winner, null);
+        const hasHighestBidder = Boolean(winningBid);
         // Auto-derive intent if not explicitly passed by operator
         const effectiveOutcome = expectedOutcome || (hasHighestBidder ? 'SOLD' : 'UNSOLD');
+        if (!['SOLD', 'UNSOLD'].includes(effectiveOutcome)) {
+            throw new https_1.HttpsError('invalid-argument', 'expectedOutcome must be SOLD or UNSOLD.');
+        }
         // Strict validation of operator intent
         if (effectiveOutcome === 'UNSOLD' && hasHighestBidder) {
             throw new https_1.HttpsError('failed-precondition', 'Cannot confirm UNSOLD: A valid bid exists on this lot.');
@@ -66,6 +86,9 @@ exports.hammerLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => 
         }
         // UNSOLD requires expiry and zero accepted valid bids
         if (!hasHighestBidder) {
+            if (!lot.timerDeadline) {
+                throw new https_1.HttpsError('failed-precondition', 'Cannot confirm UNSOLD: active auction has no authoritative deadline.');
+            }
             if (lot.timerDeadline) {
                 const deadlineMs = lot.timerDeadline.toMillis
                     ? lot.timerDeadline.toMillis()
@@ -76,6 +99,10 @@ exports.hammerLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => 
                     throw new https_1.HttpsError('failed-precondition', 'Cannot confirm UNSOLD: Auction countdown timer has not expired yet.');
                 }
             }
+        }
+        if (hasHighestBidder && (!lot.highestBidderFranchiseId ||
+            winningBid.franchiseId !== lot.highestBidderFranchiseId || Number(winningBid.amount) !== Number(lot.currentPrice))) {
+            throw new https_1.HttpsError('failed-precondition', 'Winning bid does not match the active lot. Refresh before hammering.');
         }
         const newStatus = hasHighestBidder ? 'SOLD' : 'UNSOLD';
         // Update lot status and clear timer
@@ -89,11 +116,14 @@ exports.hammerLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => 
         let winningFranchiseName = 'None';
         if (hasHighestBidder) {
             // Read franchise - deduct purse, increment squad
-            const franchiseRef = auth_1.db.collection('franchises').doc(lot.highestBidderFranchiseId);
+            const franchiseRef = auth_1.db.collection('franchises').doc(winningBid.franchiseId);
             const franchiseSnap = await txn.get(franchiseRef);
             if (!franchiseSnap.exists)
                 throw new https_1.HttpsError('internal', 'Franchise not found during hammer.');
             const franchise = franchiseSnap.data();
+            if (['DISABLED', 'BLOCKED', 'REJECTED'].includes(franchise.status)) {
+                throw new https_1.HttpsError('failed-precondition', 'Winning franchise is no longer eligible to acquire this lot.');
+            }
             winningFranchiseName = franchise.name || 'Franchise';
             // Create acquisition
             const acqRef = auth_1.db.collection('acquisitions').doc();
@@ -104,7 +134,7 @@ exports.hammerLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => 
                 lotNumber: lot.lotNumber || null,
                 playerId: lot.playerId,
                 playerName: lot.playerName || 'Player',
-                franchiseId: lot.highestBidderFranchiseId,
+                franchiseId: winningBid.franchiseId,
                 franchiseName: winningFranchiseName,
                 type: 'SOLD',
                 price: lot.currentPrice,
@@ -129,7 +159,7 @@ exports.hammerLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => 
                     status: 'SOLD',
                     auctionStatus: 'SOLD',
                     soldPrice: lot.currentPrice,
-                    soldFranchiseId: lot.highestBidderFranchiseId,
+                    soldFranchiseId: winningBid.franchiseId,
                     soldFranchiseName: winningFranchiseName,
                     auctionable: false,
                     round: lot.round || 1,
@@ -152,7 +182,6 @@ exports.hammerLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => 
             }
         }
         // Update auction state with authoritative sale data
-        const auctionRef = auth_1.db.collection('editions').doc(lot.editionId).collection('auction').doc('state');
         const lastSaleData = hasHighestBidder ? {
             lotId,
             drawNumber: lot.drawNumber || null,
@@ -165,7 +194,7 @@ exports.hammerLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => 
             bucket: lot.bucket || lot.bucketId || null,
             playerType: lot.playerType || null,
             photoUrl: lot.photoUrl || null,
-            franchiseId: lot.highestBidderFranchiseId,
+            franchiseId: winningBid.franchiseId,
             franchiseName: winningFranchiseName,
             soldPrice: lot.currentPrice,
             timestamp: Date.now(),

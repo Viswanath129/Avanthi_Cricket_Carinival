@@ -45,9 +45,9 @@ exports.placeBid = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => 
         'FRANCHISE_COORDINATOR', 'FRANCHISE_TEAM_LEADER', 'SUPER_ADMIN', 'ADMIN'
     ]);
     // 2. Extract input
-    const { lotId, clientActionId } = request.data;
-    if (!lotId || !clientActionId) {
-        throw new https_1.HttpsError('invalid-argument', 'lotId and clientActionId are required.');
+    const { lotId, auctionSessionId, clientActionId } = request.data;
+    if (!lotId || !auctionSessionId || !clientActionId) {
+        throw new https_1.HttpsError('invalid-argument', 'lotId, auctionSessionId, and clientActionId are required.');
     }
     // 3. Resolve franchise
     let franchiseId;
@@ -89,6 +89,12 @@ exports.placeBid = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => 
         if (!auctionSnap.exists)
             throw new https_1.HttpsError('not-found', 'Auction state not found.');
         const auctionState = auctionSnap.data();
+        if (auctionState.currentLotId !== lotId) {
+            throw new https_1.HttpsError('failed-precondition', 'This lot is no longer the active auction lot. Refresh before bidding.');
+        }
+        if (!auctionState.auctionSessionId || auctionState.auctionSessionId !== auctionSessionId || lot.auctionSessionId !== auctionSessionId) {
+            throw new https_1.HttpsError('failed-precondition', 'Auction session is stale or does not match the active lot. Refresh before bidding.');
+        }
         // Check franchise is IN_PLAY
         const franchiseStatus = auctionState.franchiseStatuses?.[franchiseId];
         if (franchiseStatus === 'PASSED') {
@@ -155,6 +161,7 @@ exports.placeBid = (0, https_1.onCall)({ maxInstances: 10 }, async (request) => 
             previousAmount: lot.currentPrice,
             sequenceNumber,
             clientActionId,
+            auctionSessionId,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
         (0, audit_1.writeAuditEvent)({ actor: caller, action: caller.role === 'ADMIN' || caller.role === 'SUPER_ADMIN' ? 'BID_ON_BEHALF' : 'BID_PLACED',

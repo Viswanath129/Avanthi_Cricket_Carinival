@@ -224,6 +224,7 @@ export default function ProjectorPage() {
     currentLot?.pausedRemainingMs,
     currentLot?.timerDeadline?.seconds || currentLot?.timerDeadline,
     auctionState?.status,
+    auctionState?.auctionSessionId,
     auctionState?.pausedRemainingMs,
     auctionState?.timerDeadline?.seconds || auctionState?.timerDeadline,
     serverOffset,

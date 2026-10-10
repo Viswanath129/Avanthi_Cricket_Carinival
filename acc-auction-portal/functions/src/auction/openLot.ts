@@ -1,6 +1,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { db, verifyCaller } from '../utils/auth';
 import * as admin from 'firebase-admin';
+import { randomUUID } from 'crypto';
 import { writeAuditEvent } from '../utils/audit';
 
 export const openLot = onCall({ maxInstances: 5 }, async (request) => {
@@ -20,7 +21,16 @@ export const openLot = onCall({ maxInstances: 5 }, async (request) => {
       throw new HttpsError('failed-precondition', `Cannot open lot. Current status: ${lot.status}`);
     }
     
-    // Set initial timer to 30 seconds
+    const auctionRef = db.collection('editions').doc(lot.editionId).collection('auction').doc('state');
+    const auctionSnap = await txn.get(auctionRef);
+    const activeAuction = auctionSnap.exists ? auctionSnap.data()! : null;
+    if (activeAuction?.currentLotId && activeAuction.currentLotId !== lotId &&
+      ['LIVE', 'BIDDING', 'PAUSED'].includes(activeAuction.status)) {
+      throw new HttpsError('failed-precondition', 'Cannot open a new lot while another auction session is active. Finalize or pause the current lot first.');
+    }
+
+    // A new reveal creates a new server-owned session and a fresh 30 second deadline.
+    const auctionSessionId = randomUUID();
     const timerDeadline = admin.firestore.Timestamp.fromMillis(Date.now() + 30000);
 
     // Enrich player metadata if not already present on lot
@@ -60,13 +70,14 @@ export const openLot = onCall({ maxInstances: 5 }, async (request) => {
       timerDurationMs: 30000,
       timerRunning: true,
       pausedRemainingMs: null,
+      auctionSessionId,
       version: admin.firestore.FieldValue.increment(1),
     });
     
     // Update auction state to point to this lot with authoritative deadline
-    const auctionRef = db.collection('editions').doc(lot.editionId).collection('auction').doc('state');
     txn.set(auctionRef, {
       currentLotId: lotId,
+      auctionSessionId,
       status: 'LIVE',
       auctionStatus: 'BIDDING',
       timerDeadline,
@@ -92,7 +103,7 @@ export const openLot = onCall({ maxInstances: 5 }, async (request) => {
     writeAuditEvent({ actor: caller, action: 'OPEN_LOT', targetType: 'LOT', targetId: lotId, editionId: lot.editionId,
       before: { status: lot.status }, after: { status: 'LIVE', basePrice: lot.basePrice }, transaction: txn });
     
-    return { success: true, lotId, basePrice: lot.basePrice };
+    return { success: true, lotId, auctionSessionId, basePrice: lot.basePrice };
   });
   
   return result;

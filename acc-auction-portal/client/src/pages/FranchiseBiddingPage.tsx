@@ -293,6 +293,7 @@ export default function FranchiseBiddingPage() {
     lot?.pausedRemainingMs,
     lot?.timerDeadline?.seconds || lot?.timerDeadline,
     auctionState?.status,
+    auctionState?.auctionSessionId,
     auctionState?.pausedRemainingMs,
     auctionState?.timerDeadline?.seconds || auctionState?.timerDeadline,
     serverOffset,
@@ -362,6 +363,7 @@ export default function FranchiseBiddingPage() {
       await placeBidFn({
         editionId: EDITION_ID,
         lotId: lot.id,
+        auctionSessionId: auctionState?.auctionSessionId,
         franchiseId,
         clientActionId,
       });

@@ -3,6 +3,7 @@ import { getNextEligibleUnsoldLot } from '@shared/engine/auctionOrder';
 import { 
   formatAuditTime, 
   formatAuditAction, 
+  formatAuditActor,
   formatAuditDetails, 
   extractAuditTimestamp, 
   mergeAuditTimeline 
@@ -639,6 +640,7 @@ describe('ACC 2026 — Round 2 Recall & Sold/Unsold Auction Eligibility', () => 
       expect(formatAuditTime(row1)).not.toBe('Invalid Date');
       expect(formatAuditTime(row1)).not.toBe('now');
       expect(formatAuditAction(row1)).toBe('OPEN_LOT');
+      expect(formatAuditActor({ actorUid: 'operator-7' })).toBe('operator-7');
 
       // 2. Firestore seconds/nanoseconds object
       const row2 = {
@@ -659,13 +661,14 @@ describe('ACC 2026 — Round 2 Recall & Sold/Unsold Auction Eligibility', () => 
 
       // 4. Missing timestamp & missing action
       const row4 = {};
-      expect(formatAuditTime(row4)).toBe('now');
-      expect(formatAuditAction(row4)).toBe('ACTION');
+      expect(formatAuditTime(row4)).toBe('Time unavailable');
+      expect(formatAuditAction(row4)).toBe('Unknown action');
+      expect(formatAuditAction({ action: '   ' })).toBe('Unknown action');
       expect(formatAuditDetails(row4)).toBe('System event');
 
       // 5. Corrupted timestamp string
       const row5 = { timestamp: 'not-a-valid-date', action: 'GUEST_DRAW' };
-      expect(formatAuditTime(row5)).toBe('now');
+      expect(formatAuditTime(row5)).toBe('Time unavailable');
       expect(formatAuditAction(row5)).toBe('GUEST_DRAW');
 
       // 6. Merge timeline sorts cleanly

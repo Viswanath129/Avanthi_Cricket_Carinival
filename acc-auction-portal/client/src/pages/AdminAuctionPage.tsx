@@ -179,6 +179,7 @@ export default function AdminAuctionPage() {
     currentLot?.pausedRemainingMs,
     currentLot?.timerDeadline?.seconds || currentLot?.timerDeadline,
     auctionState?.status,
+    auctionState?.auctionSessionId,
     auctionState?.pausedRemainingMs,
     auctionState?.timerDeadline?.seconds || auctionState?.timerDeadline,
     serverOffset,
@@ -201,6 +202,7 @@ export default function AdminAuctionPage() {
       await hammerLotFn({
         editionId: EDITION_ID,
         lotId: currentLot?.id,
+        auctionSessionId: auctionState?.auctionSessionId,
         expectedOutcome: isSold ? 'SOLD' : 'UNSOLD',
       });
       setHammerModalOpen(false);

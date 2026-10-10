@@ -37,6 +37,7 @@ exports.openLot = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const auth_1 = require("../utils/auth");
 const admin = __importStar(require("firebase-admin"));
+const crypto_1 = require("crypto");
 const audit_1 = require("../utils/audit");
 exports.openLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => {
     const caller = await (0, auth_1.verifyCaller)(request.auth?.uid, ['SUPER_ADMIN', 'ADMIN']);
@@ -53,7 +54,15 @@ exports.openLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => {
         if (!eligibleStatuses.has(lot.status)) {
             throw new https_1.HttpsError('failed-precondition', `Cannot open lot. Current status: ${lot.status}`);
         }
-        // Set initial timer to 30 seconds
+        const auctionRef = auth_1.db.collection('editions').doc(lot.editionId).collection('auction').doc('state');
+        const auctionSnap = await txn.get(auctionRef);
+        const activeAuction = auctionSnap.exists ? auctionSnap.data() : null;
+        if (activeAuction?.currentLotId && activeAuction.currentLotId !== lotId &&
+            ['LIVE', 'BIDDING', 'PAUSED'].includes(activeAuction.status)) {
+            throw new https_1.HttpsError('failed-precondition', 'Cannot open a new lot while another auction session is active. Finalize or pause the current lot first.');
+        }
+        // A new reveal creates a new server-owned session and a fresh 30 second deadline.
+        const auctionSessionId = (0, crypto_1.randomUUID)();
         const timerDeadline = admin.firestore.Timestamp.fromMillis(Date.now() + 30000);
         // Enrich player metadata if not already present on lot
         let pName = lot.playerName;
@@ -91,12 +100,13 @@ exports.openLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => {
             timerDurationMs: 30000,
             timerRunning: true,
             pausedRemainingMs: null,
+            auctionSessionId,
             version: admin.firestore.FieldValue.increment(1),
         });
         // Update auction state to point to this lot with authoritative deadline
-        const auctionRef = auth_1.db.collection('editions').doc(lot.editionId).collection('auction').doc('state');
         txn.set(auctionRef, {
             currentLotId: lotId,
+            auctionSessionId,
             status: 'LIVE',
             auctionStatus: 'BIDDING',
             timerDeadline,
@@ -115,7 +125,7 @@ exports.openLot = (0, https_1.onCall)({ maxInstances: 5 }, async (request) => {
         // Audit
         (0, audit_1.writeAuditEvent)({ actor: caller, action: 'OPEN_LOT', targetType: 'LOT', targetId: lotId, editionId: lot.editionId,
             before: { status: lot.status }, after: { status: 'LIVE', basePrice: lot.basePrice }, transaction: txn });
-        return { success: true, lotId, basePrice: lot.basePrice };
+        return { success: true, lotId, auctionSessionId, basePrice: lot.basePrice };
     });
     return result;
 });
